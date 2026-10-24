@@ -141,6 +141,8 @@ Pre-built binaries are attached to every GitHub release. Preview/test builds and
 update news are posted to the Telegram channel — **[t.me/waveformsc](https://t.me/waveformsc)**.
 
 ### macOS
+Requires **macOS 12 Monterey or later** for upcoming builds (starting after v0.3.0).
+
 1. Download `waveform-macos-vX.Y.Z.dmg` from the [latest release](https://github.com/mollybyte/waveform/releases/latest).
 2. Open the DMG and drag `Waveform` to your `Applications` folder.
 3. Double-click. The app is signed with Apple Developer ID and notarized, so it opens without Gatekeeper prompts.
