@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 90 90" role="img" aria-label="Waveform">
+  <g fill="#FF5500">
+    <rect x="0" y="22.5" width="10" height="45" rx="2"/>
+    <rect x="20" y="0" width="10" height="90" rx="2"/>
+    <rect x="40" y="29.25" width="10" height="31.5" rx="2"/>
+    <rect x="60" y="9" width="10" height="72" rx="2"/>
+    <rect x="80" y="18" width="10" height="54" rx="2"/>
+  </g>
+</svg>
