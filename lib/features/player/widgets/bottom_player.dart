@@ -8,6 +8,7 @@ import '../../../app/theme/colors.dart';
 import '../../../shared/action_feedback.dart';
 import '../../../shared/format.dart';
 import '../../../shared/models/track.dart';
+import '../../../shared/url_share.dart';
 import '../../../shared/widgets/cover_art.dart';
 import '../../../shared/widgets/go_plus_badge.dart';
 import '../../../shared/widgets/pressable.dart';
@@ -151,6 +152,20 @@ class BottomPlayer extends ConsumerWidget {
                 final outcome = await c.toggleLike();
                 if (context.mounted) showLikeOutcome(context, outcome);
               },
+            ),
+            // Ссылка на играющий трек без захода на /track/:id (⌘⇧C делает то же).
+            Tooltip(
+              message: 'copy link · ⌘⇧C',
+              child: _IconBtn(
+                icon: Icons.link,
+                enabled: track.permalinkUrl?.isNotEmpty ?? false,
+                onTap: () => copyToClipboard(
+                  context,
+                  track.permalinkUrl!,
+                  message: 'link copied',
+                  ref: ref,
+                ),
+              ),
             ),
             const SizedBox(width: 4),
             _Volume(volume: player.volume, muted: player.muted, onChanged: c.setVolume, onToggleMute: c.toggleMute),

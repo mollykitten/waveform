@@ -6,10 +6,8 @@ first.
 
 ## Before you start
 
-- **Licensing is not finalized.** There is no `LICENSE` file yet (a license will
-  be chosen later). By submitting a contribution, you agree that it may be
-  licensed under whatever open-source license the project eventually adopts. If
-  you're not comfortable with that, please wait until a license is in place.
+- **License.** Waveform is MIT-licensed (see [`LICENSE`](LICENSE)). By
+  submitting a contribution, you agree that it is licensed under the same terms.
 - **This is an unofficial client** built on SoundCloud's undocumented `api-v2`,
   which may conflict with their Terms of Service. Contributions must not add
   features designed to abuse the service (mass scraping, ban evasion, etc.).

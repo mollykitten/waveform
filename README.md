@@ -141,6 +141,8 @@ Pre-built binaries are attached to every GitHub release. Preview/test builds and
 update news are posted to the Telegram channel — **[t.me/waveformsc](https://t.me/waveformsc)**.
 
 ### macOS
+Requires **macOS 12 Monterey or later** for upcoming builds (starting after v0.3.0).
+
 1. Download `waveform-macos-vX.Y.Z.dmg` from the [latest release](https://github.com/mollybyte/waveform/releases/latest).
 2. Open the DMG and drag `Waveform` to your `Applications` folder.
 3. Double-click. The app is signed with Apple Developer ID and notarized, so it opens without Gatekeeper prompts.
@@ -328,7 +330,9 @@ This is an **unofficial** client and is **not affiliated with, endorsed by, or c
 
 ## License
 
-**Not licensed yet.** Until a `LICENSE` file is added, all rights are reserved. A license will be chosen and added later.
+Waveform is released under the [MIT License](LICENSE).
+
+The vendored [`third_party/desktop_webview_window`](third_party/desktop_webview_window) keeps its own [Apache-2.0 license](third_party/desktop_webview_window/LICENSE). The license covers this code only; it grants no rights to SoundCloud's API, content, or trademarks (see the disclaimer above).
 
 [`just_audio`]: https://pub.dev/packages/just_audio
 [Talker]: https://pub.dev/packages/talker_flutter
