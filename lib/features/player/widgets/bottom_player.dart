@@ -10,7 +10,6 @@ import '../../../shared/format.dart';
 import '../../../shared/models/track.dart';
 import '../../../shared/url_share.dart';
 import '../../../shared/widgets/cover_art.dart';
-import '../../../shared/widgets/go_plus_badge.dart';
 import '../../../shared/widgets/pressable.dart';
 import '../../../shared/widgets/live_waveform.dart';
 import '../player_controller.dart';
@@ -107,10 +106,6 @@ class BottomPlayer extends ConsumerWidget {
                           ),
                         ),
                       ),
-                      if (track.goPlus) ...[
-                        const SizedBox(width: 6),
-                        const GoPlusBadge(),
-                      ],
                     ],
                   ),
                   const SizedBox(height: 2),
@@ -168,7 +163,12 @@ class BottomPlayer extends ConsumerWidget {
               ),
             ),
             const SizedBox(width: 4),
-            _Volume(volume: player.volume, muted: player.muted, onChanged: c.setVolume, onToggleMute: c.toggleMute),
+            _Volume(
+              volume: player.volume,
+              muted: player.muted,
+              onChanged: c.setVolume,
+              onToggleMute: c.toggleMute,
+            ),
             const SizedBox(width: 4),
             // Collapse → 44px-bar с минимальными контролами.
             _IconBtn(
@@ -257,11 +257,7 @@ class _Volume extends StatelessWidget {
         children: [
           Tooltip(
             message: isMuted ? 'muted' : '${(volume * 100).round()}%',
-            child: _IconBtn(
-              icon: icon,
-              enabled: true,
-              onTap: onToggleMute,
-            ),
+            child: _IconBtn(icon: icon, enabled: true, onTap: onToggleMute),
           ),
           SizedBox(
             width: 84,

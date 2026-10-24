@@ -17,7 +17,6 @@ import '../../shared/models/track.dart';
 import '../../shared/widgets/async_view.dart';
 import '../../shared/widgets/cover_art.dart';
 import '../../shared/widgets/empty_state.dart';
-import '../../shared/widgets/go_plus_badge.dart';
 import '../../shared/widgets/pressable.dart';
 import '../../shared/widgets/section_header.dart';
 import '../../shared/widgets/selectable_block.dart';
@@ -203,24 +202,18 @@ class _Hero extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   Pressable(
-                    onTap: track.goPlus
-                        ? () => showGoPlusNotice(context)
-                        : onPlay,
+                    onTap: onPlay,
                     child: Container(
                       width: 56,
                       height: 56,
                       decoration: BoxDecoration(
-                        color: track.goPlus
-                            ? AppColors.surface2
-                            : AppColors.acid,
+                        color: AppColors.acid,
                         shape: BoxShape.circle,
                       ),
                       child: Icon(
-                        track.goPlus
-                            ? Icons.lock
-                            : (isPlaying ? Icons.pause : Icons.play_arrow),
-                        color: track.goPlus ? AppColors.textLow : AppColors.bg,
-                        size: track.goPlus ? 26 : 32,
+                        isPlaying ? Icons.pause : Icons.play_arrow,
+                        color: AppColors.bg,
+                        size: 32,
                       ),
                     ),
                   ),
@@ -243,10 +236,6 @@ class _Hero extends StatelessWidget {
                                 ),
                               ),
                             ),
-                            if (track.goPlus) ...[
-                              const SizedBox(width: 10),
-                              const GoPlusBadge(),
-                            ],
                           ],
                         ),
                         const SizedBox(height: 4),
