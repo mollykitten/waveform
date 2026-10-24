@@ -11,7 +11,6 @@ import '../action_feedback.dart';
 import '../format.dart';
 import '../models/track.dart';
 import 'cover_art.dart';
-import 'go_plus_badge.dart';
 import 'pressable.dart';
 import 'track_context_menu.dart';
 import 'live_waveform.dart';
@@ -35,7 +34,6 @@ class TrackRow extends ConsumerWidget {
     final isPlaying = isCurrent && player.isPlaying;
     final progress = isCurrent ? player.progress : 0.0;
     final liked = ref.watch(likedTracksProvider).contains(track.id);
-    final goPlus = track.goPlus;
 
     return Listener(
       // Right-click / two-finger tap → контекстное меню. Listener'ом, а не
@@ -65,22 +63,18 @@ class TrackRow extends ConsumerWidget {
         child: Row(
           children: [
             Pressable(
-              onTap: goPlus
-                  ? () => showGoPlusNotice(context)
-                  : () => isCurrent ? c.toggle() : c.play(track, queue: queue),
+              onTap: () => isCurrent ? c.toggle() : c.play(track, queue: queue),
               child: Container(
                 width: 36,
                 height: 36,
                 decoration: BoxDecoration(
-                  color: goPlus ? AppColors.surface2 : AppColors.acid,
+                  color: AppColors.acid,
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
-                  goPlus
-                      ? Icons.lock
-                      : (isPlaying ? Icons.pause : Icons.play_arrow),
-                  color: goPlus ? AppColors.textLow : AppColors.bg,
-                  size: goPlus ? 16 : 20,
+                  isPlaying ? Icons.pause : Icons.play_arrow,
+                  color: AppColors.bg,
+                  size: 20,
                 ),
               ),
             ),
@@ -120,10 +114,6 @@ class TrackRow extends ConsumerWidget {
                           ),
                         ),
                       ),
-                      if (goPlus) ...[
-                        const SizedBox(width: 8),
-                        const GoPlusBadge(),
-                      ],
                     ],
                   ),
                   const SizedBox(height: 2),
