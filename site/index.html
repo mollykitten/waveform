@@ -72,7 +72,7 @@ h1 { font: 700 clamp(40px, 5.4vw, 72px)/1.04 var(--sans); letter-spacing: -.04em
   -webkit-mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
   mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
 }
-.horizon i { flex: 1 1 0; min-width: 1px; border-radius: 1px; background: #191919; }
+.horizon i { flex: 1 1 0; min-width: 0; border-radius: 1px; background: #191919; }
 .horizon i.on { background: #3D1D0D; }
 .hero-shot { position: relative; }
 .player {
@@ -82,7 +82,7 @@ h1 { font: 700 clamp(40px, 5.4vw, 72px)/1.04 var(--sans); letter-spacing: -.04em
   -webkit-backdrop-filter: blur(20px) saturate(140%); backdrop-filter: blur(20px) saturate(140%);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 24px 48px rgba(0, 0, 0, .5);
 }
-.player .wave { flex: 1; height: 48px; }
+.player .wave { flex: 1 1 0; min-width: 0; height: 48px; }
 .player-label { display: flex; flex-direction: column; font: 500 12px/1.4 var(--mono); color: var(--text-mid); white-space: nowrap; }
 .player-label span { color: var(--text-low); font-weight: 400; }
 
@@ -100,7 +100,7 @@ h2 { font: 700 clamp(30px, 3.6vw, 44px)/1.08 var(--sans); letter-spacing: -.03em
 .deck-time { font: 400 13px var(--mono); color: var(--text-mid); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .deck-time b { color: var(--text-hi); font-weight: 400; }
 .wave { display: flex; align-items: center; gap: 2px; cursor: pointer; touch-action: none; user-select: none; }
-.wave i { flex: 1 1 0; min-width: 1px; background: var(--wave-dim); border-radius: 1px; }
+.wave i { flex: 1 1 0; min-width: 0; background: var(--wave-dim); border-radius: 1px; }
 .wave i.on { background: var(--acid); }
 .wave i.hov { background: #5a3420; }
 .wave i.on.hov { background: var(--acid-hover); }
@@ -323,23 +323,32 @@ footer .legal { margin: 0; max-width: 620px; justify-self: end; font-size: 12px;
 
   // Demo waveform: seeded, so it looks the same on every visit.
   const wave = document.getElementById('wave');
-  const N = innerWidth < 560 ? 80 : 150, LEN = 221;
-  let seed = 7;
-  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-  const shape = i => {
-    const t = i / N;
+  const horizonEl = document.getElementById('horizon');
+  const LEN = 221;
+  const shape = (i, n) => {
+    const t = i / n;
     const env = 0.35 + 0.65 * Math.sin(Math.PI * Math.min(1, t * 1.25 + 0.05)) ** 0.6;
-    return Math.max(0.08, env * (0.45 + 0.55 * Math.abs(Math.sin(i * 0.31) * Math.cos(i * 0.07))) * (0.75 + 0.25 * rnd()));
+    const jitter = 0.75 + 0.25 * Math.abs(Math.sin(i * 12.9898) * 43758.5453 % 1);
+    return Math.max(0.08, env * (0.45 + 0.55 * Math.abs(Math.sin(i * 0.31) * Math.cos(i * 0.07))) * jitter);
   };
-  const build = (host, count, from) => Array.from({ length: count }, (_, i) => {
-    const b = document.createElement('i');
-    b.style.height = (from(i) * 100).toFixed(1) + '%';
-    host.appendChild(b); return b;
-  });
-  const bars = build(wave, N, shape);
-  // The horizon behind the screenshot repeats the same track, wider and quieter.
-  const H = innerWidth < 560 ? 90 : 220;
-  const horizon = build(document.getElementById('horizon'), H, i => 0.12 + 0.88 * Math.abs(Math.sin(i * 0.19) * Math.cos(i * 0.053)) ** 0.8);
+  const ridge = i => 0.12 + 0.88 * Math.abs(Math.sin(i * 0.19) * Math.cos(i * 0.053)) ** 0.8;
+  // Bar count follows the box: one bar per `pitch` px (bar + gap), so the
+  // player never grows wider than its container on narrow screens.
+  const build = (host, pitch, max, from) => {
+    const count = Math.max(24, Math.min(max, Math.floor(host.clientWidth / pitch)));
+    host.replaceChildren();
+    return Array.from({ length: count }, (_, i) => {
+      const b = document.createElement('i');
+      b.style.height = (from(i, count) * 100).toFixed(1) + '%';
+      host.appendChild(b); return b;
+    });
+  };
+  let bars = [], horizon = [], N = 0, H = 0;
+  const layout = () => {
+    bars = build(wave, 4, 150, shape); N = bars.length;
+    horizon = build(horizonEl, 6, 220, ridge); H = horizon.length;
+    paint();
+  };
 
   let pos = 0, playing = false, last = 0, hov = -1;
   const tNow = document.getElementById('t-now'), playBtn = document.getElementById('play'), ico = document.getElementById('play-ico');
@@ -397,6 +406,10 @@ footer .legal { margin: 0; max-width: 620px; justify-self: end; font-size: 12px;
     if (!hit) return;
     e.preventDefault(); flash(hit);
   });
+
+  layout();
+  let resizeTimer;
+  new ResizeObserver(() => { clearTimeout(resizeTimer); resizeTimer = setTimeout(layout, 120); }).observe(wave);
 
   // On load the played part fills to a third, the way a track you left mid-way looks.
   const target = LEN * 0.34;

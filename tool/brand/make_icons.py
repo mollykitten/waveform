@@ -9,6 +9,8 @@
 последние два — waveDim (не прослушано), как активный waveform в плеере.
 """
 
+import os
+import sys
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
@@ -144,16 +146,66 @@ def full_bleed(px, transparent=False):
     return img.resize((px, px), Image.LANCZOS)
 
 
-def og_image():
+FONT_DIRS = [
+    Path.home() / "Library/Fonts",
+    Path("/Library/Fonts"),
+    Path.home() / ".local/share/fonts",
+    Path.home() / ".fonts",
+    Path("/usr/share/fonts"),
+    Path("/usr/local/share/fonts"),
+    Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft/Windows/Fonts",
+    Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts",
+]
+
+
+def find_mono_fonts():
+    """JetBrains Mono для OG-картинки: (bold, regular) пути.
+
+    Ищет переменный `JetBrainsMono[wght].ttf` или статические
+    `JetBrainsMono-Bold/-Regular.ttf` в системных папках шрифтов
+    macOS / Linux / Windows. `WAVEFORM_MONO_FONT` указывает файл явно.
+    Падает до записи любых ассетов, если шрифта нет.
+    """
+    explicit = os.environ.get("WAVEFORM_MONO_FONT")
+    if explicit:
+        path = Path(explicit)
+        if not path.is_file():
+            sys.exit(f"WAVEFORM_MONO_FONT={explicit} не найден")
+        return path, path
+    for base in FONT_DIRS:
+        if not base.is_dir():
+            continue
+        variable = sorted(base.rglob("JetBrainsMono[[]wght[]].ttf"))
+        if variable:
+            return variable[0], variable[0]
+        bold = sorted(base.rglob("JetBrainsMono-Bold.ttf"))
+        regular = sorted(base.rglob("JetBrainsMono-Regular.ttf"))
+        if bold and regular:
+            return bold[0], regular[0]
+    sys.exit(
+        "JetBrains Mono не найден. Поставь шрифт "
+        "(https://www.jetbrains.com/lp/mono/) или укажи файл "
+        "через WAVEFORM_MONO_FONT=/path/to/JetBrainsMono.ttf"
+    )
+
+
+def load_font(path, size, weight):
+    font = ImageFont.truetype(str(path), size)
+    try:
+        font.set_variation_by_name(weight)
+    except (OSError, ValueError):
+        pass  # статический файл: вес уже зашит в нём
+    return font
+
+
+def og_image(fonts):
     w, h = 1200, 630
     s = SS
     img = Image.new("RGBA", (w * s, h * s), BG + (255,))
     d = ImageDraw.Draw(img)
-    font_path = Path.home() / "Library/Fonts/JetBrainsMono[wght].ttf"
-    big = ImageFont.truetype(str(font_path), 96 * s)
-    big.set_variation_by_name("Bold")
-    small = ImageFont.truetype(str(font_path), 30 * s)
-    small.set_variation_by_name("Regular")
+    bold_path, regular_path = fonts
+    big = load_font(bold_path, 96 * s, "Bold")
+    small = load_font(regular_path, 30 * s, "Regular")
 
     # Waveform-полоса снизу: прослушано / не прослушано.
     import math
@@ -183,19 +235,26 @@ def og_image():
 def main():
     brand = ROOT / "assets/brand"
     site = ROOT / "site/assets"
-    brand.mkdir(parents=True, exist_ok=True)
-    site.mkdir(parents=True, exist_ok=True)
 
+    # Сначала рендерим всё в память: если чего-то не хватает (шрифта),
+    # скрипт падает, не оставив половину ассетов перезаписанной.
+    fonts = find_mono_fonts()
     icon = app_icon("played")
-    icon.save(ROOT / "assets/icon/icon.png")
-    icon.save(brand / "icon-1024.png")
-    app_icon("solid").save(brand / "icon-alt-solid-1024.png")
-    app_icon("acid").save(brand / "icon-alt-acid-1024.png")
+    outputs = {
+        ROOT / "assets/icon/icon.png": icon,
+        brand / "icon-1024.png": icon,
+        brand / "icon-256.png": icon.resize((256, 256), Image.LANCZOS),
+        brand / "icon-alt-solid-1024.png": app_icon("solid"),
+        brand / "icon-alt-acid-1024.png": app_icon("acid"),
+        site / "icon-512.png": icon.resize((512, 512), Image.LANCZOS),
+        site / "apple-touch-icon.png": full_bleed(180).convert("RGB"),
+        site / "favicon-32.png": full_bleed(32, transparent=True),
+        site / "og.png": og_image(fonts),
+    }
 
-    icon.resize((512, 512), Image.LANCZOS).save(site / "icon-512.png")
-    full_bleed(180).convert("RGB").save(site / "apple-touch-icon.png")
-    full_bleed(32, transparent=True).save(site / "favicon-32.png")
-    og_image().save(site / "og.png", optimize=True)
+    for path, image in outputs.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        image.save(path, optimize=path.name == "og.png")
     print("ok")
 
 
