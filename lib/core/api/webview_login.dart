@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:desktop_webview_window/desktop_webview_window.dart';
 
@@ -10,13 +9,13 @@ import 'package:desktop_webview_window/desktop_webview_window.dart';
 /// Ключевой момент: SoundCloud ставит `oauth_token` ещё ДО логина (гостевой),
 /// поэтому каждый кандидат проверяется через [validate] (запрос `/me`). Окно
 /// закрываем только когда токен реально опознан как пользовательский.
+///
+/// Реальный popup/opener не означает поддержку Google sign-in: Google
+/// запрещает OAuth в embedded user-agent под контролем приложения. Не
+/// подменяем User-Agent и не обходим отказ провайдера; см. docs/research/
+/// google-sign-in-verification.md для ограничений и разрешённого пути.
 abstract final class WebviewLogin {
   static Future<bool> available() => WebviewWindow.isWebviewAvailable();
-
-  /// Хвост UA, который WKWebView не пишет, а Safari пишет. Google по его
-  /// отсутствию опознаёт embedded-webview и отказывает во входе («This browser
-  /// or app may not be secure»). Попап Google (натив-патч плагина) наследует UA.
-  static const _safariUaSuffix = ' Version/18.0 Safari/605.1.15';
 
   /// Открывает soundcloud.com в webview, чтобы пользователь прошёл проверку
   /// (капча/анти-абуз — часто всплывает под VPN при действиях вроде лайка).
@@ -45,10 +44,6 @@ abstract final class WebviewLogin {
         windowHeight: 760,
       ),
     );
-
-    if (Platform.isMacOS) {
-      await webview.setApplicationNameForUserAgent(_safariUaSuffix);
-    }
 
     final completer = Completer<String?>();
     Timer? poll;

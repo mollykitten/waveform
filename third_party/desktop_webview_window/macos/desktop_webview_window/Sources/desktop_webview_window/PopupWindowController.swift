@@ -22,6 +22,7 @@ final class PopupWindowController: NSWindowController, NSWindowDelegate, WKUIDel
   private let onClose: (PopupWindowController) -> Void
 
   private var titleObservation: NSKeyValueObservation?
+  private var popups: [PopupWindowController] = []
 
   init(configuration: WKWebViewConfiguration,
        windowFeatures: WKWindowFeatures,
@@ -70,15 +71,26 @@ final class PopupWindowController: NSWindowController, NSWindowDelegate, WKUIDel
     close()
   }
 
-  // Вложенные попапы (редко, но бывают у провайдеров) — в этом же окне.
+  // Вложенному попапу тоже нужен собственный opener, не навигация родителя.
   func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-    if navigationAction.targetFrame == nil {
-      webView.load(navigationAction.request)
+    guard navigationAction.targetFrame == nil, let parent = window else { return nil }
+    let popup = PopupWindowController(
+      configuration: configuration,
+      windowFeatures: windowFeatures,
+      parent: parent,
+      userAgent: webView.customUserAgent
+    ) { [weak self] closed in
+      self?.popups.removeAll { $0 === closed }
     }
-    return nil
+    popups.append(popup)
+    popup.showWindow(nil)
+    return popup.webView
   }
 
   func windowWillClose(_ notification: Notification) {
+    let open = popups
+    popups.removeAll()
+    open.forEach { $0.close() }
     titleObservation = nil
     webView.stopLoading()
     webView.uiDelegate = nil
