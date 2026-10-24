@@ -111,14 +111,13 @@ lib/
   ставит `liked` из множества при `play`, `toggleLike` пишет в API (PUT/DELETE
   `/users/{me}/track_likes/{id}`) оптимистично с откатом. NB: write-эндпоинт не проверен
   на живом аккаунте — при провале деградирует до session-local + лог.
-- **Progressive-фолбэк стрима + GO+ detection.** `Track.streamCandidates` несёт
-  все транскодинги (HLS → progressive); плеер перебирает их, пока один не
+- **Progressive-фолбэк стрима.** `Track.streamCandidates` несёт все
+  транскодинги (HLS → progressive); плеер перебирает их, пока один не
   заиграет. Зашифрованные (`cbc-/ctr-encrypted-hls`) транскодинги отсеиваются
-  (just_audio их не играет). GO+ треки определяются по наличию encrypted-
-  транскодинга (надёжный сигнал, работает из любого payload) + `policy=='SNIP'`
-  / `monetization_model=='SUB_HIGH_TIER'`. В UI: `🔒 GO+` badge в `TrackRow`,
-  bottom player, track-detail hero; tap → notice «GO+ only». Любая неудачная
-  загрузка триггерит видимое уведомление (AppShell `ref.listen`), не silent skip.
+  (just_audio их не играет). Любая неудачная загрузка триггерит видимое
+  уведомление (AppShell `ref.listen`), не silent skip. **GO+-детекция и бейдж
+  `🔒 GO+` убраны (решение владельца 2026-10):** такие треки ничем не
+  выделяются в UI — общий «unavailable — skipped».
 - **Tiles ↔ list переключатель.** `viewModeProvider` + `ViewToggle` + новый
   `CollectionRow` — в library + search/playlists. Персистится в `prefs.json`.
 - **Экран /settings.** Account (avatar + sign in/out), view (тогл), cache
