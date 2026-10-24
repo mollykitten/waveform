@@ -65,6 +65,30 @@ just_audio + audio_service. Feature-first: `lib/features/*`, общее в
 - Ничего не пушить, не мержить и не ребейзить без прямой просьбы.
   Релиз — по тегу `v*`, процесс в `CLAUDE.md`.
 
+## Kanban (Hermes)
+
+Проект в Hermes — `waveform` (primary `~/dev/waveform_app`), доска — `waveform`.
+Карточки создаются человеком или оркестратором, воркер их только исполняет.
+
+```bash
+hermes kanban --board waveform create "<title>" \
+  --body-file brief.md --project waveform --branch <type>/<slug> \
+  --completion-contract mollykitten/waveform --max-runtime 45m
+```
+
+- Воркер получает worktree `.worktrees/<task-id>/` (в `.gitignore`) на ветке
+  `--branch`. Перед началом — `git fetch origin` и ветка от `origin/main`:
+  основной checkout может отставать.
+- Итог карточки с контрактом `mollykitten/waveform` — открытый PR в `main`
+  с заголовком в Conventional Commits. Ссылку на PR положи в комментарий
+  карточки и в `kanban_complete(metadata={"published_pr": "<url>"})`.
+  Карточка закроется только когда required-чек `Analyze + test` на PR
+  зелёный; красный или ещё идущий CI = `kanban_block` с причиной, не
+  повторная попытка.
+- Мержить PR, пушить в `main`, менять ветку чужой карточки — нельзя.
+- Карточки без PR (исследование, аудит) — `--completion-contract local-only`
+  и отчёт в `result`.
+
 ## Не делать
 
 - Не скрейпить cookies и сессии из чужих браузеров: антибот-cookie только из
