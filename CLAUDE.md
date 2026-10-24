@@ -31,6 +31,11 @@
 - Радиусы 3px (брутальные углы), borders 0.5px
 
 **Лого:** 5 вертикальных оранжевых баров разной высоты (стилизованная waveform).
+Геометрия = `WaveLogo`. В иконке приложения первые 3 бара acid, последние 2 waveDim
+(«прослушано наполовину»). Все PNG (иконка, фавиконки, OG) генерит
+`python3 tool/brand/make_icons.py` → `assets/brand/`, `assets/icon/icon.png`,
+`site/assets/`; потом `dart run flutter_launcher_icons`. SVG-лого — `assets/brand/`.
+Лендинг — статический `site/index.html` без сборки.
 
 ## Стек
 
