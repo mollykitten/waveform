@@ -74,9 +74,9 @@ class TopBar extends ConsumerWidget {
           const SizedBox(width: 16),
           Flexible(
             flex: 4,
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 240),
-              child: const _SearchField(),
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: SizedBox(width: 240, child: const _SearchField()),
             ),
           ),
           const SizedBox(width: 16),
