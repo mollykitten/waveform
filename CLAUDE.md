@@ -317,10 +317,15 @@ lib/
   в реестр, на Linux — `.desktop` с `x-scheme-handler/waveform` (уровень
   инсталлятора). Кроссплатформенно уже работает вставка `soundcloud.com`
   ссылки в omnibox → resolve → навигация.
-- **Windows webview-логин лагает** (`desktop_webview_window`/WebView2 на
-  тяжёлой странице SC). Сейчас основной путь на Windows — ручная вставка
-  oauth_token (в login-диалоге есть гайд + «open soundcloud.com»). Чинить:
-  либо лёгкий signin-flow, либо другой webview-бэкенд.
+- **Windows webview-логин лагает — вероятная причина исправлена, ждёт
+  проверки на Windows.** Плагин рисует тулбар webview-окна вторым
+  Flutter-движком, который снова зовёт `main(args)` с
+  `['web_view_title_bar', id]`; без `runWebViewTitleBarWidget(args)` в main
+  там поднималось всё приложение (audio_service, API, свой sync-webview).
+  Плюс натив Windows перехватывал каждую навигацию (cancel → Dart → re-Navigate)
+  даже при `triggerOnUrlRequestEvent: false` — пропатчено в
+  `third_party/.../windows/web_view.cc`. Если после этого всё ещё лагает —
+  смотреть в сторону лёгкого signin-flow или другого webview-бэкенда.
 - **Запись play-history / лайки комментов** — api-v2 их не поддерживает
   (проверено курлом: POST/PUT play-history и `/comments/{id}/likes` → 404,
   пер-юзерного поля лайка на треке/комменте нет). Появятся — ревайвить

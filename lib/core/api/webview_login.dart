@@ -25,7 +25,7 @@ abstract final class WebviewLogin {
         windowHeight: 760,
       ),
     );
-    webview.launch('https://soundcloud.com');
+    webview.launch('https://soundcloud.com', triggerOnUrlRequestEvent: false);
     await webview.onClose;
   }
 
@@ -80,17 +80,20 @@ abstract final class WebviewLogin {
       }
     }
 
-    webview.setOnUrlRequestCallback((url) {
-      capture();
-      return true;
-    });
-    poll = Timer.periodic(const Duration(seconds: 2), (_) => capture());
+    // Токен ловим только поллингом cookie. Раньше тут ещё висел
+    // setOnUrlRequestCallback — на Windows он заставляет плагин отменять
+    // каждую навигацию и перезапускать её после round-trip'а в Dart
+    // (лаги + POST-формы уходили как GET). Навигации больше не перехватываем.
+    poll = Timer.periodic(const Duration(seconds: 1), (_) => capture());
     webview.onClose.then((_) {
       poll?.cancel();
       if (!completer.isCompleted) completer.complete(null);
     });
 
-    webview.launch('https://soundcloud.com/signin');
+    webview.launch(
+      'https://soundcloud.com/signin',
+      triggerOnUrlRequestEvent: false,
+    );
     return completer.future;
   }
 }
