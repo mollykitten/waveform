@@ -1,5 +1,6 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -148,20 +149,7 @@ class BottomPlayer extends ConsumerWidget {
                 if (context.mounted) showLikeOutcome(context, outcome);
               },
             ),
-            // Ссылка на играющий трек без захода на /track/:id (⌘⇧C делает то же).
-            Tooltip(
-              message: 'copy link · ⌘⇧C',
-              child: _IconBtn(
-                icon: Icons.link,
-                enabled: track.permalinkUrl?.isNotEmpty ?? false,
-                onTap: () => copyToClipboard(
-                  context,
-                  track.permalinkUrl!,
-                  message: 'link copied',
-                  ref: ref,
-                ),
-              ),
-            ),
+            const _CopyLinkButton(),
             const SizedBox(width: 4),
             _Volume(
               volume: player.volume,
@@ -185,6 +173,49 @@ class BottomPlayer extends ConsumerWidget {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// Copies the playing track, independently of the current page's context link.
+class _CopyLinkButton extends ConsumerWidget {
+  const _CopyLinkButton();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final url = ref.watch(
+      playerControllerProvider.select((state) => state.track?.permalinkUrl),
+    );
+    final enabled = url != null && url.trim().isNotEmpty;
+    final shortcut = Theme.of(context).platform == TargetPlatform.macOS
+        ? '⌘⇧C'
+        : 'Ctrl+Shift+C';
+    // Keep button activation local: the shell maps Space to play/pause.
+    return Shortcuts(
+      shortcuts: const {
+        SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
+        SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
+      },
+      child: IconButton(
+        tooltip: 'copy link · $shortcut',
+        icon: const Icon(Icons.link, size: 18, semanticLabel: 'Copy link'),
+        style: IconButton.styleFrom(
+          fixedSize: const Size(32, 32),
+          minimumSize: const Size(32, 32),
+          padding: EdgeInsets.zero,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          foregroundColor: AppColors.textMid,
+          disabledForegroundColor: AppColors.textLow,
+        ),
+        onPressed: !enabled
+            ? null
+            : () => copyToClipboard(
+                context,
+                url,
+                message: 'link copied',
+                ref: ref,
+              ),
       ),
     );
   }
@@ -392,6 +423,7 @@ class _CollapsedBar extends ConsumerWidget {
             onTap: onPlayPause,
           ),
           _IconBtn(icon: Icons.skip_next, enabled: enabled, onTap: onNext),
+          const _CopyLinkButton(),
           _IconBtn(icon: Icons.expand_less, enabled: true, onTap: onExpand),
         ],
       ),
