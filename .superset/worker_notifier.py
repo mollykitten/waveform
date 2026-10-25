@@ -338,7 +338,9 @@ def _checkpoint_key(order: tuple[int, str, int]) -> dict[str, Any]:
     return {"completed_ms": order[0], "epoch": order[1], "sequence": order[2]}
 
 
-def _page_bounds(response: dict[str, Any]) -> tuple[Optional[tuple[int, str, int]], Optional[tuple[int, str, int]]]:
+def _completion_progress(response: dict[str, Any]) -> Optional[tuple[int, str, int]]:
+    # Completion progress only; these keys cannot bound journal traversal.
+    # Replayed items can carry an old completedAtMs at a new journal cursor.
     keys = []
     for envelope in _envelopes(response):
         cursor = envelope.get("cursor")
@@ -348,14 +350,14 @@ def _page_bounds(response: dict[str, Any]) -> tuple[Optional[tuple[int, str, int
         if not isinstance(epoch, str) or isinstance(sequence, bool) or not isinstance(sequence, int):
             continue
         event = envelope.get("event")
-        item = event.get("item") if isinstance(event, dict) else None
-        ts = item.get("completedAtMs") if isinstance(item, dict) else None
-        if isinstance(ts, bool) or not isinstance(ts, int):
-            ts = envelope.get("ts")
+        if not isinstance(event, dict) or event.get("type") not in ("item", "turn"):
+            continue
+        value = event.get(event["type"])
+        ts = value.get("completedAtMs") if isinstance(value, dict) else None
         if isinstance(ts, bool) or not isinstance(ts, int):
             continue
         keys.append((ts, epoch, sequence))
-    return (min(keys), max(keys)) if keys else (None, None)
+    return max(keys) if keys else None
 
 
 def _next_before(response: dict[str, Any]) -> Optional[str]:
@@ -368,7 +370,7 @@ def _next_before(response: dict[str, Any]) -> Optional[str]:
 
 
 def pending_completions(
-    transport: Transport, config: Config, checkpoint: tuple[int, str, int],
+    transport: Transport, config: Config,
     listed: list[dict[str, Any]], listed_harness_id: str,
 ) -> tuple[list[Completion], Optional[tuple[int, str, int]], bool]:
     # A successful list call distinguishes a missing session from a live or
@@ -401,15 +403,20 @@ def pending_completions(
             harness_id = page_harness_id
         for turn_id, status in _turn_statuses(page).items():
             turn_statuses.setdefault(turn_id, status)
-        lower, upper = _page_bounds(page)
+        upper = _completion_progress(page)
         if upper is not None and (newest_seen is None or upper > newest_seen):
             newest_seen = upper
         events = _completed_messages(page, harness_id)
         for event in events:
-            if event.order > checkpoint:
+            # Legacy checkpoints mixed envelope and completion timestamps and
+            # may already be ahead of undelivered items. Recover by scanning
+            # from the configured floor and letting delivered identities dedupe.
+            if event.completed_ms > config.since_ms:
                 completions[_identity(event, config.target)] = event
         cursor = _next_before(page)
-        if cursor is None or (lower is not None and lower <= checkpoint):
+        # nextBefore is opaque: neither item timestamps nor lexical epoch
+        # ordering prove that all remaining pages precede a completion checkpoint.
+        if cursor is None:
             break
         pages += 1
     if pages >= 100 and cursor is not None:
@@ -500,7 +507,7 @@ def run_once(config: Config, transport: Transport, state_path: Path, dry_run: bo
     checkpoint = max(checkpoint, since_floor)
 
     events, newest_seen, terminal = pending_completions(
-        transport, config, checkpoint, listed, listed_harness_id
+        transport, config, listed, listed_harness_id
     )
     notified = False
     for event in events:
