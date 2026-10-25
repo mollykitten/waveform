@@ -20,16 +20,16 @@ class WebviewApiExecutor {
     Duration warmSettle = const Duration(seconds: 3),
     Duration warmRetryDelay = const Duration(milliseconds: 1500),
     String warmUrl = 'https://soundcloud.com',
-  })  : _createRunner = createRunner,
-        _tokenGetter = tokenGetter,
-        _clientIdGetter = clientIdGetter,
-        _log = log,
-        _pollInterval = pollInterval,
-        _maxPolls = maxPolls,
-        _warmAttempts = warmAttempts,
-        _warmSettle = warmSettle,
-        _warmRetryDelay = warmRetryDelay,
-        _warmUrl = warmUrl;
+  }) : _createRunner = createRunner,
+       _tokenGetter = tokenGetter,
+       _clientIdGetter = clientIdGetter,
+       _log = log,
+       _pollInterval = pollInterval,
+       _maxPolls = maxPolls,
+       _warmAttempts = warmAttempts,
+       _warmSettle = warmSettle,
+       _warmRetryDelay = warmRetryDelay,
+       _warmUrl = warmUrl;
 
   final Future<JsRunner> Function() _createRunner;
   final Future<String?> Function() _tokenGetter;

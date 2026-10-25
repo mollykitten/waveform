@@ -55,3 +55,6 @@ docs/superpowers/
 
 # Hermes kanban worker worktrees (`hermes kanban create --workspace worktree`)
 .worktrees/
+
+# приватный Widevine-профиль устройства, не коммитится
+assets/widevine/*.wvd
