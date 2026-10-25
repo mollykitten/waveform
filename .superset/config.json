@@ -1,0 +1,7 @@
+{
+  "setup": [
+    "flutter pub get"
+  ],
+  "run": [],
+  "teardown": []
+}

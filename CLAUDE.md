@@ -346,6 +346,10 @@ lib/
 
 ## AI rules
 
+Superset setup, запуск ролей и владение macOS runtime между worktrees описаны
+в `.superset/README.md`; маршрутизация моделей — в разделе Superset файла
+`AGENTS.md`. Перед работой через Superset прочитай оба раздела.
+
 Правила Flutter/Dart для агентов лежат в `.claude/rules/flutter.md`. Claude Code
 подхватывает их сам, когда работа касается Dart-файлов (`paths:` во фронтматтере
 правила) — не импортируй их сюда через `@`, иначе файл загрузится дважды и в
