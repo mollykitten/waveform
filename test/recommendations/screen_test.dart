@@ -78,6 +78,7 @@ void main() {
   Future<void> show(
     WidgetTester tester, {
     Widget? child,
+    Key? captureKey,
     Size size = const Size(1200, 1100),
   }) async {
     tester.view.physicalSize = size;
@@ -85,13 +86,17 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(
-      UncontrolledProviderScope(
-        container: container,
-        child: MaterialApp(
-          theme: AppTheme.dark,
-          home: MediaQuery(
-            data: const MediaQueryData(disableAnimations: true),
-            child: Scaffold(body: child ?? const RecommendationsScreen()),
+      RepaintBoundary(
+        key: captureKey,
+        child: UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            debugShowCheckedModeBanner: false,
+            theme: AppTheme.dark,
+            home: MediaQuery(
+              data: const MediaQueryData(disableAnimations: true),
+              child: Scaffold(body: child ?? const RecommendationsScreen()),
+            ),
           ),
         ),
       ),
@@ -151,6 +156,40 @@ void main() {
   }
 
   for (final size in [const Size(1280, 720), const Size(960, 640)]) {
+    testWidgets(
+      'consent capture ${size.width.toInt()}x${size.height.toInt()}',
+      (tester) async {
+        await container.read(aiSettingsProvider.notifier).save(testConfig);
+        const capture = ValueKey('consent-capture');
+        await show(tester, size: size, captureKey: capture);
+        await tester.tap(find.byKey(const ValueKey('wave-primary')));
+        await tester.pumpAndSettle();
+        await tester.runAsync(() => GoogleFonts.pendingFonts());
+        await tester.pump();
+        expect(find.text(testConfig.destination), findsOneWidget);
+        expect(find.text('approve and generate').hitTestable(), findsOneWidget);
+        expect(client.payloads, isEmpty);
+        expect(tester.takeException(), isNull);
+        final boundary = tester.renderObject<RenderRepaintBoundary>(
+          find.byKey(capture),
+        );
+        await tester.runAsync(() async {
+          final image = await boundary.toImage();
+          final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+          await Directory('build/visual-review').create(recursive: true);
+          await File(
+            'build/visual-review/wave-consent-'
+            '${size.width.toInt()}x${size.height.toInt()}.png',
+          ).writeAsBytes(bytes!.buffer.asUint8List());
+          image.dispose();
+        });
+        await tester.tap(find.text('cancel'));
+        await tester.pumpAndSettle();
+        expect(client.payloads, isEmpty);
+        await tester.pumpWidget(const SizedBox.shrink());
+      },
+      skip: !visualTestFontsAvailable,
+    );
     for (final tune in [false, true]) {
       testWidgets('wave capture ${tune ? 'tune open' : 'idle'} '
           '${size.width.toInt()}x${size.height.toInt()}', (tester) async {
@@ -340,6 +379,10 @@ void main() {
   ) async {
     await container.read(aiSettingsProvider.notifier).save(testConfig);
     await show(tester);
+    expect(
+      tester.widget<WaveHero>(find.byType(WaveHero)).actionLabel,
+      'start your wave',
+    );
     await tester.tap(find.text('tune your wave'));
     await tester.pump();
     await tester.enterText(find.byType(TextField), 'quiet night');
@@ -347,6 +390,26 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text(testConfig.destination), findsOneWidget);
     expect(find.textContaining('up to 40 public SoundCloud'), findsOneWidget);
+    final dialog = tester.widget<AlertDialog>(find.byType(AlertDialog));
+    final shape = dialog.shape! as RoundedRectangleBorder;
+    expect(dialog.backgroundColor, AppColors.surface);
+    expect(dialog.surfaceTintColor, Colors.transparent);
+    expect(shape.borderRadius, BorderRadius.circular(3));
+    expect(shape.side.width, .5);
+    expect(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.byType(TextButton),
+      ),
+      findsNothing,
+    );
+    expect(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.byType(Pressable),
+      ),
+      findsNWidgets(2),
+    );
     expect(client.payloads, isEmpty);
     await tester.tap(find.text('cancel'));
     await tester.pumpAndSettle();
@@ -358,6 +421,10 @@ void main() {
     expect(find.byType(TrackRow), findsOneWidget);
     expect(find.text('model suggestion: a possible fit'), findsOneWidget);
     final track = tester.widget<TrackRow>(find.byType(TrackRow)).track;
+    expect(
+      tester.widget<WaveHero>(find.byType(WaveHero)).actionLabel,
+      'play your wave',
+    );
     expect(container.read(playerControllerProvider).track, isNull);
     await tester.tap(find.byKey(const ValueKey('wave-primary')));
     await tester.pump();

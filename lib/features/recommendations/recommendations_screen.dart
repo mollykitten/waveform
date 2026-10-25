@@ -77,7 +77,32 @@ class _RecommendationsScreenState extends ConsumerState<RecommendationsScreen> {
     final destination = settings.config.destination;
     final approved = await showDialog<bool>(
       context: context,
+      barrierColor: AppColors.bg.withValues(alpha: .8),
       builder: (context) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: AppTheme.borderRadius,
+          side: const BorderSide(color: AppColors.border, width: .5),
+        ),
+        constraints: const BoxConstraints(maxWidth: 520),
+        insetPadding: const EdgeInsets.all(24),
+        titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+        contentPadding: const EdgeInsets.fromLTRB(20, 14, 20, 4),
+        actionsPadding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+        buttonPadding: EdgeInsets.zero,
+        actionsAlignment: MainAxisAlignment.end,
+        titleTextStyle: Theme.of(context).textTheme.titleMedium?.copyWith(
+          fontSize: 16,
+          fontWeight: FontWeight.w600,
+          color: AppColors.textHi,
+        ),
+        contentTextStyle: Theme.of(context).textTheme.bodySmall?.copyWith(
+          fontSize: 12,
+          height: 1.6,
+          color: AppColors.textMid,
+        ),
         title: const Text('approve this AI generation'),
         content: SingleChildScrollView(
           child: Column(
@@ -113,13 +138,14 @@ class _RecommendationsScreenState extends ConsumerState<RecommendationsScreen> {
           ),
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('cancel'),
+          _ConsentAction(
+            onTap: () => Navigator.pop(context, false),
+            label: 'cancel',
           ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('approve and generate'),
+          _ConsentAction(
+            onTap: () => Navigator.pop(context, true),
+            label: 'approve and generate',
+            active: true,
           ),
         ],
       ),
@@ -344,6 +370,42 @@ class _RecommendationsScreenState extends ConsumerState<RecommendationsScreen> {
       ],
     );
   }
+}
+
+class _ConsentAction extends StatelessWidget {
+  const _ConsentAction({
+    required this.label,
+    required this.onTap,
+    this.active = false,
+  });
+  final String label;
+  final VoidCallback onTap;
+  final bool active;
+
+  @override
+  Widget build(BuildContext context) => Pressable(
+    onTap: onTap,
+    child: Container(
+      margin: const EdgeInsets.only(left: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
+      decoration: BoxDecoration(
+        color: active ? AppColors.acid : AppColors.surface2,
+        borderRadius: AppTheme.borderRadius,
+        border: Border.all(
+          width: .5,
+          color: active ? AppColors.acid : AppColors.border,
+        ),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w500,
+          color: active ? AppColors.bg : AppColors.textHi,
+        ),
+      ),
+    ),
+  );
 }
 
 class _WaveTuning extends StatelessWidget {
