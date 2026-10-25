@@ -41,7 +41,9 @@ dependencies:
   flutter_cache_manager: ^3.4.1
   dio: ^5.10.0
   path_provider: ^2.1.6
-  just_audio: ^0.10.6
+  # local macos output routing and player-bound airplay support
+  just_audio:
+    path: third_party/just_audio
   audio_service: ^0.18.19
   # vendored copy (third_party/) with a macos patch for a `hidden` window, used
   # by the background sync webview (datadome write executor). upstream 0.3.0
@@ -68,6 +70,8 @@ dev_dependencies:
   flutter_lints: ^6.0.0
   flutter_launcher_icons: ^0.14.4
   fake_async: ^1.3.1
+  flutter_driver:
+    sdk: flutter
 
 # app icons. put a square 1024×1024 png at `assets/icon/icon.png` and run
 # `dart run flutter_launcher_icons` to generate macos .icns, windows .ico and

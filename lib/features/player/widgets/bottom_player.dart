@@ -15,6 +15,7 @@ import '../../../shared/widgets/pressable.dart';
 import '../../../shared/widgets/live_waveform.dart';
 import '../player_controller.dart';
 import '../player_ui_state.dart';
+import 'audio_output_picker.dart';
 
 class BottomPlayer extends ConsumerWidget {
   const BottomPlayer({super.key});
@@ -85,7 +86,7 @@ class BottomPlayer extends ConsumerWidget {
             ),
             const SizedBox(width: 12),
             SizedBox(
-              width: 160,
+              width: 128,
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -150,6 +151,7 @@ class BottomPlayer extends ConsumerWidget {
               },
             ),
             const _CopyLinkButton(),
+            const AudioOutputPicker(),
             const SizedBox(width: 4),
             _Volume(
               volume: player.volume,
@@ -165,13 +167,15 @@ class BottomPlayer extends ConsumerWidget {
               onTap: () =>
                   ref.read(playerCollapsedProvider.notifier).collapse(),
             ),
-          ] else
+          ] else ...[
             Expanded(
               child: Text(
                 'select a track',
                 style: AppTheme.mono(size: 12, color: AppColors.textLow),
               ),
             ),
+            const AudioOutputPicker(),
+          ],
         ],
       ),
     );
@@ -424,6 +428,7 @@ class _CollapsedBar extends ConsumerWidget {
           ),
           _IconBtn(icon: Icons.skip_next, enabled: enabled, onTap: onNext),
           const _CopyLinkButton(),
+          const AudioOutputPicker(compact: true),
           _IconBtn(icon: Icons.expand_less, enabled: true, onTap: onExpand),
         ],
       ),
