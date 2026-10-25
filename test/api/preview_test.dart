@@ -13,10 +13,14 @@ void main() {
         'policy': policy,
         'media': {'transcodings': sources},
       });
-  Map<String, Object> source(String url, {bool snipped = false}) => {
+  Map<String, Object> source(
+    String url, {
+    bool snipped = false,
+    String protocol = 'hls',
+  }) => {
     'url': url,
     'snipped': snipped,
-    'format': {'protocol': 'hls'},
+    'format': {'protocol': protocol},
   };
 
   test(
@@ -48,7 +52,12 @@ void main() {
   });
 
   test('encrypted-only and empty sources retain main generic behavior', () {
-    expect(parse([source('https://x/encrypted')]).isBlocked, isFalse);
+    final dto = parse([
+      source('https://x/stream', protocol: 'ctr-encrypted-hls'),
+    ]);
+    expect(dto.transcodings.single.isEncrypted, isTrue);
+    expect(dto.isBlocked, isFalse);
+    expect(dto.toDomain().streamCandidates, isEmpty);
     expect(parse([]).isBlocked, isFalse);
   });
 }
