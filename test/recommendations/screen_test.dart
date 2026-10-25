@@ -202,7 +202,11 @@ void main() {
     tester,
   ) async {
     await show(tester);
-    expect(find.text('configure your wave'), findsOneWidget);
+    expect(find.text('configure your wave'), findsNothing);
+    final hero = tester.widget<WaveHero>(find.byType(WaveHero));
+    expect(hero.actionLabel, 'configure your wave');
+    expect(hero.description, 'connect a model to start your wave.');
+    expect(find.text('model connection'), findsOneWidget);
     expect(find.text('my wave'), findsOneWidget);
     expect(find.byType(TextField), findsNothing);
     expect(find.byType(FilledButton), findsNothing);

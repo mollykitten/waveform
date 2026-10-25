@@ -190,7 +190,7 @@ class _RecommendationsScreenState extends ConsumerState<RecommendationsScreen> {
     final description = !settings.ready
         ? 'getting your wave ready…'
         : !configured
-        ? 'a little connection, a whole new direction.'
+        ? 'connect a model to start your wave.'
         : result.busy
         ? 'selecting music… your current music keeps playing.'
         : queue.isNotEmpty
@@ -234,14 +234,6 @@ class _RecommendationsScreenState extends ConsumerState<RecommendationsScreen> {
                   },
                   onTune: () => setState(() => _tuning = !_tuning),
                 ),
-                if (!configured && settings.ready)
-                  Center(
-                    child: WaveAction(
-                      label: 'configure your wave',
-                      icon: Icons.arrow_forward,
-                      onTap: () => context.push('/settings'),
-                    ),
-                  ),
                 if (_tuning) ...[
                   const SizedBox(height: 8),
                   _WaveTuning(
