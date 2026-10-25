@@ -225,14 +225,6 @@ class _SearchField extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final track = ref.watch(playerControllerProvider).track;
     final controller = ref.watch(omniboxControllerProvider);
-    // Если уже есть введённый запрос — показываем его (поле выглядит «полным»);
-    // иначе — playing-плейсхолдер или дефолтный hint.
-    final display = controller.text.isNotEmpty
-        ? controller.text
-        : (track != null
-              ? 'playing: ${track.artist} — ${track.title}'
-              : 'search tracks, artists, playlists…');
-    final isPlaceholder = controller.text.isEmpty;
 
     return GestureDetector(
       onTap: () => ref.read(omniboxOpenProvider.notifier).open(),
@@ -252,14 +244,25 @@ class _SearchField extends ConsumerWidget {
               const Icon(Icons.search, size: 15, color: AppColors.textLow),
               const SizedBox(width: 8),
               Expanded(
-                child: Text(
-                  display,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: isPlaceholder ? AppColors.textLow : AppColors.textHi,
-                  ),
+                child: ValueListenableBuilder<TextEditingValue>(
+                  valueListenable: controller,
+                  builder: (context, value, _) {
+                    final hasQuery = value.text.isNotEmpty;
+                    final display = hasQuery
+                        ? value.text
+                        : (track != null
+                              ? 'playing: ${track.artist} — ${track.title}'
+                              : 'search tracks, artists, playlists…');
+                    return Text(
+                      display,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: hasQuery ? AppColors.textHi : AppColors.textLow,
+                      ),
+                    );
+                  },
                 ),
               ),
               const SizedBox(width: 8),

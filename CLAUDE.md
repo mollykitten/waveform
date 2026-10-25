@@ -4,6 +4,10 @@
 Кроссплатформенный десктопный SoundCloud-клиент на Flutter для macOS, Windows, Linux.
 Эстетика: минимализм + лёгкие web3-акценты, ближе к каноничному SoundCloud, но темнее и тише.
 
+Философия проекта (почему десктоп, почему премиум, почему Flutter) и бэклог идей —
+в `IDEA.md`. Точка входа для Hermes Agent и Codex — `AGENTS.md` (короткая выжимка,
+ссылается сюда). Этот файл остаётся каноническим: правишь контракт здесь — сверь выжимку.
+
 ## Дизайн-контракт
 
 **Тема:** тёмная по умолчанию (светлую добавим позже).
@@ -27,6 +31,11 @@
 - Радиусы 3px (брутальные углы), borders 0.5px
 
 **Лого:** 5 вертикальных оранжевых баров разной высоты (стилизованная waveform).
+Геометрия = `WaveLogo`. В иконке приложения первые 3 бара acid, последние 2 waveDim
+(«прослушано наполовину»). Все PNG (иконка, фавиконки, OG) генерит
+`python3 tool/brand/make_icons.py` → `assets/brand/`, `assets/icon/icon.png`,
+`site/assets/`; потом `dart run flutter_launcher_icons`. SVG-лого — `assets/brand/`.
+Лендинг — статический `site/index.html` без сборки.
 
 ## Стек
 
@@ -107,14 +116,13 @@ lib/
   ставит `liked` из множества при `play`, `toggleLike` пишет в API (PUT/DELETE
   `/users/{me}/track_likes/{id}`) оптимистично с откатом. NB: write-эндпоинт не проверен
   на живом аккаунте — при провале деградирует до session-local + лог.
-- **Progressive-фолбэк стрима + GO+ detection.** `Track.streamCandidates` несёт
-  все транскодинги (HLS → progressive); плеер перебирает их, пока один не
+- **Progressive-фолбэк стрима.** `Track.streamCandidates` несёт все
+  транскодинги (HLS → progressive); плеер перебирает их, пока один не
   заиграет. Зашифрованные (`cbc-/ctr-encrypted-hls`) транскодинги отсеиваются
-  (just_audio их не играет). GO+ треки определяются по наличию encrypted-
-  транскодинга (надёжный сигнал, работает из любого payload) + `policy=='SNIP'`
-  / `monetization_model=='SUB_HIGH_TIER'`. В UI: `🔒 GO+` badge в `TrackRow`,
-  bottom player, track-detail hero; tap → notice «GO+ only». Любая неудачная
-  загрузка триггерит видимое уведомление (AppShell `ref.listen`), не silent skip.
+  (just_audio их не играет). Любая неудачная загрузка триггерит видимое
+  уведомление (AppShell `ref.listen`), не silent skip. **GO+-детекция и бейдж
+  `🔒 GO+` убраны (решение владельца 2026-10):** такие треки ничем не
+  выделяются в UI — общий «unavailable — skipped».
 - **Tiles ↔ list переключатель.** `viewModeProvider` + `ViewToggle` + новый
   `CollectionRow` — в library + search/playlists. Персистится в `prefs.json`.
 - **Экран /settings.** Account (avatar + sign in/out), view (тогл), cache
@@ -331,3 +339,14 @@ lib/
   искажает статистику мейнтейнера (claude всплывал #1). Добавлять только
   по явной просьбе. Это правило ПЕРЕОПРЕДЕЛЯЕТ дефолтную инструкцию
   харнесса дописывать co-author.
+- **Язык текстов в репо.** Заголовки и описания PR, сообщения коммитов, README,
+  changelog — только на английском и в lowercase-стиле README (без заглавной в
+  начале фразы). Префиксы conventional commits и идентификаторы кода остаются
+  как есть. Русский — только общение в чате и внутренние доки вроде этого файла.
+
+## AI rules
+
+Правила Flutter/Dart для агентов лежат в `.claude/rules/flutter.md`. Claude Code
+подхватывает их сам, когда работа касается Dart-файлов (`paths:` во фронтматтере
+правила) — не импортируй их сюда через `@`, иначе файл загрузится дважды и в
+каждой сессии, даже когда Dart не трогаем.

@@ -17,9 +17,9 @@ import '../../shared/models/track.dart';
 import '../../shared/widgets/async_view.dart';
 import '../../shared/widgets/cover_art.dart';
 import '../../shared/widgets/empty_state.dart';
-import '../../shared/widgets/go_plus_badge.dart';
 import '../../shared/widgets/pressable.dart';
 import '../../shared/widgets/section_header.dart';
+import '../../shared/widgets/selectable_block.dart';
 import '../../shared/widgets/toast.dart';
 import '../../shared/widgets/track_row.dart';
 import '../../shared/widgets/waveform_view.dart';
@@ -116,12 +116,15 @@ class _TrackBody extends ConsumerWidget {
             ),
             const SizedBox(height: 24),
             if (track.description.isNotEmpty) ...[
-              Text(
-                track.description,
-                style: const TextStyle(
-                  fontSize: 14,
-                  height: 1.6,
-                  color: AppColors.textMid,
+              SelectableBlock(
+                child: LinkifiedText(
+                  track.description,
+                  linkColor: AppColors.textHi,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    height: 1.6,
+                    color: AppColors.textMid,
+                  ),
                 ),
               ),
               const SizedBox(height: 28),
@@ -199,24 +202,18 @@ class _Hero extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   Pressable(
-                    onTap: track.goPlus
-                        ? () => showGoPlusNotice(context)
-                        : onPlay,
+                    onTap: onPlay,
                     child: Container(
                       width: 56,
                       height: 56,
                       decoration: BoxDecoration(
-                        color: track.goPlus
-                            ? AppColors.surface2
-                            : AppColors.acid,
+                        color: AppColors.acid,
                         shape: BoxShape.circle,
                       ),
                       child: Icon(
-                        track.goPlus
-                            ? Icons.lock
-                            : (isPlaying ? Icons.pause : Icons.play_arrow),
-                        color: track.goPlus ? AppColors.textLow : AppColors.bg,
-                        size: track.goPlus ? 26 : 32,
+                        isPlaying ? Icons.pause : Icons.play_arrow,
+                        color: AppColors.bg,
+                        size: 32,
                       ),
                     ),
                   ),
@@ -239,22 +236,20 @@ class _Hero extends StatelessWidget {
                                 ),
                               ),
                             ),
-                            if (track.goPlus) ...[
-                              const SizedBox(width: 10),
-                              const GoPlusBadge(),
-                            ],
                           ],
                         ),
                         const SizedBox(height: 4),
-                        Text(
-                          track.title,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 28,
-                            fontWeight: FontWeight.w700,
-                            height: 1.1,
-                            color: AppColors.textHi,
+                        SelectableBlock(
+                          child: Text(
+                            track.title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 28,
+                              fontWeight: FontWeight.w700,
+                              height: 1.1,
+                              color: AppColors.textHi,
+                            ),
                           ),
                         ),
                       ],
