@@ -8,12 +8,16 @@ class TranscodingDto {
     required this.preset,
     required this.protocol,
     required this.mimeType,
+    this.snipped = false,
   });
 
   final String url;
   final String preset; // mp3_0_0 / opus_0_0 / aac_...
   final String protocol; // hls / progressive
   final String mimeType;
+
+  /// Whether the source contains only a preview of the full track.
+  final bool snipped;
 
   bool get isHls => protocol == 'hls';
 
@@ -42,6 +46,7 @@ class TranscodingDto {
       preset: asStr(j['preset']),
       protocol: asStr(format['protocol']),
       mimeType: asStr(format['mime_type']),
+      snipped: asBool(j['snipped'], false),
     );
   }
 }
@@ -66,6 +71,7 @@ class TrackDto {
     this.streamable = true,
     this.publisherArtist,
     this.transcodings = const [],
+    this.policy,
   });
 
   final int id;
@@ -88,12 +94,19 @@ class TrackDto {
   /// загрузившего). Web показывает именно его. null/пусто → берём username.
   final String? publisherArtist;
   final List<TranscodingDto> transcodings;
+  final String? policy;
+
+  /// Explicitly blocked, or every available source is a preview.
+  bool get isBlocked =>
+      policy == 'BLOCK' ||
+      (transcodings.isNotEmpty && transcodings.every((t) => t.snipped));
 
   factory TrackDto.fromJson(Map<String, dynamic> j) {
     final media = asMap(j['media']);
     return TrackDto(
       id: asInt(j['id']),
       title: asStr(j['title']),
+      policy: j['policy'] as String?,
       // api-v2 отдаёт duration в мс; full_duration — без сниппета.
       durationMs: asInt(j['full_duration'] ?? j['duration']),
       user: UserDto.fromJson(asMap(j['user'])),

@@ -18,6 +18,7 @@ class Track {
     this.streamCandidates = const [],
     this.drmStreamCandidates = const [],
     this.permalinkUrl,
+    this.blocked = false,
     this.minted = false,
     this.genre = 'electronic',
     this.postedAt = '3 days ago',
@@ -74,6 +75,9 @@ class Track {
   /// Постоянный URL трека на soundcloud.com (для «share» и «open in browser»).
   final String? permalinkUrl;
 
+  /// The API blocks playback or only offers preview sources.
+  final bool blocked;
+
   /// web3-маркер: трек заминчен как NFT.
   final bool minted;
 
@@ -94,6 +98,7 @@ class Track {
     streamCandidates: streamCandidates,
     drmStreamCandidates: drmStreamCandidates,
     permalinkUrl: permalinkUrl,
+    blocked: blocked,
     minted: minted ?? this.minted,
     genre: genre,
     postedAt: postedAt,

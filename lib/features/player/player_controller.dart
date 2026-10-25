@@ -185,7 +185,15 @@ class PlayerController extends Notifier<PlayerState> {
         final reachedEnd = dur > 0
             ? _maxPosMs >= dur * 0.7
             : since.inSeconds > 5;
-        if (since.inSeconds < 5 || !reachedEnd) return;
+        if (since.inSeconds < 5) return;
+        if (!reachedEnd) {
+          ref
+              .read(talkerProvider)
+              .warning(
+                'source ended early (${_maxPosMs}ms of ${dur}ms): '
+                '${state.track?.title}',
+              );
+        }
         if (state.repeat) {
           _engine.seek(Duration.zero);
           _engine.resume();
@@ -360,6 +368,10 @@ class PlayerController extends Notifier<PlayerState> {
   /// отдаёт 404 — тогда играем следующий источник. Мок/не streamable — тихо.
   Future<void> _load(Track track) async {
     final token = ++_loadToken;
+    if (track.blocked) {
+      _markUnplayable(token, track);
+      return;
+    }
     final candidates = track.streamCandidates;
     // Нет незашифрованных источников — возможен GO+ (Widevine). Ни тех, ни
     // других (мок/не streamable) — тихо (UI оптимистичен, реальный «играет»
@@ -441,6 +453,7 @@ class PlayerController extends Notifier<PlayerState> {
     final token = ++_preloadToken;
     final n = _upNext;
     if (n == null ||
+        n.blocked ||
         (n.streamCandidates.isEmpty && n.drmStreamCandidates.isEmpty)) {
       await _engine.preloadNext(null);
       return;
