@@ -27,7 +27,18 @@ class _SkeletonBoxState extends State<SkeletonBox>
   late final _ctrl = AnimationController(
     duration: const Duration(milliseconds: 1200),
     vsync: this,
-  )..repeat(reverse: true);
+  );
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _ctrl.stop();
+      _ctrl.value = 0.5;
+    } else if (!_ctrl.isAnimating) {
+      _ctrl.repeat(reverse: true);
+    }
+  }
 
   @override
   void dispose() {

@@ -52,3 +52,6 @@ talker_logs_*.txt
 
 # Brainstorming specs / design docs (local only)
 docs/superpowers/
+
+# Hermes kanban worker worktrees (`hermes kanban create --workspace worktree`)
+.worktrees/

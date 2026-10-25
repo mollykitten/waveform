@@ -1,5 +1,5 @@
 name: waveform_app
-description: "Waveform — a minimal cross-platform desktop SoundCloud client built with Flutter."
+description: "a keyboard-first soundcloud client for desktop, built with flutter"
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -43,9 +43,9 @@ dependencies:
   path_provider: ^2.1.5
   just_audio: ^0.10.5
   audio_service: ^0.18.18
-  # Завендоренная копия (third_party/) с macOS-патчем `hidden`-окна для фонового
-  # sync-webview (DataDome write-executor). Апстрим 0.3.0 не умеет прятать окно
-  # на macOS. См. docs/superpowers/specs/2026-06-10-account-reliability-*.
+  # vendored copy (third_party/) with a macos patch for a `hidden` window, used
+  # by the background sync webview (datadome write executor). upstream 0.3.0
+  # can't hide the window on macos. see docs/superpowers/specs/2026-06-10-account-reliability-*.
   desktop_webview_window:
     path: third_party/desktop_webview_window
   talker_flutter: ^5.1.16
@@ -68,9 +68,9 @@ dev_dependencies:
   flutter_launcher_icons: ^0.14.4
   fake_async: ^1.3.1
 
-# Иконки приложения. Положи квадратный 1024×1024 PNG в `assets/icon/icon.png`
-# и запусти `dart run flutter_launcher_icons` — генерируются macOS .icns,
-# Windows .ico и Android/iOS. Конфиг inline, чтобы не плодить файлов.
+# app icons. put a square 1024×1024 png at `assets/icon/icon.png` and run
+# `dart run flutter_launcher_icons` to generate macos .icns, windows .ico and
+# android/ios. config is inline to avoid extra files.
 flutter_launcher_icons:
   image_path: "assets/icon/icon.png"
   macos:
