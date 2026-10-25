@@ -63,3 +63,6 @@ assets/widevine/*.wvd
 .env
 .env.json
 .superset/config.local.json
+
+# Superset runtime ownership
+.superset/runtime-owner*.json

@@ -56,6 +56,17 @@ just_audio + audio_service. Feature-first: `lib/features/*`, общее в
   DataDome, аудиодвижок (`audio_engine.dart`, crossfade), релизный пайплайн.
   После любой правки там — ревью и личный просмотр диффа.
 
+## Superset
+
+- Setup, Dart MCP и единый владелец macOS runtime между worktrees описаны в
+  `.superset/README.md`. Перед запуском приложения прочитай эту памятку.
+- Основной исполнитель: `gpt-6.1-sol`, reasoning `medium`; рискованные
+  изменения и ревью: `gpt-6.1-sol`, reasoning `high`.
+- Небольшие механические правки и проверки: `gpt-6-luna`, reasoning `medium`.
+- `fable`, reasoning `high` — только советы и проектирование.
+  При делегировании явно указывай модель и reasoning; не наследуй дорогую
+  модель сессии для исполнения.
+
 ## Git
 
 - Автор и коммиттер — из локального `.git/config` этого репо, глобальный
