@@ -27,6 +27,18 @@ class TranscodingDto {
   bool get isEncrypted =>
       protocol.contains('encrypted') || url.contains('encrypted');
 
+  /// Widevine-поток SoundCloud GO+ (`ctr-encrypted-hls`) — его дешифрует
+  /// Go-ядро scdrm (см. core/drm/).
+  bool get isCtr => protocol == 'ctr-encrypted-hls';
+
+  /// Приоритет ctr-транскодинга: честный AAC лучше качества, abr-мастер
+  /// — последним (у него master-плейлист, ядро его не ест).
+  int get drmRank => switch (preset) {
+    'aac_160k' => 0,
+    'aac_96k' => 1,
+    _ => preset.contains('abr') ? 3 : 2,
+  };
+
   factory TranscodingDto.fromJson(Map<String, dynamic> j) {
     final format = asMap(j['format']);
     return TranscodingDto(
@@ -84,11 +96,10 @@ class TrackDto {
   final List<TranscodingDto> transcodings;
   final String? policy;
 
-  /// Explicitly blocked, or only preview sources remain after DRM filtering.
+  /// Explicitly blocked, or every available source is a preview.
   bool get isBlocked =>
       policy == 'BLOCK' ||
-      (transcodings.any((t) => !t.isEncrypted) &&
-          transcodings.where((t) => !t.isEncrypted).every((t) => t.snipped));
+      (transcodings.isNotEmpty && transcodings.every((t) => t.snipped));
 
   factory TrackDto.fromJson(Map<String, dynamic> j) {
     final media = asMap(j['media']);

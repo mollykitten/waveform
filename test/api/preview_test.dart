@@ -51,6 +51,16 @@ void main() {
     expect(track.streamCandidates, isEmpty);
   });
 
+  test('full DRM and plain preview remain playable through DRM', () {
+    final track = parse([
+      source('https://x/preview', snipped: true),
+      source('https://x/drm', protocol: 'ctr-encrypted-hls'),
+    ]).toDomain();
+    expect(track.blocked, isFalse);
+    expect(track.streamCandidates, isEmpty);
+    expect(track.drmStreamCandidates, ['https://x/drm']);
+  });
+
   test('encrypted-only and empty sources retain main generic behavior', () {
     final dto = parse([
       source('https://x/stream', protocol: 'ctr-encrypted-hls'),
@@ -58,6 +68,27 @@ void main() {
     expect(dto.transcodings.single.isEncrypted, isTrue);
     expect(dto.isBlocked, isFalse);
     expect(dto.toDomain().streamCandidates, isEmpty);
+    expect(dto.toDomain().drmStreamCandidates, ['https://x/stream']);
     expect(parse([]).isBlocked, isFalse);
+  });
+
+  test('snipped DRM candidates are excluded alongside plain previews', () {
+    final track = parse([
+      source('https://x/preview', snipped: true),
+      source('https://x/drm', protocol: 'ctr-encrypted-hls', snipped: true),
+    ]).toDomain();
+    expect(track.blocked, isTrue);
+    expect(track.streamCandidates, isEmpty);
+    expect(track.drmStreamCandidates, isEmpty);
+  });
+
+  test('explicit BLOCK excludes full DRM candidates too', () {
+    final track = parse([
+      source('https://x/full'),
+      source('https://x/drm', protocol: 'ctr-encrypted-hls'),
+    ], policy: 'BLOCK').toDomain();
+    expect(track.blocked, isTrue);
+    expect(track.streamCandidates, isEmpty);
+    expect(track.drmStreamCandidates, isEmpty);
   });
 }

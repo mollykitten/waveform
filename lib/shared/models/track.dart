@@ -16,6 +16,7 @@ class Track {
     this.artistPermalink,
     this.coverUrl,
     this.streamCandidates = const [],
+    this.drmStreamCandidates = const [],
     this.permalinkUrl,
     this.blocked = false,
     this.minted = false,
@@ -62,6 +63,11 @@ class Track {
   /// заиграет (часть ссылок протухает и отдаёт 404). Пусто → не проигрываем.
   final List<String> streamCandidates;
 
+  /// URL Widevine-транскодингов (`ctr-encrypted-hls`) для GO+ треков, которые
+  /// just_audio не играет напрямую. Плеер пробует их через [DrmStreamService]
+  /// (дешифровка Go-ядром scdrm в локальный файл). Пусто → не DRM.
+  final List<String> drmStreamCandidates;
+
   /// Первый (предпочтительный) источник; null → трек не проигрываем.
   String? get streamUrl =>
       streamCandidates.isEmpty ? null : streamCandidates.first;
@@ -90,6 +96,7 @@ class Track {
     artistPermalink: artistPermalink,
     coverUrl: coverUrl,
     streamCandidates: streamCandidates,
+    drmStreamCandidates: drmStreamCandidates,
     permalinkUrl: permalinkUrl,
     blocked: blocked,
     minted: minted ?? this.minted,

@@ -15,6 +15,15 @@ import 'dto/page_dto.dart';
 /// Артворк в высоком разрешении: `...-large.jpg` → `...-t500x500.jpg`.
 String? hiResArtwork(String? url) => url?.replaceFirst('-large.', '-t500x500.');
 
+/// Full Widevine sources ordered by preset quality.
+List<String> ctrTranscodingUrls(List<TranscodingDto> transcodings) {
+  final ctr = [
+    for (final t in transcodings)
+      if (t.isCtr && !t.snipped) t,
+  ]..sort((a, b) => a.drmRank.compareTo(b.drmRank));
+  return [for (final t in ctr) t.url];
+}
+
 /// ISO-дата → человекочитаемое «N days ago».
 String relativeTime(String? iso) {
   if (iso == null) return '';
@@ -59,6 +68,9 @@ extension TrackDtoMapper on TrackDto {
             for (final t in transcodings)
               if (!t.isHls && !t.isEncrypted && !t.snipped) t.url,
           ],
+    drmStreamCandidates: isBlocked
+        ? const []
+        : ctrTranscodingUrls(transcodings),
     genre: (genre == null || genre!.isEmpty) ? 'electronic' : genre!,
     postedAt: relativeTime(createdAt),
     description: description ?? '',
