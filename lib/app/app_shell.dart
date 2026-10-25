@@ -199,6 +199,10 @@ class _AppShellState extends ConsumerState<AppShell> {
       body: Focus(
         canRequestFocus: false,
         onKeyEvent: (_, event) {
+          // MaterialApp owns Tab/Shift+Tab focus traversal above this shell.
+          if (event.logicalKey == LogicalKeyboardKey.tab) {
+            return KeyEventResult.ignored;
+          }
           if (event.character != null && event.character!.isNotEmpty) {
             return KeyEventResult.ignored;
           }
