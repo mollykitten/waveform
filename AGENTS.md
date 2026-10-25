@@ -60,12 +60,21 @@ just_audio + audio_service. Feature-first: `lib/features/*`, общее в
 
 - Setup, Dart MCP и единый владелец macOS runtime между worktrees описаны в
   `.superset/README.md`. Перед запуском приложения прочитай эту памятку.
-- Основной исполнитель: `gpt-6.1-sol`, reasoning `medium`; рискованные
-  изменения и ревью: `gpt-6.1-sol`, reasoning `high`.
-- Небольшие механические правки и проверки: `gpt-6-luna`, reasoning `medium`.
-- `fable`, reasoning `high` — только советы и проектирование.
-  При делегировании явно указывай модель и reasoning; не наследуй дорогую
-  модель сессии для исполнения.
+- Предпочитай ACP chat-сессии Superset и их panes для планирования, исполнения
+  и ревью; API сессий доступны в Superset CLI 1.40 (`sessions create/read/send/open`).
+  Старый `.superset/agent.sh` — терминальный launcher.
+- Codex ACP: `--mode agent-full-access`; Claude ACP: `--mode bypassPermissions`.
+  В Claude планировании запрашивай только advisory рекомендации, явно запрети
+  правки в prompt и проверяй фактический mode через `sessions read`.
+- Планирование: предпочитай Claude ACP с Fable, целевой effort `high`; проверь
+  модель и effort через `sessions read` после выбора в ACP picker. CLI отклоняет
+  ID `claude-fable-5-1[1m]`, а с принятым ID `claude-fable-5-1` сессия всё равно
+  запускалась с Opus. Не считай Fable выбранным по аргументу CLI. Используй
+  `gpt-6-astra` как fallback, только если Fable через ACP недоступен.
+- Исполнение: `gpt-6.1-sol`, reasoning `medium`; рискованные изменения и
+  ревью: `gpt-6.1-sol`, reasoning `high`; механические правки и проверки:
+  `gpt-6-luna`, reasoning `medium`. Явно указывай модель и reasoning при
+  делегировании; не наследуй дорогую модель сессии для исполнения.
 
 ## Git
 

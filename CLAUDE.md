@@ -126,6 +126,8 @@ lib/
 не в нашей власти.
 
 Сделано вне нумерации: экран плейлиста `/playlist/:id` (карусели главной ведут на него), громкость в плеере, логи Talker.
+- **Shuffle all likes.** Кнопка в library/likes догружает страницы лайков через
+  `loadAll()`, перемешивает полную коллекцию и запускает её с shuffle.
 - **Правый рейл переосмыслен (UX):** убрана подставная секция «artists you should follow»
   и фейковая карточка-счётчик. Вместо них — профиль-карточка (тап → свой
   `/artist`, лёгкий ◆ lime-акцент), три тайла-шортката с реальными счётчиками
@@ -322,10 +324,6 @@ lib/
    заменить «unreleased» на дату.
 
 ## Идеи / бэклог
-- **True-shuffle по всей коллекции (likes).** Для плейлиста сделано
-  (`allPlaylistTracks` + `_ShuffleAll`); остаётся «shuffle all likes» —
-  пагинация `/users/{id}/track_likes?next_href=…`, UI-точка входа на library/
-  likes (кнопка над сеткой).
 - **Light theme** + system-appearance follow.
 - **Official OAuth 2.1 + PKCE** (если SoundCloud откроет регистрацию).
 - **Drag tracks между плейлистами** (web-SC этого почти не даёт).

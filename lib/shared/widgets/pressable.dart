@@ -1,4 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+import '../../app/theme/app_theme.dart';
+import '../../app/theme/colors.dart';
 
 /// Apple-like тактильность: лёгкое spring-сжатие при нажатии + pointer-курсор.
 /// Оборачивает любой интерактивный элемент.
@@ -28,6 +32,33 @@ class Pressable extends StatefulWidget {
 
 class _PressableState extends State<Pressable> {
   bool _down = false;
+  final _focusNode = FocusNode(debugLabel: 'Pressable');
+
+  @override
+  void initState() {
+    super.initState();
+    _focusNode.addListener(_focusChanged);
+  }
+
+  void _focusChanged() => setState(() {});
+
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
+    if (!node.hasPrimaryFocus || !widget.enabled || widget.onTap == null) {
+      return KeyEventResult.ignored;
+    }
+    if (event.logicalKey != LogicalKeyboardKey.enter &&
+        event.logicalKey != LogicalKeyboardKey.space) {
+      return KeyEventResult.ignored;
+    }
+    if (event is KeyDownEvent) widget.onTap?.call();
+    return KeyEventResult.handled;
+  }
 
   @override
   void didUpdateWidget(covariant Pressable oldWidget) {
@@ -43,9 +74,10 @@ class _PressableState extends State<Pressable> {
   Widget build(BuildContext context) {
     final active = widget.enabled && widget.onTap != null;
     final reducedMotion = MediaQuery.disableAnimationsOf(context);
-    return MouseRegion(
+    final content = MouseRegion(
       cursor: active ? SystemMouseCursors.click : MouseCursor.defer,
       child: GestureDetector(
+        excludeFromSemantics: widget.onTap != null,
         onTap: active ? widget.onTap : null,
         onTapDown: active ? (_) => _setDown(true) : null,
         onTapUp: active ? (_) => _setDown(false) : null,
@@ -58,6 +90,32 @@ class _PressableState extends State<Pressable> {
           // Лёгкий «отскок» на отпускании — пружинный характер.
           curve: _down ? Curves.easeOut : Curves.easeOutBack,
           child: widget.child,
+        ),
+      ),
+    );
+    // Without an action this is a structural wrapper: descendants retain
+    // their own semantics, focus traversal and keyboard handling.
+    if (widget.onTap == null) return content;
+    final focused = active && _focusNode.hasPrimaryFocus;
+    return Semantics(
+      button: true,
+      enabled: active,
+      focusable: active,
+      focused: active ? focused : null,
+      onTap: active ? widget.onTap : null,
+      child: Focus(
+        focusNode: _focusNode,
+        canRequestFocus: active,
+        skipTraversal: !active,
+        includeSemantics: false,
+        onKeyEvent: _handleKey,
+        child: DecoratedBox(
+          position: DecorationPosition.foreground,
+          decoration: BoxDecoration(
+            borderRadius: AppTheme.borderRadius,
+            border: focused ? AppTheme.border(AppColors.acid) : null,
+          ),
+          child: content,
         ),
       ),
     );

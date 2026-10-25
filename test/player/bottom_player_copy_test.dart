@@ -217,12 +217,19 @@ void main() {
           expect(node.flagsCollection.isButton, isTrue);
           expect(node.flagsCollection.isEnabled, Tristate.isTrue);
           expect(node.flagsCollection.isFocused, isNot(Tristate.none));
-          await tester.sendKeyEvent(LogicalKeyboardKey.tab);
-          await tester.pump();
-          expect(
-            Focus.of(tester.element(find.byIcon(Icons.link))).hasFocus,
-            isTrue,
-          );
+          final copyContext = tester.element(find.byIcon(Icons.link));
+          final copyFocus = Focus.of(copyContext);
+          final tabStops = FocusScope.of(
+            copyContext,
+          ).traversalDescendants.length;
+          // Playback controls before Copy are keyboard accessible too.
+          // Traverse the real focus order instead of assuming Copy is first.
+          for (var i = 0; i < tabStops && !copyFocus.hasFocus; i++) {
+            await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+            await tester.pump();
+          }
+          expect(copyFocus.hasFocus, isTrue);
+          expect(clipboard, isEmpty);
           final before = container.read(playerControllerProvider);
           await tester.sendKeyEvent(LogicalKeyboardKey.enter);
           await tester.pump();
