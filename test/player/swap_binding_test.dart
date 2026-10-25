@@ -36,7 +36,10 @@ class _Player implements AudioPlayer {
   @override
   double volume = 1;
   int plays = 0;
+  int pauses = 0;
   bool failSeek = false;
+  bool failPause = false;
+  Future<void> Function()? onPause;
 
   @override
   Stream<Duration> get positionStream => positions.stream;
@@ -63,9 +66,11 @@ class _Player implements AudioPlayer {
         return Completer<void>().future;
       case #pause:
       case #stop:
+        pauses++;
+        if (failPause) return Future<void>.error(StateError('pause failed'));
         isPlaying = false;
         playingEvents.add(false);
-        return Future<void>.value();
+        return onPause?.call() ?? Future<void>.value();
       case #seek:
         if (failSeek) return Future<void>.error(StateError('seek failed'));
         return Future<void>.value();
@@ -159,6 +164,105 @@ class _Harness {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  test(
+    'shuffle during binding cannot overwrite the selected incoming source',
+    () async {
+      final h = _Harness();
+      await h.startSwap();
+      h.controller.toggleShuffle();
+      await pumpEventQueue();
+      expect(h.players[1].urls, ['https://example.com/next']);
+      h.binding.complete();
+      await pumpEventQueue();
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      expect(h.state.track?.id, 'next');
+      expect(h.players[1].urls, ['https://example.com/next']);
+      expect(h.players[1].isPlaying, isTrue);
+      expect(h.engine.hasPreload, isTrue);
+    },
+  );
+
+  test('delayed failure pause cannot stop a newer user load', () async {
+    final h = _Harness();
+    await h.startSwap();
+    final cleanupStarted = Completer<void>();
+    final cleanup = Completer<void>();
+    h.players[0].onPause = () {
+      if (cleanupStarted.isCompleted) return Future<void>.value();
+      cleanupStarted.complete();
+      return cleanup.future;
+    };
+    h.players[1].failSeek = true;
+    h.binding.complete();
+    await cleanupStarted.future;
+    h.players[1].failSeek = false;
+    h.controller.play(_track('replacement'));
+    await pumpEventQueue();
+    expect(h.players[1].isPlaying, isTrue);
+    cleanup.complete();
+    await pumpEventQueue();
+    expect(h.state.track?.id, 'replacement');
+    expect(h.players[1].urls.last, 'https://example.com/replacement');
+    expect(h.players[1].isPlaying, isTrue);
+    expect(h.state.isPlaying, isTrue);
+  });
+
+  test(
+    'pause during retained-player fallback still loads the incoming source',
+    () async {
+      final h = _Harness();
+      await h.startSwap();
+      h.preservePlayer = true;
+      final cleanupStarted = Completer<void>();
+      final cleanup = Completer<void>();
+      h.players[1].onPause = () {
+        if (cleanupStarted.isCompleted) return Future<void>.value();
+        cleanupStarted.complete();
+        return cleanup.future;
+      };
+      h.binding.complete();
+      await cleanupStarted.future;
+      h.controller.toggle();
+      await pumpEventQueue();
+      cleanup.complete();
+      await pumpEventQueue();
+      expect(h.state.track?.id, 'next');
+      expect(h.players[0].urls.last, 'https://example.com/next');
+      expect(h.state.isPlaying, isFalse);
+      expect(h.players.every((player) => !player.isPlaying), isTrue);
+      h.controller.toggle();
+      await pumpEventQueue();
+      expect(h.players[0].isPlaying, isTrue);
+      expect(h.players[0].urls.last, 'https://example.com/next');
+    },
+  );
+
+  test('failure cleanup cannot overwrite a newer resume', () async {
+    final h = _Harness();
+    await h.startSwap();
+    final cleanupStarted = Completer<void>();
+    final cleanup = Completer<void>();
+    h.players[0].onPause = () {
+      if (cleanupStarted.isCompleted) return Future<void>.value();
+      cleanupStarted.complete();
+      return cleanup.future;
+    };
+    h.players[1].failSeek = true;
+    h.binding.complete();
+    await cleanupStarted.future;
+    expect(h.state.unplayable?.title, 'next');
+    expect(h.state.isPlaying, isFalse);
+    h.players[1].failSeek = false;
+    h.controller.toggle();
+    await pumpEventQueue();
+    expect(h.players[1].isPlaying, isTrue);
+    cleanup.complete();
+    await pumpEventQueue();
+    expect(h.state.track?.id, 'next');
+    expect(h.state.isPlaying, isTrue);
+    expect(h.players[1].isPlaying, isTrue);
+  });
+
   test('AirPlay retention during paused binding keeps next paused', () async {
     final h = _Harness();
     await h.startSwap();
@@ -177,6 +281,24 @@ void main() {
     expect(h.players[0].isPlaying, isTrue);
     expect(h.players[1].isPlaying, isFalse);
   });
+
+  test(
+    'persistent outgoing pause failure still stops incoming and reports failure',
+    () async {
+      final h = _Harness();
+      await h.startSwap();
+      h.players[0].failPause = true;
+      final incomingPauses = h.players[1].pauses;
+      h.binding.complete();
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      await pumpEventQueue();
+      expect(h.state.track?.id, 'next');
+      expect(h.state.isPlaying, isFalse);
+      expect(h.state.unplayable?.title, 'next');
+      expect(h.players[1].pauses, greaterThan(incomingPauses));
+      expect(h.players[1].isPlaying, isFalse);
+    },
+  );
 
   test(
     'failure after source commit keeps incoming metadata and stops audio',

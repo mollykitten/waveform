@@ -209,12 +209,16 @@ class JustAudioEngine implements AudioEngine {
     void Function()? onSourceLoaded,
   }) async {
     if (_disposed) return;
-    ++_sourceGen;
+    final source = ++_sourceGen;
     if (onSourceLoaded == null) _pendingSwap = null;
     _wantsPlayback = autoplay;
     // Новая авторитетная загрузка отменяет любую идущую crossfade-рампу и
     // preload (он был под старый «следующий»).
     final gen = ++_swapGen;
+    // A retained-player swap still has to select its incoming source after
+    // pause. Ordinary loads retain their existing cancellation behavior.
+    bool isCurrentLoad() =>
+        onSourceLoaded == null ? _isCurrent(gen) : _isSourceCurrent(source);
     ++_preloadGen;
     _log.debug('[engine] load → gen=$_swapGen');
     _preloadReady = false;
@@ -225,43 +229,56 @@ class JustAudioEngine implements AudioEngine {
     // прерванного crossfade'а.
     try {
       await inactive.pause();
-      if (!_isCurrent(gen)) return;
+      if (!isCurrentLoad()) return;
       await inactive.setVolume(0);
     } catch (error, stack) {
       _log.warning('[engine] inactive player cleanup failed', error, stack);
     }
-    if (!_isCurrent(gen)) return;
+    if (!isCurrentLoad()) return;
     await player.setUrl(url);
-    if (!_isCurrent(gen)) return;
+    if (!isCurrentLoad()) return;
     onSourceLoaded?.call();
     await _prepareOutput(player);
-    if (!_isCurrent(gen)) return;
+    if (!isCurrentLoad()) return;
     await _withRoutingTransaction(() async {
-      if (!_isCurrent(gen)) return;
+      if (!isCurrentLoad()) return;
       await _bindOutput(player);
-      if (!_isCurrent(gen)) await _restoreOutput();
+      if (!isCurrentLoad()) await _restoreOutput();
     });
-    if (!_isCurrent(gen)) return;
+    if (!isCurrentLoad()) return;
     await player.setVolume(_userVolume);
-    if (!_isCurrent(gen)) return;
+    if (!isCurrentLoad()) return;
     // Явный seek(0): setUrl обычно сбрасывает позицию, но защищаемся от
     // унаследованной позиции у переиспользуемого AudioPlayer'а.
     await player.seek(Duration.zero);
-    if (_isCurrent(gen) && _wantsPlayback) _play(player);
+    if (isCurrentLoad() && _wantsPlayback) _play(player);
   }
 
   @override
   Future<void> pause() async {
     // Отменяем идущую crossfade-рампу — иначе она доиграет старый плеер и
     // докрутит громкости поверх нашей паузы.
-    ++_swapGen;
+    final gen = ++_swapGen;
     _wantsPlayback = false;
     _log.debug('[engine] pause → gen=$_swapGen');
     // Глушим ОБА плеера: во время crossfade старый (`from`) ещё звучит, и
     // пауза только `_active` оставляла бы его играющим («поставил на паузу —
     // а играет»). Пауза второго плеера идемпотентна, когда он и так стоит.
-    await _a.pause();
-    await _b.pause();
+    (Object, StackTrace)? failure;
+    for (final player in [_a, _b]) {
+      try {
+        await player.pause();
+      } catch (error, stack) {
+        // Failure on one player must not leave the other playing. Keep the
+        // first error for the caller, with at most one log per player.
+        failure ??= (error, stack);
+        _log.warning('[engine] player pause failed', error, stack);
+      }
+      if (!_isCurrent(gen) || _wantsPlayback) return;
+    }
+    if (failure != null) {
+      Error.throwWithStackTrace(failure.$1, failure.$2);
+    }
     // Рампа могла оставить активный на промежуточной громкости — возвращаем.
     await _active.setVolume(_userVolume);
   }

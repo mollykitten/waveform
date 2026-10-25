@@ -458,6 +458,9 @@ class PlayerController extends Notifier<PlayerState> {
   /// [_upNext], чтобы preload и фактический переход выбрали один и тот же трек.
   Future<void> _preloadAfter(Track current) async {
     final token = ++_preloadToken;
+    // The inactive player may still own the selected incoming source until
+    // output binding commits. Defer queue/shuffle preloads until swap settles.
+    if (_swapping) return;
     final n = _upNext;
     if (n == null ||
         n.blocked ||
@@ -520,19 +523,29 @@ class PlayerController extends Notifier<PlayerState> {
     _deadStreak = 0;
     try {
       await _engine.swapToNext(crossfade: crossfade);
-      if (token == _loadToken) unawaited(_preloadAfter(n));
+      if (token == _loadToken) {
+        _swapping = false;
+        unawaited(_preloadAfter(n));
+      }
     } catch (error, stack) {
       ref.read(talkerProvider).warning('audio swap failed', error, stack);
       if (token != _loadToken) return;
       if (error is AudioSwapCommittedException) {
         // The incoming source owns the active player already. Stop playback
         // instead of rolling metadata back over a different audio source.
-        await _engine.pause();
-        if (token != _loadToken) return;
         state = state.copyWith(
           isPlaying: false,
           unplayable: (seq: ++_unplayableSeq, title: n.title),
         );
+        // Publish before cleanup so a failed pause still reports the source
+        // error, and delayed cleanup cannot overwrite a newer play/resume.
+        try {
+          await _engine.pause();
+        } catch (pauseError, pauseStack) {
+          ref
+              .read(talkerProvider)
+              .warning('audio swap pause failed', pauseError, pauseStack);
+        }
         return;
       }
       // Binding failed before the engine committed the incoming player.
@@ -550,6 +563,7 @@ class PlayerController extends Notifier<PlayerState> {
         queueVersion: state.queueVersion + 1,
       );
       final track = state.track;
+      _swapping = false;
       if (track != null) unawaited(_preloadAfter(track));
     } finally {
       if (token == _loadToken) _swapping = false;
