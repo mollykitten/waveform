@@ -35,5 +35,12 @@ jobs:
         run: flutter pub get
 
       # Debug build — no signing required. Catches plugin / entitlement breakage.
+      # The Runner Debug config signs automatically with the dev team, and the
+      # runner has no certificate → turn signing off for xcodebuild.
+      # flutter passes FLUTTER_XCODE_* env vars through as Xcode build settings.
       - name: Build macOS debug
         run: flutter build macos --debug --no-tree-shake-icons
+        env:
+          FLUTTER_XCODE_CODE_SIGNING_ALLOWED: 'NO'
+          FLUTTER_XCODE_CODE_SIGNING_REQUIRED: 'NO'
+          FLUTTER_XCODE_DEVELOPMENT_TEAM: ''

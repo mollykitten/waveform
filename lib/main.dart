@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:audio_service/audio_service.dart';
+import 'package:desktop_webview_window/desktop_webview_window.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:talker_flutter/talker_flutter.dart';
@@ -11,8 +12,12 @@ import 'app/app.dart';
 import 'core/audio/waveform_audio_handler.dart';
 import 'core/log/talker.dart';
 
-Future<void> main() async {
+Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // WebView titlebars run this entrypoint in a secondary Flutter engine
+  // without the primary window/audio plugins. Do not bootstrap the app there.
+  if (runWebViewTitleBarWidget(args)) return;
 
   // Window manager — для динамического title и базового sizing на desktop.
   if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) {

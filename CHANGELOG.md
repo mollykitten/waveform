@@ -4,6 +4,12 @@ All notable changes to Waveform are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **macOS 12 Monterey is now the minimum supported version.** Runner, tests,
+  and CocoaPods targets use a consistent minimum compatible with Xcode 27.
+
 ## [0.3.0] — 2026-06-10
 
 Account actions finally stick, full keyboard control, and smoother transitions.
@@ -180,4 +186,4 @@ loop works end-to-end on macOS (Windows / Linux build too, less exercised).
 - Windows builds are **unsigned** (no EV cert yet); SmartScreen will warn
   the first time.
 
-[0.1.0]: https://github.com/alina0x/waveform/releases/tag/v0.1.0
+[0.1.0]: https://github.com/mollybyte/waveform/releases/tag/v0.1.0
