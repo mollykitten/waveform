@@ -17,12 +17,6 @@ internal guide for working on waveform in superset.
   so fallback discovery cannot launch or stop the app. the optional
   `.superset/site.sh` and `ports.json` remain available for the site workflow.
 - keep personal additions in ignored `.superset/config.local.json`.
-- verification on fresh HEAD with Flutter 3.41.0 completed successfully, but
-  `flutter pub get` changed five versions in `pubspec.lock`: `matcher`, `meta`,
-  `test`, `test_api`, and `test_core`. this reflects a pre-existing mismatch
-  between the current checkout's lockfile and this SDK. inspect the lockfile
-  diff after setup; do not automatically commit it or run an upgrade without
-  a separate task.
 
 ## flutter mcp
 
