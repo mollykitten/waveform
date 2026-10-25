@@ -21,6 +21,7 @@ import '../../shared/widgets/section_header.dart';
 import '../../shared/widgets/toast.dart';
 import '../../shared/widgets/view_toggle.dart';
 import '../auth/login_dialog.dart';
+import '../recommendations/ai_settings_section.dart';
 
 /// Версия отображается в секции About; обновлять руками синхронно с pubspec.yaml.
 // Bumped on every tagged release. Matches `version:` in pubspec.yaml.
@@ -55,6 +56,8 @@ class SettingsScreen extends ConsumerWidget {
             _ViewSection(),
             SizedBox(height: 28),
             _LinksSection(),
+            SizedBox(height: 28),
+            AiSettingsSection(),
             SizedBox(height: 28),
             _PlaybackSection(),
             SizedBox(height: 28),
