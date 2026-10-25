@@ -51,7 +51,7 @@ func DecryptTrack(ctx context.Context, httpClient *http.Client, transcodingURL, 
 		psshData = buildPSSHFromKID(pl.KID)
 	}
 
-	keys, err := getLicenseKeys(httpClient, wvd, psshData, licenseURL, info.LicenseAuthToken)
+	keys, err := getLicenseKeys(ctx, httpClient, wvd, psshData, licenseURL, info.LicenseAuthToken)
 	if err != nil {
 		return "", fmt.Errorf("license keys: %w", err)
 	}

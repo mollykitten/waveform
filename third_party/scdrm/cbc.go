@@ -137,7 +137,7 @@ func parseCBCSPlaylist(m3u8Content string, baseURL string) (*cbcsPlaylist, error
 // (edef8ba9-79d6-4ace-a3c8-27dcd51d21ed), а не PlayReady из соседней
 // #EXT-X-KEY строки.
 func widevinePSSHIsOurs(pssh []byte) bool {
-	if len(pssh) < 24 {
+	if len(pssh) < 28 {
 		return false
 	}
 	// box: [size 4][type 'pssh'][version+flags 4][systemID 16]
@@ -145,7 +145,7 @@ func widevinePSSHIsOurs(pssh []byte) bool {
 		return false
 	}
 	want, _ := hex.DecodeString("edef8ba979d64acea3c827dcd51d21ed")
-	return bytes.Equal(pssh[8:24], want)
+	return bytes.Equal(pssh[12:28], want)
 }
 
 func resolveURI(uri string, baseURL string) string {
@@ -262,7 +262,7 @@ func buildPSSHFromKID(kid []byte) []byte {
 	return append(pssh, kid...)
 }
 
-func getLicenseKeys(httpClient *http.Client, deviceWVD []byte, psshBytes []byte, licenseURL string, licenseAuthToken string) ([]*widevine.Key, error) {
+func getLicenseKeys(ctx context.Context, httpClient *http.Client, deviceWVD []byte, psshBytes []byte, licenseURL string, licenseAuthToken string) ([]*widevine.Key, error) {
 	device, err := widevine.NewDevice(widevine.FromWVD(bytes.NewReader(deviceWVD)))
 	if err != nil {
 		return nil, fmt.Errorf("load device: %w", err)
@@ -288,7 +288,7 @@ func getLicenseKeys(httpClient *http.Client, deviceWVD []byte, psshBytes []byte,
 	q.Set("license_token", licenseAuthToken)
 	u.RawQuery = q.Encode()
 
-	req, err := http.NewRequest("POST", u.String(), bytes.NewReader(challenge))
+	req, err := http.NewRequestWithContext(ctx, "POST", u.String(), bytes.NewReader(challenge))
 	if err != nil {
 		return nil, err
 	}

@@ -33,8 +33,10 @@ for a in "${archs[@]}"; do
     *) echo "неизвестная архитектура: $a" >&2; exit 1 ;;
   esac
   echo "building $a (GOARCH=$goarch)"
-  CGO_ENABLED=1 GOOS=darwin GOARCH="$goarch" \
-    CGO_CFLAGS="-arch $a" CGO_LDFLAGS="-arch $a" \
+  MACOSX_DEPLOYMENT_TARGET=12.0 \
+    CGO_ENABLED=1 GOOS=darwin GOARCH="$goarch" \
+    CGO_CFLAGS="-arch $a -mmacosx-version-min=12.0" \
+    CGO_LDFLAGS="-arch $a -mmacosx-version-min=12.0" \
     go build -buildmode=c-shared -o "$tmpdir/libscdrm-$a.dylib" ./cmd/scdrm
   files+=("$tmpdir/libscdrm-$a.dylib")
 done
