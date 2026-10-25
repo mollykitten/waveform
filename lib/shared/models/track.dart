@@ -17,7 +17,6 @@ class Track {
     this.coverUrl,
     this.streamCandidates = const [],
     this.permalinkUrl,
-    this.goPlus = false,
     this.minted = false,
     this.genre = 'electronic',
     this.postedAt = '3 days ago',
@@ -69,10 +68,6 @@ class Track {
   /// Постоянный URL трека на soundcloud.com (для «share» и «open in browser»).
   final String? permalinkUrl;
 
-  /// GO+ трек (платная подписка SoundCloud): полный поток зашифрован,
-  /// наш клиент его не проигрывает — помечаем как unplayable с причиной.
-  final bool goPlus;
-
   /// web3-маркер: трек заминчен как NFT.
   final bool minted;
 
@@ -92,7 +87,6 @@ class Track {
     coverUrl: coverUrl,
     streamCandidates: streamCandidates,
     permalinkUrl: permalinkUrl,
-    goPlus: goPlus,
     minted: minted ?? this.minted,
     genre: genre,
     postedAt: postedAt,

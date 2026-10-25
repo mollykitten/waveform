@@ -36,12 +36,12 @@ doesn't have them.
 ## What is this?
 
 Waveform is a minimal cross-platform **desktop SoundCloud client** built with
-Flutter. See the [README](https://github.com/alina0x/waveform#readme) for the
+Flutter. See the [README](https://github.com/mollybyte/waveform#readme) for the
 full picture.
 
 > **Status:** early WIP. Use it with your own SoundCloud account, expect rough
 > edges, and please file issues at
-> https://github.com/alina0x/waveform/issues.
+> https://github.com/mollybyte/waveform/issues.
 
 ## Known limitations
 
@@ -53,6 +53,6 @@ full picture.
 
 ## Source code
 
-https://github.com/alina0x/waveform
+https://github.com/mollybyte/waveform
 
 🤖 Built and published by GitHub Actions.

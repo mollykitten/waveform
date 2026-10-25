@@ -52,8 +52,6 @@ class TrackDto {
     this.repostsCount = 0,
     this.commentCount = 0,
     this.streamable = true,
-    this.policy,
-    this.monetizationModel,
     this.publisherArtist,
     this.transcodings = const [],
   });
@@ -73,25 +71,11 @@ class TrackDto {
   final int repostsCount;
   final int commentCount;
   final bool streamable;
-  final String? policy; // ALLOW / SNIP / BLOCK
-  final String?
-  monetizationModel; // NOT_APPLICABLE / AD_SUPPORTED / SUB_HIGH_TIER
+
   /// `publisher_metadata.artist` — реальный исполнитель (может отличаться от
   /// загрузившего). Web показывает именно его. null/пусто → берём username.
   final String? publisherArtist;
   final List<TranscodingDto> transcodings;
-
-  /// GO+ (платная подписка): полный поток зашифрован, бесплатно — только сниппет.
-  /// Такие треки наш клиент проиграть не может.
-  ///
-  /// `policy`/`monetization_model` присутствуют только в полном объекте
-  /// `/tracks/{id}` (в выдаче search/stream/likes их нет), поэтому главный
-  /// надёжный признак — **наличие зашифрованного транскодинга**: у бесплатных
-  /// треков `cbc-/ctr-encrypted-hls` не бывает.
-  bool get isGoPlus =>
-      policy == 'SNIP' ||
-      monetizationModel == 'SUB_HIGH_TIER' ||
-      transcodings.any((t) => t.isEncrypted);
 
   factory TrackDto.fromJson(Map<String, dynamic> j) {
     final media = asMap(j['media']);
@@ -112,8 +96,6 @@ class TrackDto {
       repostsCount: asInt(j['reposts_count']),
       commentCount: asInt(j['comment_count']),
       streamable: asBool(j['streamable'], true),
-      policy: j['policy'] as String?,
-      monetizationModel: j['monetization_model'] as String?,
       publisherArtist: () {
         final v = asMap(j['publisher_metadata'])['artist'];
         return v is String && v.trim().isNotEmpty ? v : null;

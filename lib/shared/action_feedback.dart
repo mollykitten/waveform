@@ -30,12 +30,3 @@ void showWriteOutcome(
 /// bottom_player); делегирует в обобщённый [showWriteOutcome].
 void showLikeOutcome(BuildContext context, LikeOutcome outcome) =>
     showWriteOutcome(context, outcome, verb: 'like');
-
-/// Уведомление, что трек доступен только по подписке GO+ и не проигрывается.
-void showGoPlusNotice(BuildContext context) {
-  showToast(
-    context,
-    'GO+ only — needs a SoundCloud GO+ subscription to play',
-    duration: const Duration(seconds: 3),
-  );
-}

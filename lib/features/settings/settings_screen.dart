@@ -25,7 +25,7 @@ import '../auth/login_dialog.dart';
 /// Версия отображается в секции About; обновлять руками синхронно с pubspec.yaml.
 // Bumped on every tagged release. Matches `version:` in pubspec.yaml.
 const _kAppVersion = '0.3.0';
-const _kRepoUrl = 'https://github.com/alina0x/waveform';
+const _kRepoUrl = 'https://github.com/mollybyte/waveform';
 
 /// Экран настроек. Сейчас покрывает то, что реально реализовано: аккаунт,
 /// вид списков, кэш обложек, выход на логи и about. Тема / Last.fm / качество

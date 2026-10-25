@@ -56,7 +56,6 @@ extension TrackDtoMapper on TrackDto {
       for (final t in transcodings)
         if (!t.isHls && !t.isEncrypted) t.url,
     ],
-    goPlus: isGoPlus,
     genre: (genre == null || genre!.isEmpty) ? 'electronic' : genre!,
     postedAt: relativeTime(createdAt),
     description: description ?? '',
