@@ -226,97 +226,129 @@ class WaveRibbonPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final centre = size.center(Offset.zero);
-    final radiusX = math.min(size.width * .28, 202.0);
-    final radiusY = size.height * .415;
+    final radiusX = math.min(size.width * .24, 166.0);
+    final radiusY = size.height * .45;
     final time = phase.value * math.pi * 2;
     final bounds = Rect.fromCenter(
       center: centre,
-      width: radiusX * 2.3,
-      height: radiusY * 2.5,
+      width: radiusX * 2,
+      height: radiusY * 2,
     );
-    for (var layer = 0; layer < 5; layer++) {
-      final outer = <Offset>[];
-      final inner = <Offset>[];
-      final edge = <Offset>[];
-      for (var step = 0; step < 120; step++) {
-        final angle = step / 120 * math.pi * 2;
-        final light =
-            _foldLight(angle, 2.3 + math.sin(time) * .12) +
-            _foldLight(angle, 5.35 + math.cos(time) * .12);
-        final fold =
-            math.sin(angle * 3 + time) * .035 +
-            math.cos(angle * 2 - time) * .035;
-        final separation =
-            (layer - 2) *
-            (.006 + light * .035) *
-            math.sin(angle * 2 + layer * .55 + time);
-        final radius = 1 + fold + separation;
-        final point =
-            centre +
-            Offset(
-              math.cos(angle) * radiusX * radius +
-                  math.sin(angle * 2 + time) * 9,
-              math.sin(angle) * radiusY * radius +
-                  math.cos(angle * 3 - time) * 7,
-            );
-        final width =
-            (1.2 + layer * .75) *
-            (.18 + light * 2.5) *
-            (.7 + math.sin(angle * 3 + layer + time) * .3);
-        final normal = Offset(math.cos(angle), math.sin(angle));
-        outer.add(point + normal * width);
-        inner.add(point - normal * width * .35);
-        edge.add(point + normal * width * .8);
+    for (var fold = 0; fold < 2; fold++) {
+      for (var layer = 0; layer < 2; layer++) {
+        _paintFold(
+          canvas,
+          centre,
+          radiusX,
+          radiusY,
+          time,
+          bounds,
+          lower: fold == 0,
+          layer: layer,
+        );
       }
-      final ribbon = _smoothLoop(outer)
-        ..addPath(_smoothLoop(inner), Offset.zero)
-        ..fillType = PathFillType.evenOdd;
-      final shader = const SweepGradient(
-        colors: [
-          Color(0x00FF6500),
-          Color(0x00FF6500),
-          Color(0x08FF7800),
-          Color(0xB3FFBC4D),
-          Color(0x22FF7A00),
-          Color(0x00FF6500),
-          Color(0x00FF6500),
-          Color(0x0DFF7800),
-          Color(0x99FFC76A),
-          Color(0x1AFF6500),
-          Color(0x00FF6500),
-        ],
-        stops: [0, .17, .26, .36, .43, .52, .66, .76, .85, .92, 1],
-      ).createShader(bounds);
-      canvas.drawPath(
-        ribbon,
-        Paint()
-          ..shader = shader
-          ..color = Colors.white.withValues(alpha: .32)
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 9),
+    }
+  }
+
+  void _paintFold(
+    Canvas canvas,
+    Offset centre,
+    double radiusX,
+    double radiusY,
+    double time,
+    Rect bounds, {
+    required bool lower,
+    required int layer,
+  }) {
+    final outer = <Offset>[];
+    final inner = <Offset>[];
+    final edge = <Offset>[];
+    for (var step = 0; step <= 80; step++) {
+      final t = step / 80;
+      final angle = lower ? 2.85 - t * 2.65 : 3.45 + t * 2.7;
+      final taper = math.pow(math.sin(t * math.pi), 1.6).toDouble();
+      final drift = math.sin(time + t * 4 + (lower ? 0 : 1.2));
+      final crossing =
+          math.sin(t * math.pi * 2 + time) * taper * layer * (lower ? 13 : 7);
+      final point =
+          centre +
+          Offset(
+            math.cos(angle) * radiusX + drift * taper * 5 + crossing,
+            math.sin(angle) * radiusY +
+                taper * drift * 4 +
+                crossing * math.cos(t * math.pi),
+          );
+      final wideFold = math.exp(
+        -math.pow(t - .57 - math.sin(time) * .035, 2) / .065,
       );
+      final width =
+          taper * (2 + (lower ? 21 : 10) * wideFold) * (layer == 0 ? 1 : .65);
+      final normal = Offset(math.cos(angle), math.sin(angle));
+      outer.add(point + normal * width * .5);
+      inner.add(point - normal * width * .5);
+      edge.add(point - normal * width * .35);
+    }
+    final ribbon = _smoothLoop([...outer, ...inner.reversed]);
+    final bodyShader = LinearGradient(
+      colors: [
+        const Color(0x00FF8A00),
+        Color(lower ? 0x08FF8A00 : 0x03FF8A00),
+        Color(lower ? 0x20FF9D25 : 0x10FF9D25),
+        Color(lower ? 0x10FF6B00 : 0x06FF6B00),
+        const Color(0x00FF6B00),
+      ],
+      stops: const [0, .15, .5, .78, 1],
+    ).createShader(bounds);
+    canvas.drawPath(
+      ribbon,
+      Paint()
+        ..shader = bodyShader
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8),
+    );
+    canvas.drawPath(ribbon, Paint()..shader = bodyShader);
+    final edgeShader = LinearGradient(
+      colors: [
+        const Color(0x00FF8A00),
+        Color(lower ? 0x14FF8A00 : 0x06FF8A00),
+        Color(lower ? 0x66FFB84D : 0x26FFB84D),
+        Color(lower ? 0x40FF7800 : 0x0AFF7800),
+        const Color(0x00FF7800),
+      ],
+      stops: const [0, .2, .48, .7, 1],
+    ).createShader(bounds);
+    canvas.drawPath(
+      _smoothLine(edge),
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = layer == 0 ? 1.1 : .7
+        ..shader = edgeShader,
+    );
+    if (lower && layer == 0) {
+      final highlight = edge.sublist(31, 46);
       canvas.drawPath(
-        ribbon,
-        Paint()
-          ..shader = shader
-          ..color = Colors.white.withValues(alpha: .22),
-      );
-      canvas.drawPath(
-        _smoothLoop(edge),
+        _smoothLine(highlight),
         Paint()
           ..style = PaintingStyle.stroke
-          ..strokeWidth = layer == 2 ? .9 : .45
-          ..shader = shader
-          ..color = Colors.white.withValues(alpha: .72),
+          ..strokeWidth = 1.7
+          ..shader = const LinearGradient(
+            colors: [Color(0x00FFCB70), Color(0xA6FFCB70), Color(0x00FFCB70)],
+          ).createShader(Rect.fromPoints(highlight.first, highlight.last)),
       );
     }
   }
 
-  double _foldLight(double angle, double centre) {
-    final distance = math.atan2(
-      math.sin(angle - centre),
-      math.cos(angle - centre),
-    );
-    return math.exp(-distance * distance / .17);
+  Path _smoothLine(List<Offset> points) {
+    final path = Path()..moveTo(points.first.dx, points.first.dy);
+    for (var index = 1; index < points.length - 1; index++) {
+      final next = (points[index] + points[index + 1]) / 2;
+      path.quadraticBezierTo(
+        points[index].dx,
+        points[index].dy,
+        next.dx,
+        next.dy,
+      );
+    }
+    return path..lineTo(points.last.dx, points.last.dy);
   }
 
   Path _smoothLoop(List<Offset> points) {
