@@ -226,8 +226,8 @@ class WaveRibbonPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final centre = size.center(Offset.zero);
-    final radiusX = math.min(size.width * .39, 310.0);
-    final radiusY = size.height * .36;
+    final radiusX = math.min(size.width * .28, 202.0);
+    final radiusY = size.height * .415;
     final time = phase.value * math.pi * 2;
     final bounds = Rect.fromCenter(
       center: centre,
@@ -235,65 +235,99 @@ class WaveRibbonPainter extends CustomPainter {
       height: radiusY * 2.5,
     );
     for (var layer = 0; layer < 5; layer++) {
-      final points = <Offset>[];
-      for (var step = 0; step < 96; step++) {
-        final angle = step / 96 * math.pi * 2;
+      final outer = <Offset>[];
+      final inner = <Offset>[];
+      final edge = <Offset>[];
+      for (var step = 0; step < 120; step++) {
+        final angle = step / 120 * math.pi * 2;
+        final light =
+            _foldLight(angle, 2.3 + math.sin(time) * .12) +
+            _foldLight(angle, 5.35 + math.cos(time) * .12);
         final fold =
-            math.sin(angle * 3 + time + layer * .36) * .08 +
-            math.cos(angle * 2 - time + layer * .27) * .055;
-        final radius = 1 + fold + (layer - 2) * .047;
-        points.add(
-          centre +
-              Offset(
-                math.cos(angle) * radiusX * radius +
-                    math.sin(angle * 2 + time) * 12,
-                math.sin(angle) * radiusY * radius +
-                    math.cos(angle * 3 - time + layer * .4) * 12,
-              ),
-        );
+            math.sin(angle * 3 + time) * .035 +
+            math.cos(angle * 2 - time) * .035;
+        final separation =
+            (layer - 2) *
+            (.006 + light * .035) *
+            math.sin(angle * 2 + layer * .55 + time);
+        final radius = 1 + fold + separation;
+        final point =
+            centre +
+            Offset(
+              math.cos(angle) * radiusX * radius +
+                  math.sin(angle * 2 + time) * 9,
+              math.sin(angle) * radiusY * radius +
+                  math.cos(angle * 3 - time) * 7,
+            );
+        final width =
+            (1.2 + layer * .75) *
+            (.18 + light * 2.5) *
+            (.7 + math.sin(angle * 3 + layer + time) * .3);
+        final normal = Offset(math.cos(angle), math.sin(angle));
+        outer.add(point + normal * width);
+        inner.add(point - normal * width * .35);
+        edge.add(point + normal * width * .8);
       }
-      final path = Path();
-      final start = (points.last + points.first) / 2;
-      path.moveTo(start.dx, start.dy);
-      for (var index = 0; index < points.length; index++) {
-        final point = points[index];
-        final next = (point + points[(index + 1) % points.length]) / 2;
-        path.quadraticBezierTo(point.dx, point.dy, next.dx, next.dy);
-      }
-      path.close();
+      final ribbon = _smoothLoop(outer)
+        ..addPath(_smoothLoop(inner), Offset.zero)
+        ..fillType = PathFillType.evenOdd;
       final shader = const SweepGradient(
         colors: [
-          Color(0xFFFF6800),
-          Color(0x33FF5500),
-          Color(0xFFFFB800),
-          Color(0xFFFFE191),
-          Color(0x44FF5500),
-          Color(0xFFFF6800),
+          Color(0x00FF6500),
+          Color(0x00FF6500),
+          Color(0x08FF7800),
+          Color(0xB3FFBC4D),
+          Color(0x22FF7A00),
+          Color(0x00FF6500),
+          Color(0x00FF6500),
+          Color(0x0DFF7800),
+          Color(0x99FFC76A),
+          Color(0x1AFF6500),
+          Color(0x00FF6500),
         ],
-        stops: [0, .18, .42, .58, .8, 1],
+        stops: [0, .17, .26, .36, .43, .52, .66, .76, .85, .92, 1],
       ).createShader(bounds);
-      final bloom = Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 8 + layer * 2.0
-        ..color = const Color(0x10FF8A00)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 12);
-      canvas.drawPath(path, bloom);
       canvas.drawPath(
-        path,
+        ribbon,
         Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 4 + layer * 1.1
           ..shader = shader
-          ..color = Colors.white.withValues(alpha: .16),
+          ..color = Colors.white.withValues(alpha: .32)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 9),
       );
       canvas.drawPath(
-        path,
+        ribbon,
+        Paint()
+          ..shader = shader
+          ..color = Colors.white.withValues(alpha: .22),
+      );
+      canvas.drawPath(
+        _smoothLoop(edge),
         Paint()
           ..style = PaintingStyle.stroke
-          ..strokeWidth = layer == 2 ? 1.6 : .7
-          ..shader = shader,
+          ..strokeWidth = layer == 2 ? .9 : .45
+          ..shader = shader
+          ..color = Colors.white.withValues(alpha: .72),
       );
     }
+  }
+
+  double _foldLight(double angle, double centre) {
+    final distance = math.atan2(
+      math.sin(angle - centre),
+      math.cos(angle - centre),
+    );
+    return math.exp(-distance * distance / .17);
+  }
+
+  Path _smoothLoop(List<Offset> points) {
+    final start = (points.last + points.first) / 2;
+    final path = Path()..moveTo(start.dx, start.dy);
+    for (var index = 0; index < points.length; index++) {
+      final point = points[index];
+      final next = (point + points[(index + 1) % points.length]) / 2;
+      path.quadraticBezierTo(point.dx, point.dy, next.dx, next.dy);
+    }
+    return path..close();
   }
 
   @override
