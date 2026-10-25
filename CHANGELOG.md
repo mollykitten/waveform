@@ -49,6 +49,8 @@ and release preparation. includes the merged work in #50–#56.
 - docs moved from the README into `docs/`.
 
 ### fixed
+- initial profile lookup failures retry with bounded backoff; listening
+  attribution stays suspended until identity is verified.
 - chatgpt sign-in state stays consistent after a soundcloud account switch or
   logout without restoring revoked listening consent.
 - player source generations and swap recovery preserve playback intent,
