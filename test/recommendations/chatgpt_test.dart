@@ -5,13 +5,24 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jose/jose.dart';
+import 'package:waveform_app/core/api/soundcloud_auth.dart';
 import 'package:waveform_app/core/recommendations/ai_client.dart';
 import 'package:waveform_app/core/recommendations/ai_config.dart';
 import 'package:waveform_app/core/recommendations/chatgpt_auth.dart';
 import 'package:waveform_app/core/recommendations/chatgpt_client.dart';
 import 'package:waveform_app/core/recommendations/models.dart';
+import 'package:waveform_app/core/recommendations/providers.dart';
+
+class MemoryAiConfig extends AiConfigStore {
+  AiConfig value = const AiConfig(backend: AiBackend.chatGpt);
+  @override
+  Future<AiConfig> load() async => value;
+  @override
+  Future<void> save(AiConfig config) async => value = config;
+}
 
 class MemoryCredentials implements ChatGptCredentialStore {
   String? value;
@@ -208,6 +219,126 @@ void main() {
     );
   });
   tearDown(() => auth.close());
+
+  for (final nextToken in ['soundcloud-two', null]) {
+    test('completed ChatGPT sign-in is reflected after SoundCloud '
+        '${nextToken == null ? 'logout' : 'account switch'}', () async {
+      auth.close();
+      final browserOpened = Completer<void>();
+      auth = ChatGptAuth(
+        store: store,
+        dio: Dio()..httpClientAdapter = adapter,
+        callback: (_) async => callback,
+        openBrowser: (uri) async {
+          authorization = uri;
+          adapter.nonce = uri.queryParameters['nonce']!;
+          browserOpened.complete();
+          return true;
+        },
+      );
+      final configStore = MemoryAiConfig();
+      String? sourceToken = 'soundcloud-one';
+      final container = ProviderContainer(
+        overrides: [
+          authControllerProvider.overrideWithBuild(
+            (ref, notifier) => SoundcloudAuth(userToken: sourceToken),
+          ),
+          aiListeningIdentityProvider.overrideWith((ref) async {
+            return ref.watch(authControllerProvider).userToken ?? 'anonymous';
+          }),
+          chatGptAuthProvider.overrideWithValue(auth),
+          aiConfigStoreProvider.overrideWithValue(configStore),
+        ],
+      );
+      addTearDown(container.dispose);
+      container.listen(aiSettingsProvider, (_, _) {});
+      await Future<void>.delayed(Duration.zero);
+      final settings = container.read(aiSettingsProvider.notifier);
+      await settings.save(
+        const AiConfig(endpoint: 'https://custom.example/v1', model: 'm'),
+        sessionKey: 'SYNTHETIC_SESSION_KEY',
+      );
+      await settings.setListeningConsent(true);
+      final connection = settings.connectChatGpt();
+      await browserOpened.future;
+      sourceToken = nextToken;
+      container.invalidate(authControllerProvider);
+      container.read(authControllerProvider);
+      await Future<void>.delayed(Duration.zero);
+      callback.completion.complete(
+        Uri(
+          path: '/auth/callback',
+          queryParameters: {
+            'state': authorization.queryParameters['state']!,
+            'client_id': 'oaiapp_test',
+            'code': 'CODE_SECRET',
+          },
+        ),
+      );
+      await connection;
+
+      expect(auth.account?.connected, isTrue);
+      final restored = ChatGptAuth(store: store);
+      addTearDown(restored.close);
+      await restored.restore();
+      expect(restored.account?.connected, isTrue);
+      final state = container.read(aiSettingsProvider);
+      expect(state.chatGptConnected, isTrue);
+      expect(state.chatGptAccountLabel, 'person@example.com');
+      expect(state.connecting, isFalse);
+      expect(state.error, isNull);
+      expect(state.config.backend, AiBackend.openAi);
+      expect(state.config.listeningConsent, isFalse);
+      expect(state.hasSessionKey, isFalse);
+      expect(configStore.value.listeningConsent, isFalse);
+    });
+  }
+
+  test(
+    'disconnect wins over a sign-in finishing its credential write',
+    () async {
+      final container = ProviderContainer(
+        overrides: [
+          authControllerProvider.overrideWithBuild(
+            (ref, notifier) => const SoundcloudAuth(),
+          ),
+          chatGptAuthProvider.overrideWithValue(auth),
+          aiConfigStoreProvider.overrideWithValue(MemoryAiConfig()),
+        ],
+      );
+      addTearDown(container.dispose);
+      container.listen(aiSettingsProvider, (_, _) {});
+      await Future<void>.delayed(Duration.zero);
+      final staged = Completer<void>(), releaseWrite = Completer<void>();
+      store.beforeWrite = (_) async {
+        if (!staged.isCompleted) {
+          staged.complete();
+          await releaseWrite.future;
+        }
+      };
+      adapter.revokeGate = Completer<void>();
+      final settings = container.read(aiSettingsProvider.notifier);
+      final connection = settings.connectChatGpt();
+      await staged.future;
+      final disconnect = settings.disconnectChatGpt();
+      await adapter.revokeStarted.future;
+      try {
+        releaseWrite.complete();
+        await connection;
+        expect(container.read(aiSettingsProvider).chatGptConnected, isFalse);
+        expect(container.read(aiSettingsProvider).chatGptAccountLabel, isNull);
+        expect(
+          container.read(aiSettingsProvider).config.listeningConsent,
+          isFalse,
+        );
+      } finally {
+        adapter.revokeGate!.complete();
+        await disconnect;
+      }
+      expect(auth.account?.connected, isFalse);
+      expect(container.read(aiSettingsProvider).chatGptConnected, isFalse);
+    },
+  );
 
   test(
     'callback state, issued client and ID-token nonce fail closed',
