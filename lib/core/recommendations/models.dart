@@ -5,7 +5,15 @@ import '../../shared/models/track.dart';
 /// Safe failures: never retain transport exceptions, headers or response bodies.
 enum AiFailure implements Exception {
   configuration('configure a valid endpoint and model first'),
-  credentials('model access denied — check your session key'),
+  credentials(
+    'AI access denied — reconnect ChatGPT or check custom credentials',
+  ),
+  signIn('could not complete ChatGPT sign-in — try again'),
+  permission('enable ChatGPT plan usage when connecting your account'),
+  storage('could not securely save the ChatGPT connection'),
+  revocation(
+    'signed out locally; disconnect waveform in ChatGPT settings to confirm remote access is revoked',
+  ),
   rateLimit('model rate limit reached — try again later'),
   timeout('the model took too long — try again'),
   network('could not reach the model endpoint'),

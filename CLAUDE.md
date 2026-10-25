@@ -116,11 +116,30 @@ lib/
 - Windows code-signing.
 
 **Горизонт 2 — фичи, по одной на релиз** (порядок — ценность к усилию):
-1. Shuffle всех лайков (паттерн `allPlaylistTracks` уже есть).
+1. Shuffle всех лайков — реализовано (`loadAll()` и shuffle полной коллекции).
 2. Light theme + следование системному appearance.
-3. Reduced-motion + VoiceOver-проход.
+3. Reduced-motion и клавиатурная навигация — реализованы; полный VoiceOver-проход впереди.
 4. Heatmap прослушиваний 7×24.
 5. Lyrics — последним: у SoundCloud нет эндпоинта, нужен сторонний источник.
+
+**Рекомендации и backend (статус 2026-10-25).** В исходном коде реализованы
+рекомендации по реальным трекам SoundCloud, визуальная «Моя волна»,
+ChatGPT-подключение (PKCE, проверка identity, secure storage), custom providers,
+непрерывное пополнение очереди и локальные структурные векторы по ограниченному
+related-графу (до 6 seed-интересов × 12 соседей) с локальными фактами прослушивания.
+Это не нейронные аудиоэмбеддинги и не глобальный каталог. Live OAuth, доступ по
+подписке, Keychain/restart/refresh/logout, качество рекомендаций и нативный
+playback/refill ещё требуют проверки; тесты не доказывают эти сценарии.
+
+Backend пока только в плане: сначала ограниченный музыкальный эксперимент против
+текущего graph baseline, выбор модели и разрешённых источников; затем API,
+PostgreSQL с векторным индексом, фоновые jobs с версиями моделей/embedding,
+гибридные retrieval/ranking и разнообразие/исследование. Обязательны изоляция
+аккаунтов, удаление, отдельное согласие на sync, локальный fallback и миграция,
+пороги качества, latency и стоимости, наблюдаемость и rollback. Подписка ChatGPT
+в приложении не оплачивает backend inference. Полный актуальный статус и этапы —
+[docs/roadmap.md](docs/roadmap.md); детали реализованного core —
+[docs/ai-recommendations.md](docs/ai-recommendations.md).
 
 **Не планируем:** web3 (снят решением владельца 2026-10); «когда откроют API» —
 не в нашей власти.
@@ -328,7 +347,7 @@ lib/
 - **Official OAuth 2.1 + PKCE** (если SoundCloud откроет регистрацию).
 - **Drag tracks между плейлистами** (web-SC этого почти не даёт).
 - **Lyrics view** на странице трека.
-- **Reduced-motion + полный VoiceOver-pass** (accessibility-аудит).
+- **Полный VoiceOver-pass** (accessibility-аудит); reduced-motion уже реализован.
 - **Windows code-signing** (EV cert) — сейчас .zip без подписи,
   SmartScreen ругается.
 - **Notarization-проверка на чистой macOS-машине** после первого

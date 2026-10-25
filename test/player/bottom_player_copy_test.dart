@@ -22,7 +22,7 @@ import 'package:waveform_app/shared/models/track.dart';
 import '../support/fake_audio_engine.dart';
 import '../support/stub_liked_tracks.dart';
 
-Track track(String id, {String? url}) => Track(
+Track track(String id, {String? url, bool playable = false}) => Track(
   id: id,
   title: 'Track $id',
   artist: 'Artist',
@@ -32,7 +32,13 @@ Track track(String id, {String? url}) => Track(
   plays: 0,
   waveform: const [0.2, 0.6, 0.4],
   permalinkUrl: url,
+  streamCandidates: playable ? ['https://example.com/$id'] : const [],
 );
+
+class _PlayableApi extends MockSoundcloudApi {
+  @override
+  Future<String?> resolveStreamUrl(String url) async => url;
+}
 
 class _Watcher implements ClipboardWatcher {
   final seen = <String>[];
@@ -81,6 +87,7 @@ void main() {
       ProviderScope(
         overrides: [
           audioEngineProvider.overrideWithValue(engine),
+          soundcloudApiProvider.overrideWithValue(_PlayableApi()),
           likedTracksProvider.overrideWith(StubLikedTracks.new),
           clipboardWatcherProvider.overrideWith((ref) => watcher),
         ],
@@ -232,9 +239,21 @@ void main() {
 
     testWidgets('copy tracks next, queue replacement and crossfade swap: '
         'collapsed=$collapsed', (tester) async {
-      final a = track('a', url: 'https://soundcloud.com/artist/a');
-      final b = track('b', url: 'https://soundcloud.com/artist/b');
-      final c = track('c', url: 'https://soundcloud.com/artist/c');
+      final a = track(
+        'a',
+        url: 'https://soundcloud.com/artist/a',
+        playable: true,
+      );
+      final b = track(
+        'b',
+        url: 'https://soundcloud.com/artist/b',
+        playable: true,
+      );
+      final c = track(
+        'c',
+        url: 'https://soundcloud.com/artist/c',
+        playable: true,
+      );
       final container = await pumpPlayer(tester, collapsed: collapsed);
       final controller = container.read(playerControllerProvider.notifier);
       controller.play(a, queue: [a, b]);

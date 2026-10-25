@@ -5,7 +5,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'models.dart';
 
-enum AiBackend { openAi, ollama }
+enum AiBackend { chatGpt, openAi, ollama }
 
 /// Public configuration only. API keys deliberately have no representation here.
 class AiConfig {
@@ -14,14 +14,19 @@ class AiConfig {
     this.endpoint = '',
     this.model = '',
     this.listeningConsent = false,
+    this.consentBinding = '',
   });
 
   final AiBackend backend;
   final String endpoint;
   final String model;
   final bool listeningConsent;
+  final String consentBinding;
 
   Uri get requestUri {
+    if (backend == AiBackend.chatGpt) {
+      return Uri.parse('https://api.openai.com/v1/responses');
+    }
     final uri = Uri.tryParse(endpoint.trim());
     if (uri == null ||
         !uri.hasAuthority ||
@@ -51,6 +56,7 @@ class AiConfig {
   }
 
   bool get isValid {
+    if (backend == AiBackend.chatGpt) return true;
     try {
       requestUri;
       return model.trim().isNotEmpty &&
@@ -63,11 +69,12 @@ class AiConfig {
 
   String get destination => requestUri.toString();
 
-  AiConfig withConsent(bool consent) => AiConfig(
+  AiConfig withConsent(bool consent, {String? binding}) => AiConfig(
     backend: backend,
     endpoint: endpoint,
     model: model,
     listeningConsent: consent,
+    consentBinding: consent ? binding ?? consentBinding : '',
   );
 
   Map<String, Object> toJson() => {
@@ -75,13 +82,21 @@ class AiConfig {
     'endpoint': endpoint,
     'model': model,
     'listeningConsent': listeningConsent,
+    'consentBinding': consentBinding,
   };
 
   static AiConfig fromJson(Map<String, dynamic> json) => AiConfig(
-    backend: json['backend'] == 'ollama' ? AiBackend.ollama : AiBackend.openAi,
+    backend: switch (json['backend']) {
+      'ollama' => AiBackend.ollama,
+      'openAi' => AiBackend.openAi,
+      _ => AiBackend.chatGpt,
+    },
     endpoint: json['endpoint'] is String ? json['endpoint'] as String : '',
     model: json['model'] is String ? json['model'] as String : '',
     listeningConsent: json['listeningConsent'] == true,
+    consentBinding: json['consentBinding'] is String
+        ? json['consentBinding'] as String
+        : '',
   );
 }
 
@@ -99,7 +114,7 @@ class AiConfigStore {
   Future<AiConfig> load() async {
     await _tail;
     final file = await _file();
-    if (!await file.exists()) return const AiConfig();
+    if (!await file.exists()) return const AiConfig(backend: AiBackend.chatGpt);
     if (await file.length() > 4096) throw AiFailure.configuration;
     try {
       final json = jsonDecode(await file.readAsString());

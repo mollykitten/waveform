@@ -36,6 +36,7 @@ abstract interface class AudioEngine {
   Stream<void> get completedStream;
 
   /// Загрузить источник по URL и начать воспроизведение.
+  /// Пауза во время загрузки сохраняет выбор источника без автозапуска.
   Future<void> load(String url);
   Future<void> pause();
   Future<void> resume();
@@ -117,6 +118,13 @@ class JustAudioEngine implements AudioEngine {
   int _sourceGen = 0;
   bool _wantsPlayback = false;
   Future<void>? _pendingSwap;
+  Completer<bool>? _pendingLoad;
+
+  void _cancelPendingLoad() {
+    final pending = _pendingLoad;
+    _pendingLoad = null;
+    if (pending != null && !pending.isCompleted) pending.complete(false);
+  }
 
   bool _isSourceCurrent(int generation) =>
       !_disposed && generation == _sourceGen;
@@ -201,7 +209,19 @@ class JustAudioEngine implements AudioEngine {
   }
 
   @override
-  Future<void> load(String url) => _load(url);
+  Future<void> load(String url) async {
+    _cancelPendingLoad();
+    final done = Completer<bool>();
+    _pendingLoad = done;
+    var loaded = false;
+    try {
+      await _load(url);
+      loaded = true;
+    } finally {
+      if (identical(_pendingLoad, done)) _pendingLoad = null;
+      if (!done.isCompleted) done.complete(loaded);
+    }
+  }
 
   Future<void> _load(
     String url, {
@@ -214,11 +234,10 @@ class JustAudioEngine implements AudioEngine {
     _wantsPlayback = autoplay;
     // Новая авторитетная загрузка отменяет любую идущую crossfade-рампу и
     // preload (он был под старый «следующий»).
-    final gen = ++_swapGen;
-    // A retained-player swap still has to select its incoming source after
-    // pause. Ordinary loads retain their existing cancellation behavior.
-    bool isCurrentLoad() =>
-        onSourceLoaded == null ? _isCurrent(gen) : _isSourceCurrent(source);
+    ++_swapGen;
+    // Pause changes transport intent, while load/stop/dispose change source.
+    // Installing the selected source must survive pause without autoplaying.
+    bool isCurrentLoad() => _isSourceCurrent(source);
     ++_preloadGen;
     _log.debug('[engine] load → gen=$_swapGen');
     _preloadReady = false;
@@ -287,6 +306,9 @@ class JustAudioEngine implements AudioEngine {
   Future<void> resume() async {
     final source = _sourceGen;
     _wantsPlayback = true;
+    // The old source may still be active while load cleans up or sets its URL.
+    final load = _pendingLoad;
+    if (load != null && !await load.future) return;
     // Until native binding commits, _active still owns the outgoing source.
     await _pendingSwap;
     if (_isSourceCurrent(source) && _wantsPlayback) _play(_active);
@@ -305,6 +327,7 @@ class JustAudioEngine implements AudioEngine {
   Future<void> stop() async {
     if (_disposed) return;
     ++_sourceGen;
+    _cancelPendingLoad();
     _pendingSwap = null;
     _wantsPlayback = false;
     final gen = ++_swapGen;
@@ -379,6 +402,7 @@ class JustAudioEngine implements AudioEngine {
       _log.warning('[swap] called but preload not ready — no-op');
       return;
     }
+    _cancelPendingLoad();
     final preloadUrl = _preloadUrl;
     if (_preservingPlayer) {
       if (preloadUrl != null) {
@@ -490,6 +514,7 @@ class JustAudioEngine implements AudioEngine {
     if (_disposed) return;
     _disposed = true;
     ++_sourceGen;
+    _cancelPendingLoad();
     ++_swapGen;
     ++_preloadGen;
     _posSub?.cancel();

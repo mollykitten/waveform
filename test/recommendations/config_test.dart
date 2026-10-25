@@ -68,7 +68,13 @@ void main() {
       );
       expect(
         json.keys,
-        unorderedEquals(['backend', 'endpoint', 'model', 'listeningConsent']),
+        unorderedEquals([
+          'backend',
+          'endpoint',
+          'model',
+          'listeningConsent',
+          'consentBinding',
+        ]),
       );
       expect(
         await File('${directory.path}/ai_config.json.tmp').exists(),

@@ -1,77 +1,226 @@
 # ai recommendations
 
-Open **discover**, or `/recommendations`. Configure your own endpoint and model
-in settings. Waveform does not install a model server or download weights.
+open **my wave**, or `/recommendations`. choose **Continue with ChatGPT** once,
+then **play my wave**. an **add a mood (optional)** field lets you steer the
+selection; no endpoint, model name or API key is needed for ChatGPT. with an
+empty mood, approved listening context and a verified SoundCloud identity, the
+button can use local graph recommendations without a model request. a nonempty
+mood continues through the existing model-assisted discovery route. without
+account context, a mood or public discovery request can still supply a starting
+point.
 
-- OpenAI-compatible: a base such as `https://api.openai.com/v1`, or an existing
-  local server's `http://127.0.0.1:<port>/v1`. Requests use
-  `/v1/chat/completions` and JSON object output.
-- native Ollama: `http://localhost:11434`, with the name of a model you already
-  have. Requests use `/api/chat`, `stream: false` and `format: json`.
-- remote endpoints require HTTPS. Plain HTTP is restricted to exact loopback
-  hosts. Redirects are disabled, including redirects to another model endpoint.
-- API keys are optional for endpoints that do not require authentication. They
-  live only in the current app session and are cleared on account or destination
-  changes. They are never written to configuration, provider state or logs.
+## ChatGPT connection
 
-`ai_config.json` in application support stores only protocol, endpoint, model and
-listening-consent preference. Writes are serialized and replace the file via a
-temporary file. Listening authorization is revoked on startup, account changes,
-destination changes, or explicitly in settings.
+the default connection uses the official [open-source sign-in flow](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)
+for eligible ChatGPT plans. waveform opens the system browser, binds a temporary
+callback listener to `127.0.0.1`, and uses OAuth authorization code + PKCE. it
+registers a client dynamically and retains the issued client ID and a stable
+host identifier for returning sign-ins. no Codex token files, browser cookies,
+client secret or partner API key are used.
 
-Every generation requires an approval dialog listing the exact destination and
-data categories for both model calls. Mood text is limited to 500 characters;
-links are rejected. Current-track context is optional. Recent likes/history are
-separately opt-in and bounded to 20 combined seeds, including the current track.
-Only bounded ID/title/artist/genre metadata is sent. Audio, descriptions,
-comments, private links, stream URLs and SoundCloud credentials are excluded.
+state and nonce are fresh for each attempt. before activating a connection,
+waveform verifies the ID-token signature against OpenAI's JWKS, issuer,
+audience, expiry, nonce and subject. a pending or failed sign-in does not replace
+the active account. OAuth and inference transports disable redirects and do not
+use SoundCloud logging interceptors.
 
-The first model call plans at most two search strings. Those strings go through
-the existing `SoundcloudApi.search`. Up to 40 deduplicated, nonblocked tracks
-with ordinary playback sources become candidates. The second model call ranks
-at most ten candidate IDs and supplies short reasons. Unknown IDs, duplicate IDs,
-additional fields, malformed JSON and oversized output are rejected. UI uses
-the original SoundCloud `Track` objects and their existing playback queue.
-Reasons are labeled model suggestions; no audio analysis or BPM is claimed.
-There is no deterministic recommendation fallback if either model stage fails.
+access, refresh and retained ID tokens live in OS secure storage. on macOS,
+this uses the legacy encrypted Keychain with data-protection sharing disabled,
+which avoids a shared-keychain provisioning requirement. linux requires an
+unlocked secret service; see [development](development.md). there is no plaintext
+credential fallback. refreshes are serialized, rotating credentials are saved
+together, and transient storage failures can be retried. logout attempts remote
+revocation and clears local tokens while retaining the registration and host.
+if remote revocation cannot be confirmed, the UI directs the user to disconnect
+waveform in ChatGPT settings.
 
-Requests have timeouts and response/input caps. Cancel, account changes and
-configuration changes invalidate pending generations. Previous successful
-results remain available during refresh or retryable failure. Account/config
-changes clear them. Model errors expose fixed messages, never raw response
-bodies or transport errors. The AI transport has no SoundCloud log interceptors.
+waveform requests the signed-in account's model catalog and chooses its first
+visible model in server order. subscription inference uses only the public
+`https://api.openai.com/v1/responses` endpoint with `store: false`, `stream: true`,
+an input array and instructions. it omits unsupported sampling and output-limit
+fields. streamed text is accepted only after `response.completed`; failed,
+incomplete or interrupted responses are rejected, including subscription usage
+failures delivered after text has begun. these contracts follow the official
+[models and inference](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference)
+and [preview limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations)
+documentation.
+
+## listening permission and custom providers
+
+the first wave asks permission to send the displayed metadata categories to the
+chosen destination. this choice is remembered across batches and restarts for
+the same SoundCloud identity, AI connection and permission scope. logout,
+confirmed account changes, destination changes, custom credential changes or
+revocation in settings require a new approval. a delayed or offline account
+restore does not erase a saved approval: the binding is checked again before
+listening metadata can be sent.
+
+`ai_config.json` stores only public protocol, endpoint, model, consent and an
+opaque consent binding. serialized writes replace the file through a temporary
+file. the binding contains no OAuth tokens. recent likes/history and the current
+track are bounded to 20 combined seeds. only bounded ID/title/artist/genre
+metadata and an optional mood are sent. mood text is limited to 500 characters
+and rejects links. audio, descriptions, comments, private links, stream URLs and
+SoundCloud credentials are excluded.
+
+**advanced settings** preserves existing custom providers:
+
+- OpenAI-compatible: an HTTPS `/v1` base or an existing loopback server's
+  `http://127.0.0.1:<port>/v1`; requests use chat completions and JSON output.
+- native Ollama: an existing `http://localhost:11434` server and installed model;
+  requests use `/api/chat`, `stream: false` and `format: json`.
+- custom API keys are optional and remain in memory for the current session.
+  they are cleared on SoundCloud account or destination changes and never enter
+  configuration files, provider state or logs.
+- remote endpoints require HTTPS; plain HTTP is restricted to exact loopback
+  hosts. redirects are disabled. waveform does not install a server or download
+  model weights.
+
+## recommendation batches
+
+the existing model-assisted route uses one model call to plan at most two
+search strings for `SoundcloudApi.search`. up to 40 deduplicated, nonblocked
+tracks with ordinary playback sources become candidates. a second model call
+ranks at most ten candidate IDs and supplies short reasons. unknown or
+duplicate IDs, extra fields, malformed JSON and oversized output are rejected.
+results retain the original SoundCloud `Track` objects and use the existing
+playback queue. reasons are suggestions; no audio analysis or measured BPM is
+claimed. model failures do not produce fabricated recommendations.
+
+## local graph recommendations and learning
+
+when the mood is empty, listening permission is approved, and the SoundCloud
+identity is verified, **play my wave** first tries local recommendations. it
+uses up to six distinct playable seeds, preferring different artists, and
+fetches at most 12 public related tracks per seed. returned tracks are not
+expanded recursively and pagination links are not followed. candidates are
+genuine SoundCloud track objects with ordinary playback sources.
+
+the local ranker builds sparse structural vectors from seed-to-related-track
+edges and ranks by cosine similarity across separate seed interests. it
+diversifies results, limits any artist to two tracks, and uses every fifth
+position to explore a less-observed interest. these six seed interests do not
+claim to be general genre clusters. a valid local pool needs no model call; if
+the graph produces no candidates, the existing model-assisted route remains the
+fallback. a nonempty mood always uses that existing route. local listening
+facts are not added to model requests.
+
+the player records explicit transition causes and sampled listening facts.
+advancing playback counts as heard time; pauses, seeks, buffering, and playback
+errors do not count as negative feedback. sampling gaps longer than two seconds
+are discarded. during crossfade, the outgoing track continues to accrue heard
+time only until the overlap begins. a listen of at least 30 seconds and 70% of
+track duration is positive evidence. a manual next without seeking can be
+negative evidence when heard time is 5–30 seconds and below 25% of track
+duration. other transitions, including unplayable tracks, are neutral. feedback
+support decays with a 30-day half-life.
+
+facts are stored locally per verified SoundCloud identity in an atomic bounded
+store of at most 2,000 records and 2 MiB. the store holds track IDs and playback
+facts, not titles, stream URLs, audio, or SoundCloud payloads. account changes
+clear current playback attribution while identity is unresolved. vector
+provenance is persisted separately with limits of 600 latest vectors, 1,200
+timestamped revisions, 2,000 session attributions, and 512 KiB. related edges
+are timestamped after retrieval completes, so a newly fetched edge cannot be
+backdated to a session that occurred during retrieval. session attribution is
+preserved across repeated generations and reloads; unknown earlier context
+stays unknown. listening to a seed track also updates that seed's own interest
+without counting the same fact twice.
+
+this is sparse graph ranking, not neural audio embeddings. waveform does not
+download models, index the full SoundCloud catalog, or perform global
+collaborative learning. the one-button flow adds no new settings.
+
+the core supports continuation batches: previously recommended IDs are excluded
+before ranking, with a bounded recent exclusion list sent to the planner. a
+batch stops if no new candidates remain, without endless retries. a persistent
+wave controller continues to refill the playback queue after leaving the screen,
+including early refill for a one-track batch. it stops on exhaustion, explicit
+cancellation, connection changes or a replacement playback queue. late initial
+results and appends cannot take over playback selected by the user.
+
+requests have deadlines and response/input caps. cancellation, account and
+configuration changes invalidate pending generations. successful results remain
+available during refresh or retryable failure; connection changes clear stale
+results. errors expose fixed messages without response bodies or transport
+exceptions.
 
 ## verification handoff
 
-Unit/widget tests use test-only scripted clients and fake SoundCloud fixtures.
-They do not prove live model or SoundCloud interoperability.
+an earlier core verification passed **51 tests** across auth, SSE transport,
+consent, config, providers, service and model parsing. targeted analysis reported
+no errors and `git diff --check` was clean. coverage includes signed identity and
+PKCE exchange, negative callback/token checks, refresh and logout races,
+secure-storage recovery, persisted consent and identity recovery, continuation
+exclusions, and existing custom-provider behavior. the later adjustment to send
+the most recent exclusion IDs passed all nine service tests.
 
-The runtime owner should verify with an already running, explicitly approved
-model server (for example, official llama.cpp with its OpenAI-compatible API):
+four later privacy regressions cover every generation relying on remembered
+consent, including mood/current-track requests without history: an anonymous
+restored identity sends nothing, a confirmed new identity revokes and persists
+the stale grant, unavailable identity preserves the grant while blocking
+requests until recovery, and a late lookup cannot revoke replacement settings.
+the final consent/provider run passed **16 tests**, with no analyzer errors.
 
-The parent-owned development server uses `http://127.0.0.1:19381/v1`, model alias
-`waveform-dev`, and no API key. Thinking is disabled on the server; the client
-expects plain JSON in `choices[0].message.content`. This is a development setup,
-not an application default or a bundled runtime. Minimum viewport coverage is
-960×640 for navigation, generation, approval, results and AI configuration.
+the focused UI/controller verification passed **23 tests**. it exercised a wave
+across screen disposal through four batches and 16 tracks, one-track prefetch,
+exhaustion without retries, late initial playback and appends after a foreign
+queue replaces the wave while keeping the same current track, configuration,
+authentication and explicit cancellation, denied reconnect, and the advanced
+another-account action. the previous complete default `test/` suite passed all
+**218 tests** through Dart MCP; that is the prior baseline, not verification of
+the current graph and listening increment. the macOS debug build also exited successfully
+and produced `Waveform.app`; this does not verify native Keychain access,
+interactive OAuth or subscribed live inference.
 
-1. Set its loopback `/v1` base and exact model name in settings; leave key blank
-   if the server requires none. Do not install or start another model runtime.
-2. Generate from a mood without listening metadata. Confirm the approval dialog
-   shows the intended endpoint and categories; cancel once and confirm no model
-   call occurs. Approve, then verify two model calls and real SoundCloud results.
-3. Open a result on SoundCloud and play it in Waveform; verify returned IDs and
-   displayed titles match actual search data. Capture the new screen and dialog.
-4. Try optional current-track context and signed-in listening opt-in, then
-   revoke consent. Check 401/429, unreachable endpoint, malformed model output,
-   no matching candidates, refresh, cancellation and account/destination changes.
-5. Check app logs with a disposable test key: its value and raw model payloads
-   must never appear. Do not inspect or export existing user credentials.
+before/after screen and settings captures at 960×640 were reviewed at
+`/tmp/waveform-wave-ui/{before,after}-{screen,settings}-960x640.png`. these are
+widget-harness renders with test fixtures, not screenshots of a live signed-in
+account.
 
-Known source limitation: existing `likesPage`/`historyPage` turn certain
-SoundCloud failures into empty results, so an empty seed set cannot establish
-whether the library is genuinely empty. Mood-only generation remains possible.
-No new SoundCloud endpoint contract is introduced here.
+these tests use injected credentials, network adapters and SoundCloud fixtures;
+the loopback listener is also tested with real local HTTP requests. they do not
+prove an interactive ChatGPT login, native Keychain access or subscribed live
+inference. public OpenAI discovery and JWKS metadata were checked without an
+account login. no existing user tokens were read and no application runtime was
+launched for the core work.
+
+the runtime owner should verify the complete flow on the owned runtime:
+
+1. complete **Continue with ChatGPT** in the user's browser, then confirm native
+   secure storage, restart restoration, refresh and logout/revocation behavior.
+2. cancel the initial metadata dialog and confirm no model generation occurs;
+   approve once, then verify subsequent waves use the same bound approval.
+3. generate with automatic likes/history context and with an optional mood;
+   confirm public Responses requests, real SoundCloud results and playback.
+4. verify continuation/refill behavior, cancellation and stale playback guards,
+   then account/destination changes and explicit permission revocation.
+5. check fixed messages for denied access, usage limits, unavailable services,
+   malformed output and missing candidates. capture the screen and consent
+   dialog at a 960×640 viewport. tokens and raw model payloads must not appear in
+   app logs; do not inspect or export existing credentials.
+
+known source limitation: existing `likesPage`/`historyPage` turn certain
+SoundCloud failures into empty results, so empty seeds cannot establish whether
+the library is genuinely empty.
+
+the current increment's focused player/listening verification passed **63
+tests**. vector, service, and consent verification passed **32 tests**. an
+independent read-only high-risk review reported no findings. a combined 250-test
+run exposed one widget-test failure: its harness had not drained the legitimate
+120 ms mocked identity lookup, which also exposed a late-identity regression.
+the existing widget test now drains that lookup. production code was unchanged
+for this fix apart from null-aware style cleanup. final whole-root Dart MCP
+verification passed all **252 default tests**, with analyzer reporting no
+errors or diagnostics. `git diff --check` is clean, and the latest macOS debug
+build succeeded without launching the app. these checks do not evaluate live
+recommendation quality or verify interactive OAuth, native Keychain access, or
+subscribed inference. the graph and listening facts remain within the existing
+ChatGPT connection, consent, and verified-identity gates.
+
+the historical live evidence below covers the advanced custom-provider route
+before the ChatGPT integration. its earlier suite counts and UI descriptions
+are not verification of the current subscription connection or continuous wave.
 
 ## live client evidence — 2026-10-25
 
@@ -137,6 +286,14 @@ proves the live plan → search → rank flow and original-object grounding, not
 native playback, musical-quality scoring, or signed-in listening behavior.
 The manual file is excluded from default test discovery by its filename.
 
+on 2026-10-25, a separate bounded read-only probe selected one playable public
+track from `/search/tracks` and requested `/tracks/{id}/related?limit=12` with
+the existing public client-id flow. the related endpoint returned HTTP 200 and
+12 entries. all 12 parsed through the existing `PageDto` and `TrackDto` classes;
+all had ordinary stream candidates. the probe inspected no stream URLs and
+downloaded no audio. this verifies one public response shape, not broad endpoint
+availability or recommendation quality.
+
 Review follow-up: a delayed-store widget test reproduced clear → edit → save
 overlap leaving active replacement configuration behind a misleading cleared
 form. Save and clear now share a busy guard; endpoint/model/key fields, protocol
@@ -146,3 +303,65 @@ default suite passed 177 tests. Both public-mood live service tests passed again
 (one ambient result and the same nine drum-and-bass results, 5 seconds in the
 runner). The only production change in this follow-up is the settings UI;
 AI transport, prompts, service and ID validation remain unchanged.
+
+
+## integrated presentation evidence — 2026-10-25
+
+PRs #53–#55 supply the approved ambient hero, compact controls and header
+alignment. the ChatGPT/continuous-wave integration retains that presentation:
+one play action, one remembered destination/account consent, an optional mood
+shelf and custom provider fields hidden in advanced settings. local structural
+vector ranking adds no new user choices. see [roadmap](roadmap.md) for the
+separate planned backend and neural audio embeddings.
+
+the combined UI/settings/presentation run passed 20 tests, with two optional
+settings captures skipped; targeted analysis reported no errors. a separate
+manual renderer passed four captures using real fonts at 960×640. reviewed
+before evidence from the #55 tree is under
+`/Users/flakke/.superset/worktrees/waveform/feat/notes-integrated-20261025/build/visual-review/`
+(`wave-idle-960x640.png`, `wave-tune-open-960x640.png`,
+`wave-consent-960x640.png`, `ai-settings-960x640.png`). combined captures are
+`/tmp/waveform-wave-ui/integrated-{connected,unconnected}-{screen,settings}-960x640.png`;
+the updated consent and tuning captures are in this worktree's ignored
+`build/visual-review/` directory. the unconnected screen asserts that the
+ChatGPT connection action is visible and tappable without scrolling. the
+connection button uses the existing 3px corner token.
+
+these are widget-harness renders with injected account/data fixtures, not
+native signed-in runtime screenshots. no app was launched or attached during
+integration. interactive OAuth, native secure storage, subscription inference,
+musical quality and physical AirPlay remain outside this evidence.
+
+
+final independent review of the combined authentication, consent/UI, player and
+audio-engine changes reported no remaining blocker. playback regressions cover
+old audio during pending track resolution, appended-queue preload identity,
+source-generation feedback ownership, and pause/load cancellation and timeout.
+waiting for source readiness preserves the user's paused state and cancels on
+source replacement, stop or disposal. this review does not resolve the pending
+live-account and musical-quality checks above.
+
+
+## final combined verification — 2026-10-25
+
+independent verification of the final combined source reported:
+
+- Dart MCP analyzer: no errors.
+- default Flutter suite: **356 passed**, **10 optional captures skipped**.
+- notifier Python suite: **36/36 passed**.
+- macOS debug build: successful,
+  `build/macos/Build/Products/Debug/Waveform.app`; the app was not launched.
+- staged and working-tree `git diff --check`: clean.
+
+independent review and the coordinator's player/audio diff review found no
+remaining blocker after fixing three reproduced issues: old-source listening
+attribution while the next track resolves, stale preload after queue append,
+and pause/load cancellation. focused regressions include readiness cancellation
+on replacement, stop and disposal, failed/superseded loads and rapid pause/resume.
+
+the successful build still emitted nonfatal warnings about an unused
+`audio_session` expression, deprecated `javaEnabled`, missing Metal toolchain
+Swift search paths and an always-running script phase. it was not warning-free.
+these checks do not verify release signing/notarization, interactive ChatGPT
+OAuth, native Keychain persistence, subscription inference, musical quality or
+physical AirPlay playback. those remain explicit follow-up work in the roadmap.

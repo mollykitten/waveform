@@ -22,6 +22,8 @@ class _FakePlayer implements AudioPlayer {
   final List<String> urls = [];
   final List<String> events = [];
   void Function(double)? onSetVolume;
+  Future<void> Function()? onPause;
+  Future<Duration?> Function(String)? onSetUrl;
   bool played = false;
   int stopCount = 0;
 
@@ -50,14 +52,22 @@ class _FakePlayer implements AudioPlayer {
         events.add('play');
         return playCompleter.future; // никогда не завершается
       case #setUrl:
-        urls.add(inv.positionalArguments.first as String);
+        final url = inv.positionalArguments.first as String;
+        final pending = onSetUrl?.call(url);
+        if (pending != null) {
+          return pending.then((duration) {
+            urls.add(url);
+            return duration;
+          });
+        }
+        urls.add(url);
         return Future<Duration?>.value(const Duration(seconds: 1));
       case #stop:
         stopCount++;
         return Future<void>.value();
       case #pause:
         events.add('pause');
-        return Future<void>.value();
+        return onPause?.call() ?? Future<void>.value();
       case #seek:
       case #dispose:
         return Future<void>.value();
@@ -138,6 +148,193 @@ void main() {
     await engine.load('url').timeout(const Duration(seconds: 2));
     engine.dispose();
   });
+
+  test('pause still installs a pending source without autoplay', () async {
+    final players = <_FakePlayer>[];
+    final engine = JustAudioEngine(
+      talker,
+      createPlayer: () {
+        final player = _FakePlayer();
+        players.add(player);
+        return player;
+      },
+    );
+    addTearDown(engine.dispose);
+    await engine.load('first');
+    final started = Completer<void>();
+    final cleanup = Completer<void>();
+    players[1].onPause = () {
+      if (started.isCompleted) return Future<void>.value();
+      started.complete();
+      return cleanup.future;
+    };
+    final load = engine.load('next');
+    await started.future;
+    await engine.pause();
+    final plays = players[0].events.where((event) => event == 'play').length;
+    cleanup.complete();
+    await load;
+    expect(players[0].urls.last, 'next');
+    expect(players[0].events.where((event) => event == 'play').length, plays);
+    await engine.resume();
+    expect(players[0].events.last, 'play');
+  });
+
+  test(
+    'resume waits for a pending load and a newer pause keeps it silent',
+    () async {
+      final players = <_FakePlayer>[];
+      final engine = JustAudioEngine(
+        talker,
+        createPlayer: () {
+          final player = _FakePlayer();
+          players.add(player);
+          return player;
+        },
+      );
+      addTearDown(engine.dispose);
+      await engine.load('first');
+      final started = Completer<void>();
+      final cleanup = Completer<void>();
+      players[1].onPause = () {
+        if (started.isCompleted) return Future<void>.value();
+        started.complete();
+        return cleanup.future;
+      };
+      final load = engine.load('next');
+      await started.future;
+      await engine.pause();
+      final plays = players[0].events.where((event) => event == 'play').length;
+      final resume = engine.resume();
+      await pumpEventQueue();
+      expect(players[0].events.where((event) => event == 'play').length, plays);
+      await engine.pause();
+      cleanup.complete();
+      await load;
+      await resume;
+      expect(players[0].urls.last, 'next');
+      expect(players[0].events.where((event) => event == 'play').length, plays);
+      await engine.resume();
+      expect(players[0].events.last, 'play');
+    },
+  );
+
+  for (final cancellation in ['load', 'stop', 'dispose']) {
+    test(
+      'pending resume settles when $cancellation supersedes the source',
+      () async {
+        final players = <_FakePlayer>[];
+        final engine = JustAudioEngine(
+          talker,
+          createPlayer: () {
+            final player = _FakePlayer();
+            players.add(player);
+            return player;
+          },
+        );
+        addTearDown(engine.dispose);
+        await engine.load('first');
+        final started = Completer<void>();
+        final cleanup = Completer<void>();
+        players[1].onPause = () {
+          if (started.isCompleted) return Future<void>.value();
+          started.complete();
+          return cleanup.future;
+        };
+        final stale = engine.load('stale');
+        await started.future;
+        final resume = engine.resume();
+        switch (cancellation) {
+          case 'load':
+            await engine.load('latest');
+          case 'stop':
+            await engine.stop();
+          case 'dispose':
+            engine.dispose();
+        }
+        final plays = players[0].events
+            .where((event) => event == 'play')
+            .length;
+        try {
+          await resume.timeout(const Duration(milliseconds: 250));
+        } finally {
+          cleanup.complete();
+          await stale;
+        }
+        expect(
+          players[0].urls,
+          cancellation == 'load' ? ['first', 'latest'] : ['first'],
+        );
+        expect(
+          players[0].events.where((event) => event == 'play').length,
+          plays,
+        );
+      },
+    );
+  }
+
+  test('a superseded load cannot release the newer load resume gate', () async {
+    final players = <_FakePlayer>[];
+    final engine = JustAudioEngine(
+      talker,
+      createPlayer: () {
+        final player = _FakePlayer();
+        players.add(player);
+        return player;
+      },
+    );
+    addTearDown(engine.dispose);
+    await engine.load('first');
+    final cleanups = [Completer<void>(), Completer<void>()];
+    var pauses = 0;
+    players[1].onPause = () => cleanups[pauses++].future;
+    final stale = engine.load('stale');
+    final latest = engine.load('latest');
+    final plays = players[0].events.where((event) => event == 'play').length;
+    cleanups[0].complete();
+    await stale;
+    var resumed = false;
+    final resume = engine.resume().then((_) => resumed = true);
+    await pumpEventQueue();
+    expect(resumed, isFalse);
+    expect(players[0].events.where((event) => event == 'play').length, plays);
+    cleanups[1].complete();
+    await latest;
+    await resume;
+    expect(players[0].urls, ['first', 'latest']);
+  });
+
+  test(
+    'failed load settles queued resume without replaying the old source',
+    () async {
+      final players = <_FakePlayer>[];
+      final engine = JustAudioEngine(
+        talker,
+        createPlayer: () {
+          final player = _FakePlayer();
+          players.add(player);
+          return player;
+        },
+      );
+      addTearDown(engine.dispose);
+      await engine.load('first');
+      final setUrl = Completer<Duration?>();
+      players[0].onSetUrl = (_) => setUrl.future;
+      final failed = engine.load('failed');
+      final failure = expectLater(failed, throwsStateError);
+      await pumpEventQueue();
+      final plays = players[0].events.where((event) => event == 'play').length;
+      final resume = engine.resume();
+      setUrl.completeError(StateError('setUrl failed'));
+      await failure;
+      await resume.timeout(const Duration(milliseconds: 250));
+      expect(players[0].urls, ['first']);
+      expect(players[0].events.where((event) => event == 'play').length, plays);
+      players[0].onSetUrl = null;
+      await engine.load('latest');
+      expect(players[0].urls.last, 'latest');
+    },
+  );
 
   test(
     'route preparation covers both players and binding follows setUrl',

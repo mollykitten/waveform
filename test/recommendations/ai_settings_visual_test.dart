@@ -10,9 +10,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:waveform_app/app/theme/app_theme.dart';
 import 'package:waveform_app/core/recommendations/ai_config.dart';
+import 'package:waveform_app/core/recommendations/chatgpt_auth.dart';
 import 'package:waveform_app/core/recommendations/providers.dart';
 import 'package:waveform_app/features/recommendations/ai_settings_section.dart';
 import 'package:waveform_app/shared/widgets/pressable.dart';
+
+class _NoChatGpt extends ChatGptAuth {
+  @override
+  Future<void> restore() async {}
+}
 
 class _Store extends AiConfigStore {
   Completer<void>? pending;
@@ -44,7 +50,10 @@ void main() {
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
       final container = ProviderContainer(
-        overrides: [aiConfigStoreProvider.overrideWithValue(_Store())],
+        overrides: [
+          aiConfigStoreProvider.overrideWithValue(_Store()),
+          chatGptAuthProvider.overrideWithValue(_NoChatGpt()),
+        ],
       );
       addTearDown(container.dispose);
       const capture = ValueKey('settings-capture');
@@ -77,7 +86,7 @@ void main() {
         capture,
         'ai-settings-${size.width.toInt()}x${size.height.toInt()}.png',
       );
-      await tester.tap(find.text('connection & privacy'));
+      await tester.tap(find.text('advanced settings'));
       await tester.pumpAndSettle();
       await _capture(
         tester,
@@ -112,7 +121,10 @@ void main() {
     (tester) async {
       final store = _Store();
       final container = ProviderContainer(
-        overrides: [aiConfigStoreProvider.overrideWithValue(store)],
+        overrides: [
+          aiConfigStoreProvider.overrideWithValue(store),
+          chatGptAuthProvider.overrideWithValue(_NoChatGpt()),
+        ],
       );
       addTearDown(container.dispose);
       await tester.pumpWidget(
@@ -128,7 +140,8 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.byType(TextButton), findsNothing);
+      await tester.tap(find.text('advanced settings'));
+      await tester.pumpAndSettle();
       expect(find.byType(DropdownButtonFormField<AiBackend>), findsNothing);
       for (final field in tester.widgetList<TextField>(
         find.byType(TextField),
@@ -142,7 +155,8 @@ void main() {
         'session-test-key',
       );
       store.pending = Completer<void>();
-      await tester.tap(find.text('save AI settings'));
+      await tester.ensureVisible(find.text('save custom provider'));
+      await tester.tap(find.text('save custom provider'));
       await tester.pump();
       expect(
         tester
@@ -155,8 +169,8 @@ void main() {
             .widgetList<Pressable>(find.byType(Pressable))
             .where((button) => button.enabled)
             .length,
-        1,
-        reason: 'only the privacy disclosure remains interactive',
+        0,
+        reason: 'all custom-provider controls remain locked while saving',
       );
       store.pending!.complete();
       await tester.pumpAndSettle();

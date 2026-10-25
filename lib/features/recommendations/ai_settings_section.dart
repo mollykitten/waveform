@@ -9,8 +9,8 @@ import '../../core/recommendations/models.dart';
 import '../../core/recommendations/providers.dart';
 import '../../shared/widgets/section_header.dart';
 import '../../shared/widgets/pressable.dart';
+import 'wave_controls.dart';
 
-/// User-owned endpoint configuration. The key field is never restored to UI.
 class AiSettingsSection extends ConsumerStatefulWidget {
   const AiSettingsSection({super.key});
   @override
@@ -24,7 +24,6 @@ class _AiSettingsSectionState extends ConsumerState<AiSettingsSection> {
   AiBackend _backend = AiBackend.openAi;
   bool _initialized = false;
   bool _busy = false;
-  bool _showDetails = false;
   String? _message;
 
   @override
@@ -36,62 +35,56 @@ class _AiSettingsSectionState extends ConsumerState<AiSettingsSection> {
     super.dispose();
   }
 
-  Future<void> _save() async {
+  Future<void> _run(Future<void> Function() operation) async {
     if (_busy) return;
     setState(() {
       _busy = true;
       _message = null;
     });
     try {
-      final previous = ref.read(aiSettingsProvider).config;
-      await ref
-          .read(aiSettingsProvider.notifier)
-          .save(
-            AiConfig(
-              backend: _backend,
-              endpoint: _endpoint.text.trim(),
-              model: _model.text.trim(),
-              listeningConsent: previous.listeningConsent,
-            ),
-            sessionKey: _key.text.isEmpty ? null : _key.text,
-          );
-      if (!mounted) return;
-      _key.clear();
-      if (mounted) {
-        setState(
-          () => _message = ref.read(aiSettingsProvider).error == null
-              ? 'saved — keys last for this app session only'
-              : 'could not save configuration on this device',
-        );
-      }
-    } on AiFailure catch (error) {
-      if (mounted) setState(() => _message = error.message);
+      await operation();
+    } on AiFailure catch (failure) {
+      if (mounted) setState(() => _message = failure.message);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
-  Future<void> _clear() async {
-    if (_busy) return;
+  Future<void> _save() => _run(() async {
+    final previous = ref.read(aiSettingsProvider).config;
+    await ref
+        .read(aiSettingsProvider.notifier)
+        .save(
+          AiConfig(
+            backend: _backend,
+            endpoint: _endpoint.text.trim(),
+            model: _model.text.trim(),
+            listeningConsent: previous.listeningConsent,
+          ),
+          sessionKey: _key.text.isEmpty ? null : _key.text,
+        );
+    if (!mounted) return;
+    _key.clear();
+    setState(
+      () => _message = ref.read(aiSettingsProvider).error == null
+          ? 'custom provider saved — keys last for this app session only'
+          : 'could not save configuration on this device',
+    );
+  });
+
+  Future<void> _clear() => _run(() async {
+    await ref.read(aiSettingsProvider.notifier).clear();
+    if (!mounted) return;
+    _key.clear();
+    _model.clear();
+    _endpoint.clear();
     setState(() {
-      _busy = true;
-      _message = null;
+      _backend = AiBackend.openAi;
+      _message = ref.read(aiSettingsProvider).error == null
+          ? 'custom settings cleared'
+          : 'could not clear configuration on this device';
     });
-    try {
-      await ref.read(aiSettingsProvider.notifier).clear();
-      if (!mounted) return;
-      _key.clear();
-      _model.clear();
-      _endpoint.clear();
-      setState(
-        () => _message = ref.read(aiSettingsProvider).error == null
-            ? 'AI settings cleared'
-            : 'could not clear configuration on this device',
-      );
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -101,41 +94,108 @@ class _AiSettingsSectionState extends ConsumerState<AiSettingsSection> {
       _initialized = true;
       _endpoint.text = settings.config.endpoint;
       _model.text = settings.config.model;
-      _backend = settings.config.backend;
+      _backend = settings.config.backend == AiBackend.chatGpt
+          ? AiBackend.openAi
+          : settings.config.backend;
     }
+    final busy = _busy || settings.connecting;
+    final controller = ref.read(aiSettingsProvider.notifier);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const SectionHeader(title: 'ai recommendations'),
+        const SectionHeader(title: 'my wave'),
         const SizedBox(height: AppTheme.headerGap),
-        Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: AppTheme.borderRadius,
-            border: AppTheme.border(),
+        WaveConnectionCard(
+          connected: settings.chatGptConnected,
+          busy: busy,
+          onConnect: () => _run(controller.connectChatGpt),
+          onDisconnect: () => _run(controller.disconnectChatGpt),
+          message: settings.error?.message ?? _message,
+        ),
+        if (settings.error == AiFailure.credentials &&
+            settings.chatGptConnected)
+          TextButton(
+            onPressed: busy ? null : () => _run(controller.connectChatGpt),
+            child: const Text('reconnect ChatGPT'),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+        if (settings.chatGptConnected && settings.chatGptAccountLabel != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              settings.chatGptAccountLabel!,
+              style: AppTheme.mono(size: 11, color: AppColors.textMid),
+            ),
+          ),
+        if (settings.chatGptConnected &&
+            settings.config.backend != AiBackend.chatGpt)
+          TextButton(
+            onPressed: busy ? null : () => _run(controller.useChatGpt),
+            child: const Text('use ChatGPT for my wave'),
+          ),
+        const SizedBox(height: 12),
+        Text(
+          settings.config.listeningConsent
+              ? 'personalisation is on for this destination and account.'
+              : 'listening metadata stays private until you allow it when starting your wave.',
+          style: const TextStyle(
+            color: AppColors.textMid,
+            fontSize: 12,
+            height: 1.5,
+          ),
+        ),
+        if (settings.config.listeningConsent)
+          TextButton(
+            onPressed: busy
+                ? null
+                : () => _run(() => controller.setListeningConsent(false)),
+            child: const Text('turn off personalisation'),
+          ),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton(
+            onPressed: busy ? null : () => context.go('/recommendations'),
+            child: const Text('open my wave'),
+          ),
+        ),
+        const SizedBox(height: 12),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            border: AppTheme.border(),
+            borderRadius: AppTheme.borderRadius,
+          ),
+          child: ExpansionTile(
+            key: const ValueKey('wave-advanced-settings'),
+            title: Text(
+              'advanced settings',
+              style: AppTheme.mono(size: 12, color: AppColors.textMid),
+            ),
+            subtitle: const Text(
+              'use your own provider',
+              style: TextStyle(color: AppColors.textLow, fontSize: 11),
+            ),
+            shape: const Border(),
+            collapsedShape: const Border(),
+            childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
             children: [
-              const Text(
-                'your model, your endpoint',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+              TextButton(
+                onPressed: busy
+                    ? null
+                    : () => _run(
+                        () => controller.connectChatGpt(newAccount: true),
+                      ),
+                child: const Text('use another ChatGPT account'),
               ),
-              const SizedBox(height: 6),
               const Text(
-                'nothing is sent until you generate and approve '
-                'the destination and data.',
-                style: TextStyle(fontSize: 12, color: AppColors.textMid),
+                'custom providers are optional. changing the destination '
+                'revokes listening consent. no model server is started or downloaded.',
+                style: TextStyle(color: AppColors.textMid, fontSize: 12),
               ),
-              const SizedBox(height: 16),
-              const Text('model protocol', style: _labelStyle),
-              const SizedBox(height: 6),
+              const SizedBox(height: 12),
               Wrap(
                 spacing: 6,
                 runSpacing: 6,
                 children: [
-                  for (final backend in AiBackend.values)
+                  for (final backend in [AiBackend.openAi, AiBackend.ollama])
                     Semantics(
                       selected: _backend == backend,
                       child: _ConfigAction(
@@ -143,7 +203,7 @@ class _AiSettingsSectionState extends ConsumerState<AiSettingsSection> {
                             ? 'OpenAI-compatible'
                             : 'Ollama (native)',
                         active: _backend == backend,
-                        onTap: _busy
+                        onTap: busy
                             ? null
                             : () => setState(() => _backend = backend),
                       ),
@@ -152,9 +212,9 @@ class _AiSettingsSectionState extends ConsumerState<AiSettingsSection> {
               ),
               const SizedBox(height: 14),
               _ConfigField(
-                fieldKey: const ValueKey<String>('ai-endpoint'),
+                fieldKey: const ValueKey('ai-endpoint'),
                 controller: _endpoint,
-                enabled: !_busy,
+                enabled: !busy,
                 maxLength: 500,
                 label: 'endpoint base URL',
                 hint: 'https://api.openai.com/v1',
@@ -162,17 +222,17 @@ class _AiSettingsSectionState extends ConsumerState<AiSettingsSection> {
               ),
               const SizedBox(height: 12),
               _ConfigField(
-                fieldKey: const ValueKey<String>('ai-model'),
+                fieldKey: const ValueKey('ai-model'),
                 controller: _model,
-                enabled: !_busy,
+                enabled: !busy,
                 maxLength: 120,
                 label: 'model name',
               ),
               const SizedBox(height: 12),
               _ConfigField(
-                fieldKey: const ValueKey<String>('ai-session-key'),
+                fieldKey: const ValueKey('ai-session-key'),
                 controller: _key,
-                enabled: !_busy,
+                enabled: !busy,
                 maxLength: 4096,
                 label: 'API key · session only',
                 obscure: true,
@@ -184,75 +244,27 @@ class _AiSettingsSectionState extends ConsumerState<AiSettingsSection> {
                     : 'optional for local models · never saved to disk',
                 style: const TextStyle(fontSize: 11, color: AppColors.textMid),
               ),
-              const SizedBox(height: 14),
-              Pressable(
-                onTap: () => setState(() => _showDetails = !_showDetails),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        _showDetails ? Icons.expand_less : Icons.expand_more,
-                        size: 14,
-                        color: AppColors.textMid,
-                      ),
-                      const SizedBox(width: 4),
-                      const Text('connection & privacy', style: _labelStyle),
-                    ],
-                  ),
-                ),
+              const SizedBox(height: 12),
+              const Text(
+                'HTTPS is required for remote providers. HTTP is only '
+                'allowed on loopback. your provider may charge for requests.',
+                style: TextStyle(color: AppColors.textMid, fontSize: 12),
               ),
-              if (_showDetails)
-                const Padding(
-                  padding: EdgeInsets.only(top: 6),
-                  child: Text(
-                    'remote endpoints require HTTPS; HTTP is local only '
-                    '(localhost, 127.0.0.1 or ::1). changing the destination '
-                    'revokes listening consent and clears the previous key. '
-                    'Waveform does not install or download models.',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: AppColors.textMid,
-                      height: 1.5,
-                    ),
-                  ),
-                ),
-              if (settings.config.listeningConsent)
-                _ConfigAction(
-                  onTap: _busy
-                      ? null
-                      : () => ref
-                            .read(aiSettingsProvider.notifier)
-                            .setListeningConsent(false),
-                  label: 'revoke listening metadata consent',
-                ),
               if (_message != null) ...[
                 const SizedBox(height: 8),
-                Text(_message!, style: _labelStyle),
+                Text(_message!, style: AppTheme.mono(size: 11)),
               ],
-              if (settings.error != null)
-                const Text(
-                  'configuration could not be read or saved; '
-                  'review the fields and save again',
-                ),
-              const SizedBox(height: 16),
               Wrap(
-                spacing: 8,
-                runSpacing: 8,
+                spacing: 12,
                 children: [
                   _ConfigAction(
-                    onTap: _busy ? null : _save,
-                    label: 'save AI settings',
+                    onTap: busy ? null : _save,
+                    label: 'save custom provider',
                     active: true,
                   ),
                   _ConfigAction(
-                    onTap: _busy ? null : () => context.go('/recommendations'),
-                    label: 'open recommendations',
-                  ),
-                  _ConfigAction(
-                    onTap: _busy ? null : _clear,
-                    label: 'clear AI settings and key',
+                    onTap: busy ? null : _clear,
+                    label: 'clear custom settings',
                   ),
                 ],
               ),

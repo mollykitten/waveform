@@ -42,6 +42,9 @@ class MockSoundcloudApi implements SoundcloudApi {
   Future<List<FeedPost>> feed() => _delayed(Mock.feed);
 
   @override
+  Future<List<Track>> relatedTracks(String id) => _delayed(Mock.related(id));
+
+  @override
   Future<TrackDetail> trackDetail(String id) {
     final t = Mock.trackById(id);
     return _delayed((

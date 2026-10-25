@@ -485,7 +485,7 @@ class HttpSoundcloudApi implements SoundcloudApi {
   Future<TrackDetail> trackDetail(String id) async {
     // Только сам трек обязателен — комменты/related не должны ронять страницу.
     final commentsF = _trackComments(id);
-    final relatedF = _trackRelated(id);
+    final relatedF = relatedTracks(id);
 
     final dto = TrackDto.fromJson(asMap(await _get('/tracks/$id')));
     final wave = await _waveform(dto.waveformUrl);
@@ -510,7 +510,8 @@ class HttpSoundcloudApi implements SoundcloudApi {
     }
   }
 
-  Future<List<Track>> _trackRelated(String id) async {
+  @override
+  Future<List<Track>> relatedTracks(String id) async {
     try {
       final data = await _get('/tracks/$id/related', {'limit': 12});
       return _page(data, TrackDto.fromJson).mapList((d) => d.toDomain());
