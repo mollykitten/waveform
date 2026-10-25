@@ -42,7 +42,7 @@ dependencies:
   dio: ^5.10.0
   path_provider: ^2.1.6
   just_audio: ^0.10.6
-  audio_service: ^0.18.18
+  audio_service: ^0.18.19
   # vendored copy (third_party/) with a macos patch for a `hidden` window, used
   # by the background sync webview (datadome write executor). upstream 0.3.0
   # can't hide the window on macos. see docs/superpowers/specs/2026-06-10-account-reliability-*.
