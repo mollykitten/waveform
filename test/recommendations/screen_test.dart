@@ -99,12 +99,12 @@ void main() {
     await tester.pump();
   }
 
-  testWidgets('wave desktop visual evidence', (tester) async {
+  Future<void> captureWave(WidgetTester tester, Size size, bool tune) async {
     await container.read(aiSettingsProvider.notifier).save(testConfig);
     const capture = ValueKey('wave-capture');
     await show(
       tester,
-      size: const Size(960, 640),
+      size: size,
       child: const RepaintBoundary(
         key: capture,
         child: ColoredBox(color: AppColors.bg, child: RecommendationsScreen()),
@@ -117,23 +117,47 @@ void main() {
     expect(heroSize.height, 400);
     expect(heroSize.width, lessThanOrEqualTo(880));
     expect(find.byType(TextField), findsNothing);
+    if (tune) {
+      await tester.tap(find.text('tune your wave'));
+      await tester.pumpAndSettle();
+      // Capture the real scroll position needed to expose the complete shelf.
+      await tester.ensureVisible(find.text('model connection'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('listening history · off').hitTestable(),
+        findsOneWidget,
+      );
+      expect(find.text('current track · off').hitTestable(), findsOneWidget);
+    }
     expect(tester.takeException(), isNull);
     final boundary = tester.renderObject<RenderRepaintBoundary>(
       find.byKey(capture),
     );
     await tester.runAsync(() async {
-      final image = await boundary.toImage(pixelRatio: 2);
+      final image = await boundary.toImage();
+      expect(image.width, size.width.toInt());
+      expect(image.height, size.height.toInt());
       final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
       final folder = await Directory(
         'build/visual-review',
       ).create(recursive: true);
       await File(
-        '${folder.path}/wave-after.png',
+        '${folder.path}/wave-${tune ? 'tune-open' : 'idle'}-'
+        '${size.width.toInt()}x${size.height.toInt()}.png',
       ).writeAsBytes(bytes!.buffer.asUint8List());
       image.dispose();
     });
     await tester.pumpWidget(const SizedBox.shrink());
-  });
+  }
+
+  for (final size in [const Size(1280, 720), const Size(960, 640)]) {
+    for (final tune in [false, true]) {
+      testWidgets('wave capture ${tune ? 'tune open' : 'idle'} '
+          '${size.width.toInt()}x${size.height.toInt()}', (tester) async {
+        await captureWave(tester, size, tune);
+      });
+    }
+  }
 
   testWidgets('unconfigured state is explicit and never calls model', (
     tester,
