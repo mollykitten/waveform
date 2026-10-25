@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'dart:ui' show Tristate;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -385,8 +387,35 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('system default'), findsOneWidget);
     expect(find.text('AirPlay…'), findsOneWidget);
+    final usbItem = find.widgetWithText(PopupMenuItem<String>, 'USB speakers');
+    final selectedUsb = find.descendant(
+      of: usbItem,
+      matching: find.byWidgetPredicate(
+        (widget) => widget is Semantics && widget.properties.selected == true,
+      ),
+    );
+    expect(selectedUsb, findsOneWidget);
+    expect(
+      tester.getSemantics(selectedUsb).flagsCollection.isSelected,
+      Tristate.isTrue,
+    );
+    final defaultItem = find.widgetWithText(
+      PopupMenuItem<String>,
+      'system default',
+    );
+    final unselectedDefault = find.descendant(
+      of: defaultItem,
+      matching: find.byWidgetPredicate(
+        (widget) => widget is Semantics && widget.properties.selected == false,
+      ),
+    );
+    expect(unselectedDefault, findsOneWidget);
+    expect(
+      tester.getSemantics(unselectedDefault).flagsCollection.isSelected,
+      Tristate.isFalse,
+    );
     await tester.tap(
-      find.widgetWithText(CheckedPopupMenuItem<String>, 'system default'),
+      find.widgetWithText(PopupMenuItem<String>, 'system default'),
     );
     await tester.pumpAndSettle();
     expect(platform.selected, ['usb', null]);

@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/audio/audio_output.dart';
+import '../../../app/theme/app_theme.dart';
+import '../../../app/theme/colors.dart';
 
 /// Keyboard and screen-reader accessible output routing menu.
 class AudioOutputPicker extends ConsumerWidget {
@@ -25,6 +27,16 @@ class AudioOutputPicker extends ConsumerWidget {
       },
       child: PopupMenuButton<String>(
         tooltip: label,
+        color: AppColors.surface,
+        surfaceTintColor: Colors.transparent,
+        shadowColor: Colors.transparent,
+        elevation: 0,
+        menuPadding: const EdgeInsets.symmetric(vertical: 6),
+        constraints: const BoxConstraints(minWidth: 260, maxWidth: 300),
+        shape: const RoundedRectangleBorder(
+          borderRadius: AppTheme.borderRadius,
+          side: AppTheme.borderSideStatic,
+        ),
         padding: EdgeInsets.zero,
         style: IconButton.styleFrom(
           fixedSize: const Size(32, 32),
@@ -42,38 +54,54 @@ class AudioOutputPicker extends ConsumerWidget {
         },
         itemBuilder: (context) => [
           if (output.supported) ...[
-            PopupMenuItem<String>(
+            const PopupMenuItem<String>(
               enabled: false,
-              child: Text('audio output · ${output.selectedName}'),
+              height: 28,
+              padding: EdgeInsets.symmetric(horizontal: 12),
+              child: Text(
+                'audio output',
+                style: TextStyle(fontSize: 10, color: AppColors.textMid),
+              ),
             ),
-            CheckedPopupMenuItem<String>(
+            _outputItem(
               value: 'default',
-              checked: output.requestedUid == null && !output.airPlayActive,
-              child: const Text('system default'),
+              name: 'system default',
+              icon: Icons.speaker_group_outlined,
+              selected: output.requestedUid == null && !output.airPlayActive,
             ),
             for (final device in output.devices)
-              CheckedPopupMenuItem<String>(
+              _outputItem(
                 value: 'device:${device.uid}',
-                checked:
+                name: device.name,
+                icon: switch (device.transport.toLowerCase()) {
+                  'bluetooth' => Icons.bluetooth_audio,
+                  'usb' => Icons.usb,
+                  _ => Icons.speaker_outlined,
+                },
+                selected:
                     output.requestedUid == device.uid && !output.airPlayActive,
-                child: SizedBox(
-                  width: 220,
-                  child: Text(device.name, overflow: TextOverflow.ellipsis),
-                ),
               ),
-            const PopupMenuDivider(),
-            const PopupMenuItem<String>(
+            const PopupMenuDivider(height: 12),
+            _outputItem(
               value: 'airplay',
-              child: Text('AirPlay…'),
+              name: 'AirPlay…',
+              icon: Icons.airplay,
+              selected: output.airPlayActive,
             ),
             if (output.preservePlayer)
               const PopupMenuItem<String>(
                 enabled: false,
+                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 child: SizedBox(
                   width: 240,
                   child: Text(
                     'Gapless and crossfade are paused for AirPlay. '
                     'Select a local output to restore them.',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: AppColors.textMid,
+                      height: 1.5,
+                    ),
                   ),
                 ),
               ),
@@ -81,7 +109,18 @@ class AudioOutputPicker extends ConsumerWidget {
           if (output.message case final message?)
             PopupMenuItem<String>(
               enabled: false,
-              child: SizedBox(width: 240, child: Text(_message(message))),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              child: SizedBox(
+                width: 240,
+                child: Text(
+                  _message(message),
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: AppColors.textMid,
+                    height: 1.5,
+                  ),
+                ),
+              ),
             ),
         ],
         child: Semantics(
@@ -99,6 +138,9 @@ class AudioOutputPicker extends ConsumerWidget {
                         ? Icons.airplay
                         : Icons.speaker_group_outlined,
                     size: 18,
+                    color: output.airPlayActive
+                        ? AppColors.acid
+                        : AppColors.textMid,
                   ),
                   if (showName) ...[
                     const SizedBox(width: 6),
@@ -107,7 +149,10 @@ class AudioOutputPicker extends ConsumerWidget {
                         output.supported ? output.selectedName : 'unavailable',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 11),
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: AppColors.textMid,
+                        ),
                       ),
                     ),
                   ],
@@ -120,6 +165,48 @@ class AudioOutputPicker extends ConsumerWidget {
     );
   }
 }
+
+PopupMenuItem<String> _outputItem({
+  required String value,
+  required String name,
+  required IconData icon,
+  required bool selected,
+}) => PopupMenuItem<String>(
+  value: value,
+  height: 36,
+  padding: const EdgeInsets.symmetric(horizontal: 12),
+  child: Semantics(
+    selected: selected,
+    child: Row(
+      children: [
+        Icon(
+          icon,
+          size: 14,
+          color: selected ? AppColors.acid : AppColors.textMid,
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 12,
+              color: selected ? AppColors.acid : AppColors.textHi,
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        SizedBox(
+          width: 14,
+          child: selected
+              ? const Icon(Icons.check, size: 14, color: AppColors.acid)
+              : null,
+        ),
+      ],
+    ),
+  ),
+);
 
 String _message(String message) => switch (message) {
   'device_unavailable' =>

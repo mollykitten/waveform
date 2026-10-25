@@ -68,12 +68,16 @@ class TopBar extends ConsumerWidget {
           _NavLink('home', '/', location),
           _NavLink('feed', '/feed', location),
           _NavLink('library', '/library', location),
+          _NavLink('discover', '/recommendations', location),
           // Гибкая пустая зона — тоже draggable (но НЕ кнопки справа).
           Expanded(child: DragToMoveArea(child: const SizedBox.expand())),
           const SizedBox(width: 16),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 240),
-            child: const _SearchField(),
+          Flexible(
+            flex: 4,
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: SizedBox(width: 240, child: const _SearchField()),
+            ),
           ),
           const SizedBox(width: 16),
           if (kDebugMode) ...[

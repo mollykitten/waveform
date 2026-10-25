@@ -164,6 +164,7 @@ class BottomPlayer extends ConsumerWidget {
             _IconBtn(
               icon: Icons.expand_more,
               enabled: true,
+              label: 'collapse player',
               onTap: () =>
                   ref.read(playerCollapsedProvider.notifier).collapse(),
             ),
@@ -231,12 +232,14 @@ class _IconBtn extends StatelessWidget {
     required this.enabled,
     required this.onTap,
     this.active = false,
+    this.label,
   });
 
   final IconData icon;
   final bool enabled;
   final bool active;
   final VoidCallback onTap;
+  final String? label;
 
   @override
   Widget build(BuildContext context) {
@@ -245,15 +248,27 @@ class _IconBtn extends StatelessWidget {
         : active
         ? AppColors.acid
         : AppColors.textMid;
+    final iconButton = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 7),
+      child: Icon(icon, size: 18, color: color, semanticLabel: label),
+    );
+    if (label case final label?) {
+      return Tooltip(
+        message: label,
+        child: Semantics(
+          button: true,
+          enabled: enabled,
+          label: label,
+          onTap: enabled ? onTap : null,
+          child: ExcludeSemantics(
+            child: Pressable(onTap: enabled ? onTap : null, child: iconButton),
+          ),
+        ),
+      );
+    }
     return MouseRegion(
       cursor: enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
-      child: GestureDetector(
-        onTap: enabled ? onTap : null,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 7),
-          child: Icon(icon, size: 18, color: color),
-        ),
-      ),
+      child: GestureDetector(onTap: enabled ? onTap : null, child: iconButton),
     );
   }
 }
@@ -429,7 +444,12 @@ class _CollapsedBar extends ConsumerWidget {
           _IconBtn(icon: Icons.skip_next, enabled: enabled, onTap: onNext),
           const _CopyLinkButton(),
           const AudioOutputPicker(compact: true),
-          _IconBtn(icon: Icons.expand_less, enabled: true, onTap: onExpand),
+          _IconBtn(
+            icon: Icons.expand_less,
+            enabled: true,
+            label: 'expand player',
+            onTap: onExpand,
+          ),
         ],
       ),
     );
