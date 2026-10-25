@@ -70,13 +70,36 @@ final listeningTrackerProvider = Provider<ListeningTracker>((ref) {
 final listeningFeedbackProvider = Provider<void>((ref) {
   final tracker = ref.watch(listeningTrackerProvider);
   final store = ref.read(listeningStoreProvider);
+  Timer? identityRetry;
+  var retrySeconds = 1;
   ref.listen(authControllerProvider, (previous, next) {
-    if (previous?.userToken != next.userToken) tracker.setIdentity(null);
+    if (previous?.userToken != next.userToken) {
+      identityRetry?.cancel();
+      retrySeconds = 1;
+      tracker.setIdentity(null);
+    }
   });
   ref.listen(listeningPartitionProvider, (_, next) {
     tracker.setIdentity(
       next.isLoading || next.hasError ? null : next.asData?.value,
     );
+    identityRetry?.cancel();
+    if (next.isLoading) return;
+    if (!next.hasError) {
+      retrySeconds = 1;
+      return;
+    }
+    final auth = ref.read(authControllerProvider);
+    if (!auth.isAuthenticated) return;
+    // Retry the upstream lookup: rebuilding the partition alone reuses its error.
+    identityRetry = Timer(Duration(seconds: retrySeconds), () {
+      if (!ref.mounted ||
+          ref.read(authControllerProvider).userToken != auth.userToken) {
+        return;
+      }
+      ref.invalidate(aiListeningIdentityProvider);
+    });
+    retrySeconds = (retrySeconds * 2).clamp(1, 30);
   }, fireImmediately: true);
   final lifecycle = AppLifecycleListener(
     onExitRequested: () async {
@@ -90,6 +113,7 @@ final listeningFeedbackProvider = Provider<void>((ref) {
     },
   );
   ref.onDispose(() {
+    identityRetry?.cancel();
     lifecycle.dispose();
     tracker.finish(ListeningTransitionCause.disposal);
     unawaited(store.flush());
