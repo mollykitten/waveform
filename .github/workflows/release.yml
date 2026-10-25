@@ -17,7 +17,7 @@ jobs:
     name: Build macOS (signed + notarized)
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -27,14 +27,14 @@ jobs:
           cache: true
 
       - name: Cache pub
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.pub-cache
           key: pub-macos-${{ hashFiles('pubspec.lock') }}
           restore-keys: pub-macos-
 
       - name: Cache CocoaPods
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             macos/Pods
@@ -148,7 +148,7 @@ jobs:
     name: Build Windows (unsigned)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -158,7 +158,7 @@ jobs:
           cache: true
 
       - name: Cache pub
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.pub-cache
           key: pub-windows-${{ hashFiles('pubspec.lock') }}
@@ -191,7 +191,7 @@ jobs:
     name: Build Linux (unsigned)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -201,14 +201,14 @@ jobs:
           cache: true
 
       - name: Cache pub
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.pub-cache
           key: pub-linux-${{ hashFiles('pubspec.lock') }}
           restore-keys: pub-linux-
 
       - name: Cache apt packages
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: /var/cache/apt/archives
           key: apt-linux-flutter-deps
@@ -251,7 +251,7 @@ jobs:
     if: always() && needs.macos.result == 'success'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Download artifacts
         uses: actions/download-artifact@v8
@@ -266,7 +266,7 @@ jobs:
           ls -lh release/
 
       - name: Create / update GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.ref_name }}
           name: Waveform ${{ github.ref_name }}

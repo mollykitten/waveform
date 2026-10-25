@@ -15,11 +15,8 @@ import 'core/log/talker.dart';
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Windows/Linux: плагин webview рисует тулбар окна (назад/вперёд/reload)
-  // отдельным Flutter-движком, который снова вызывает этот main с
-  // args = ['web_view_title_bar', id]. Без этой ветки в тулбаре поднималось
-  // всё приложение целиком (window_manager, audio_service, API, свой
-  // sync-webview), и окно входа дико лагало.
+  // WebView titlebars run this entrypoint in a secondary Flutter engine
+  // without the primary window/audio plugins. Do not bootstrap the app there.
   if (runWebViewTitleBarWidget(args)) return;
 
   // Window manager — для динамического title и базового sizing на desktop.

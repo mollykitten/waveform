@@ -4,6 +4,12 @@ All notable changes to Waveform are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **macOS 12 Monterey is now the minimum supported version.** Runner, tests,
+  and CocoaPods targets use a consistent minimum compatible with Xcode 27.
+
 ## [0.3.0] — 2026-06-10
 
 Account actions finally stick, full keyboard control, and smoother transitions.
