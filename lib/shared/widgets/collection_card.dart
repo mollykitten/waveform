@@ -8,7 +8,7 @@ import 'cover_art.dart';
 import 'pressable.dart';
 
 /// Карточка подборки для каруселей и сеток: обложка (квадрат/круг) с оверлеями
-/// (MIX-плашка, вордмарк, ◆ minted, hover-play) + название и подпись.
+/// (MIX-плашка, вордмарк, hover-play) + название и подпись.
 class CollectionCard extends StatefulWidget {
   const CollectionCard({super.key, required this.item, this.size = 150});
 
@@ -31,7 +31,9 @@ class _CollectionCardState extends State<CollectionCard> {
       case CollectionTarget.playlist:
         context.push('/playlist/${item.id}');
       case CollectionTarget.artist:
-        context.push('/artist/${Uri.encodeComponent(item.handle ?? item.title)}');
+        context.push(
+          '/artist/${Uri.encodeComponent(item.handle ?? item.title)}',
+        );
     }
   }
 
@@ -121,10 +123,6 @@ class _Cover extends StatelessWidget {
           if (item.mixLabel != null)
             Positioned(left: 8, bottom: 8, child: _Plate(text: item.mixLabel!)),
 
-          // web3-маркер.
-          if (item.minted)
-            const Positioned(top: 8, right: 8, child: _MintedDot()),
-
           // Hover-play.
           Positioned(
             right: item.isCircular ? size / 2 - 18 : 8,
@@ -207,29 +205,6 @@ class _Plate extends StatelessWidget {
           weight: FontWeight.w600,
           letterSpacing: 0.5,
         ),
-      ),
-    );
-  }
-}
-
-class _MintedDot extends StatelessWidget {
-  const _MintedDot();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 18,
-      height: 18,
-      decoration: BoxDecoration(
-        color: AppColors.bg.withValues(alpha: 0.8),
-        borderRadius: AppTheme.borderRadius,
-        border: Border.all(
-          color: AppColors.lime.withValues(alpha: 0.5),
-          width: AppTheme.borderWidth,
-        ),
-      ),
-      child: const Center(
-        child: Text('◆', style: TextStyle(color: AppColors.lime, fontSize: 9)),
       ),
     );
   }

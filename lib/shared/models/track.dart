@@ -19,7 +19,6 @@ class Track {
     this.drmStreamCandidates = const [],
     this.permalinkUrl,
     this.blocked = false,
-    this.minted = false,
     this.genre = 'electronic',
     this.postedAt = '3 days ago',
     this.description = '',
@@ -78,12 +77,9 @@ class Track {
   /// The API blocks playback or only offers preview sources.
   final bool blocked;
 
-  /// web3-маркер: трек заминчен как NFT.
-  final bool minted;
-
   Duration get duration => Duration(milliseconds: durationMs);
 
-  Track copyWith({List<double>? waveform, bool? minted}) => Track(
+  Track copyWith({List<double>? waveform}) => Track(
     id: id,
     title: title,
     artist: artist,
@@ -99,7 +95,6 @@ class Track {
     drmStreamCandidates: drmStreamCandidates,
     permalinkUrl: permalinkUrl,
     blocked: blocked,
-    minted: minted ?? this.minted,
     genre: genre,
     postedAt: postedAt,
     description: description,

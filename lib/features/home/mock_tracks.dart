@@ -10,12 +10,11 @@ final List<Track> mockTracks = [
     likes: 12400,
     reposts: 892,
     plays: 341000,
-    minted: true,
     genre: 'ambient techno',
     postedAt: '2 days ago',
     description:
-        'late-night session, all hardware, one take. minted as a 1/1 — '
-        'owner gets the stems. tag me in your edits.',
+        'late-night session, all hardware, one take. '
+        'tag me in your edits.',
     waveform: Track.generateWaveform(11),
   ),
   Track(
@@ -36,7 +35,6 @@ final List<Track> mockTracks = [
     likes: 45100,
     reposts: 3120,
     plays: 1280000,
-    minted: true,
     genre: 'downtempo',
     postedAt: '1 week ago',
     description:
@@ -61,7 +59,6 @@ final List<Track> mockTracks = [
     likes: 18900,
     reposts: 1540,
     plays: 502000,
-    minted: true,
     waveform: Track.generateWaveform(73),
   ),
   Track(
