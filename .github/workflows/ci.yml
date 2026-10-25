@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: test worker notifier
-        run: python3 -m unittest test.worker_notifier_test
+        run: python3 -m unittest discover -s test -p worker_notifier_test.py
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
