@@ -7,21 +7,39 @@ import '../url_share.dart';
 /// Выделяемый текст: мышью, двойным кликом, ⌘C/Ctrl+C и через right-click
 /// «Copy». Свой Shortcuts на копирование — внешний Focus в AppShell глотает
 /// non-character клавиши раньше, чем они доходят до DefaultTextEditingShortcuts.
-class SelectableBlock extends StatelessWidget {
+class SelectableBlock extends StatefulWidget {
   const SelectableBlock({super.key, required this.child});
 
   final Widget child;
 
   @override
+  State<SelectableBlock> createState() => _SelectableBlockState();
+}
+
+class _SelectableBlockState extends State<SelectableBlock> {
+  String? _selectedText;
+
+  Future<void> _copySelection() async {
+    final text = _selectedText;
+    // A collapsed SelectionArea can report SelectedContent with empty text.
+    // Copy must leave the clipboard intact, without trimming valid whitespace.
+    if (text == null || text.isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: text));
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return Shortcuts(
-      shortcuts: const <ShortcutActivator, Intent>{
-        SingleActivator(LogicalKeyboardKey.keyC, meta: true):
-            CopySelectionTextIntent.copy,
-        SingleActivator(LogicalKeyboardKey.keyC, control: true):
-            CopySelectionTextIntent.copy,
+    return CallbackShortcuts(
+      bindings: <ShortcutActivator, VoidCallback>{
+        const SingleActivator(LogicalKeyboardKey.keyC, meta: true):
+            _copySelection,
+        const SingleActivator(LogicalKeyboardKey.keyC, control: true):
+            _copySelection,
       },
-      child: SelectionArea(child: child),
+      child: SelectionArea(
+        onSelectionChanged: (content) => _selectedText = content?.plainText,
+        child: widget.child,
+      ),
     );
   }
 }
