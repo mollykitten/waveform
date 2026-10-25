@@ -8,9 +8,10 @@ import '../../core/api/soundcloud_auth.dart';
 import '../../core/recommendations/ai_client.dart';
 import '../../core/recommendations/models.dart';
 import '../../core/recommendations/providers.dart';
-import '../../shared/widgets/empty_state.dart';
+import '../../shared/widgets/pressable.dart';
 import '../../shared/widgets/track_row.dart';
 import '../player/player_controller.dart';
+import 'widgets/wave_hero.dart';
 
 class RecommendationsScreen extends ConsumerStatefulWidget {
   const RecommendationsScreen({super.key});
@@ -20,20 +21,35 @@ class RecommendationsScreen extends ConsumerStatefulWidget {
 }
 
 class _RecommendationsScreenState extends ConsumerState<RecommendationsScreen> {
-  final _mood = TextEditingController();
+  final _mood = TextEditingController(text: 'discover something new');
   bool _listening = false;
   bool _current = false;
   bool _confirming = false;
+  bool _tuning = false;
   String? _inputError;
+  final _scroll = ScrollController();
+  bool _heroVisible = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _scroll.addListener(_visibilityChanged);
+  }
+
+  void _visibilityChanged() {
+    final visible = _scroll.offset < AppTheme.topBarHeight + 424;
+    if (visible != _heroVisible) setState(() => _heroVisible = visible);
+  }
 
   @override
   void dispose() {
+    _scroll.dispose();
     _mood.dispose();
     super.dispose();
   }
 
   Future<void> _generate() async {
-    if (_confirming) return;
+    if (_confirming || ref.read(recommendationsProvider).busy) return;
     final settings = ref.read(aiSettingsProvider);
     if (!settings.ready || !settings.config.isValid) return;
     final track = _current ? ref.read(playerControllerProvider).track : null;
@@ -46,11 +62,12 @@ class _RecommendationsScreenState extends ConsumerState<RecommendationsScreen> {
         throw AiFailure.configuration;
       }
     } on AiFailure {
-      setState(
-        () => _inputError =
+      setState(() {
+        _tuning = true;
+        _inputError =
             'describe a mood (up to 500 characters, '
-            'without links), or select a track or listening metadata',
-      );
+            'without links), or select a track or listening metadata';
+      });
       return;
     }
     setState(() {
@@ -144,7 +161,17 @@ class _RecommendationsScreenState extends ConsumerState<RecommendationsScreen> {
     final current = ref.watch(playerControllerProvider.select((p) => p.track));
     final configured = settings.ready && settings.config.isValid;
     final queue = result.items.map((item) => item.track).toList();
+    final description = !settings.ready
+        ? 'getting your wave ready…'
+        : !configured
+        ? 'a little connection, a whole new direction.'
+        : result.busy
+        ? 'selecting music… your current music keeps playing.'
+        : queue.isNotEmpty
+        ? 'your selection is ready. press play and drift.'
+        : 'follow your mood. find your next favourite.';
     return ListView(
+      controller: _scroll,
       padding: const EdgeInsets.fromLTRB(
         AppTheme.pagePad,
         AppTheme.topBarHeight + 24,
@@ -152,131 +179,274 @@ class _RecommendationsScreenState extends ConsumerState<RecommendationsScreen> {
         AppTheme.playerHeight + 32,
       ),
       children: [
-        const Text(
-          'ai recommendations',
-          style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700),
-        ),
-        const SizedBox(height: 8),
-        const Text(
-          'your model suggests music; every result is a real '
-          'SoundCloud track. reasons are model suggestions, not audio analysis.',
-        ),
-        TextButton(
-          onPressed: () => context.push('/settings'),
-          child: const Text('configure AI endpoint and model'),
-        ),
-        if (!settings.ready) const LinearProgressIndicator(),
-        if (settings.ready && !configured)
-          const EmptyState(
-            compact: true,
-            icon: Icons.tune,
-            title: 'configure your model first',
-            subtitle:
-                'use an OpenAI-compatible endpoint or your own Ollama. '
-                'no model server starts automatically.',
-          ),
-        TextField(
-          controller: _mood,
-          maxLength: 500,
-          minLines: 2,
-          maxLines: 4,
-          decoration: const InputDecoration(
-            labelText: 'what would you like to hear?',
-            hintText:
-                'a mood, an artist, or something to explore — without links',
-          ),
-        ),
-        CheckboxListTile(
-          contentPadding: EdgeInsets.zero,
-          title: const Text('include recent likes and listening history'),
-          subtitle: Text(
-            authed
-                ? 'optional; up to 20 seed tracks, approved below'
-                : 'sign in to SoundCloud to use listening metadata',
-          ),
-          value: authed && _listening,
-          onChanged: !authed || result.busy
-              ? null
-              : (value) => setState(() => _listening = value ?? false),
-        ),
-        CheckboxListTile(
-          contentPadding: EdgeInsets.zero,
-          title: const Text('include the currently playing track'),
-          subtitle: Text(
-            current == null ? 'no current track' : current.title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          value: current != null && _current,
-          onChanged: current == null || result.busy
-              ? null
-              : (value) => setState(() => _current = value ?? false),
-        ),
-        if (_inputError != null) Text(_inputError!),
-        Wrap(
-          spacing: 12,
-          children: [
-            FilledButton(
-              onPressed: configured && !result.busy && !_confirming
-                  ? _generate
-                  : null,
-              child: Text(
-                result.items.isEmpty
-                    ? 'generate recommendations'
-                    : 'generate again',
-              ),
+        Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 880),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                WaveHero(
+                  active: _heroVisible,
+                  description: description,
+                  actionLabel: !configured
+                      ? 'configure your wave'
+                      : queue.isEmpty
+                      ? 'start your wave'
+                      : 'play your wave',
+                  busy: result.busy,
+                  enabled: settings.ready && !_confirming,
+                  onPlay: () {
+                    if (!configured) {
+                      context.push('/settings');
+                    } else if (queue.isNotEmpty) {
+                      ref
+                          .read(playerControllerProvider.notifier)
+                          .play(queue.first, queue: queue);
+                    } else {
+                      _generate();
+                    }
+                  },
+                  onTune: () => setState(() => _tuning = !_tuning),
+                ),
+                if (!configured && settings.ready)
+                  Center(
+                    child: WaveAction(
+                      label: 'configure your wave',
+                      icon: Icons.arrow_forward,
+                      onTap: () => context.push('/settings'),
+                    ),
+                  ),
+                if (_tuning) ...[
+                  const SizedBox(height: 8),
+                  _WaveTuning(
+                    mood: _mood,
+                    enabled: !result.busy && !_confirming,
+                    listening: authed && _listening,
+                    current: current != null && _current,
+                    listeningEnabled: authed,
+                    currentEnabled: current != null,
+                    currentTitle: current?.title,
+                    onListening: () => setState(() => _listening = !_listening),
+                    onCurrent: () => setState(() => _current = !_current),
+                  ),
+                ],
+                if (_inputError != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: Text(
+                      _inputError!,
+                      style: const TextStyle(
+                        color: AppColors.textMid,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                const SizedBox(height: 16),
+                Center(
+                  child: Wrap(
+                    spacing: 12,
+                    runSpacing: 8,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      if (result.busy)
+                        WaveAction(
+                          label: 'cancel generation',
+                          icon: Icons.close,
+                          onTap: () => ref
+                              .read(recommendationsProvider.notifier)
+                              .cancel(),
+                        )
+                      else if (configured && queue.isNotEmpty)
+                        WaveAction(
+                          label: 'refresh selection',
+                          icon: Icons.refresh,
+                          enabled: !_confirming,
+                          onTap: _generate,
+                        ),
+                      Pressable(
+                        onTap: () => context.push('/settings'),
+                        child: const Padding(
+                          padding: EdgeInsets.all(10),
+                          child: Text(
+                            'model connection',
+                            style: TextStyle(
+                              color: AppColors.textMid,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (result.error != null) ...[
+                  const SizedBox(height: 16),
+                  Text(
+                    result.error!.message,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: AppColors.textMid),
+                  ),
+                  const SizedBox(height: 10),
+                  Center(
+                    child: WaveAction(
+                      label: 'retry with approval',
+                      icon: Icons.refresh,
+                      enabled: configured && !_confirming,
+                      onTap: _generate,
+                    ),
+                  ),
+                ],
+                if (queue.isNotEmpty) ...[
+                  const SizedBox(height: 32),
+                  Row(
+                    children: [
+                      const Text(
+                        'selected for your wave',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const Spacer(),
+                      Text(
+                        '${queue.length} tracks',
+                        style: AppTheme.mono(
+                          size: 11,
+                          color: AppColors.textMid,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'real SoundCloud tracks · reasons suggested by your model',
+                    style: TextStyle(color: AppColors.textMid, fontSize: 11),
+                  ),
+                  const SizedBox(height: 16),
+                  for (final item in result.items) ...[
+                    TrackRow(track: item.track, queue: queue),
+                    Padding(
+                      padding: const EdgeInsets.only(left: 12, bottom: 18),
+                      child: Text(
+                        'model suggestion: ${item.reason}',
+                        style: const TextStyle(
+                          color: AppColors.textMid,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ],
             ),
-            if (result.busy)
-              TextButton(
-                onPressed: () =>
-                    ref.read(recommendationsProvider.notifier).cancel(),
-                child: const Text('cancel generation'),
-              ),
-          ],
+          ),
         ),
-        if (result.busy) ...[
-          const SizedBox(height: 16),
-          const LinearProgressIndicator(),
-          const Text(
-            'planning, searching SoundCloud and ranking… '
-            'previous results stay available',
-          ),
-        ],
-        if (result.error != null) ...[
-          const SizedBox(height: 16),
-          Text(
-            result.error!.message,
-            style: const TextStyle(color: AppColors.textMid),
-          ),
-          TextButton(
-            onPressed: configured && !_confirming ? _generate : null,
-            child: const Text('retry with approval'),
-          ),
-        ],
-        if (configured &&
-            result.items.isEmpty &&
-            !result.busy &&
-            result.error == null)
-          const EmptyState(
-            compact: true,
-            icon: Icons.auto_awesome_outlined,
-            title: 'ready to discover',
-            subtitle:
-                'describe what you want and generate. metadata is sent '
-                'only after you approve the destination.',
-          ),
-        const SizedBox(height: 20),
-        for (final item in result.items) ...[
-          TrackRow(track: item.track, queue: queue),
-          Padding(
-            padding: const EdgeInsets.only(left: 12, bottom: 18),
-            child: Text(
-              'model suggestion: ${item.reason}',
-              style: const TextStyle(color: AppColors.textMid, fontSize: 12),
-            ),
-          ),
-        ],
       ],
     );
   }
+}
+
+class _WaveTuning extends StatelessWidget {
+  const _WaveTuning({
+    required this.mood,
+    required this.enabled,
+    required this.listening,
+    required this.current,
+    required this.listeningEnabled,
+    required this.currentEnabled,
+    required this.currentTitle,
+    required this.onListening,
+    required this.onCurrent,
+  });
+  final TextEditingController mood;
+  final bool enabled;
+  final bool listening;
+  final bool current;
+  final bool listeningEnabled;
+  final bool currentEnabled;
+  final String? currentTitle;
+  final VoidCallback onListening;
+  final VoidCallback onCurrent;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextField(
+          controller: mood,
+          enabled: enabled,
+          maxLength: 500,
+          minLines: 1,
+          maxLines: 2,
+          style: const TextStyle(fontSize: 14),
+          decoration: const InputDecoration(
+            labelText: 'what would you like to hear?',
+            hintText: 'a mood, an artist, a direction — without links',
+            counterText: '',
+            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          ),
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            for (final preset in [
+              'discover something new',
+              'quiet evening',
+              'focus without vocals',
+              'late night energy',
+            ])
+              WaveAction(
+                label: preset,
+                enabled: enabled,
+                onTap: () => mood.value = TextEditingValue(
+                  text: preset,
+                  selection: TextSelection.collapsed(offset: preset.length),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 18),
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: [
+            WaveAction(
+              label: listening
+                  ? 'listening history · on'
+                  : 'listening history · off',
+              icon: listening ? Icons.check : Icons.history,
+              selected: listening,
+              enabled: enabled && listeningEnabled,
+              onTap: onListening,
+            ),
+            WaveAction(
+              label: current ? 'current track · on' : 'current track · off',
+              icon: current ? Icons.check : Icons.music_note_outlined,
+              selected: current,
+              enabled: enabled && currentEnabled,
+              onTap: onCurrent,
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Text(
+          !listeningEnabled
+              ? 'sign in to include likes and listening history.'
+              : 'history includes recent likes; shared only with your approval.',
+          style: const TextStyle(color: AppColors.textMid, fontSize: 11),
+        ),
+        if (currentEnabled)
+          Text(
+            'current track: $currentTitle',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: AppColors.textMid, fontSize: 11),
+          ),
+      ],
+    ),
+  );
 }
