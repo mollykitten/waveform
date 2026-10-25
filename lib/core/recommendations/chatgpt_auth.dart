@@ -149,6 +149,20 @@ class ChatGptAuth {
   String _random() => base64Url
       .encode(List<int>.generate(32, (_) => Random.secure().nextInt(256)))
       .replaceAll('=', '');
+
+  String _newHostId() {
+    final random = Random.secure();
+    final bytes = List<int>.generate(16, (_) => random.nextInt(256));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    final hex = bytes
+        .map((byte) => byte.toRadixString(16).padLeft(2, '0'))
+        .join();
+    return 'urn:uuid:${hex.substring(0, 8)}-${hex.substring(8, 12)}-'
+        '${hex.substring(12, 16)}-${hex.substring(16, 20)}-'
+        '${hex.substring(20)}';
+  }
+
   Future<void> restore() async {
     final operation = _restore ??= _load();
     try {
@@ -168,8 +182,11 @@ class ChatGptAuth {
       } else {
         _vault = {};
       }
-      if (_vault['host'] is! String) {
-        _vault['host'] = 'urn:waveform:${_random()}';
+      final host = _vault['host'];
+      // Older builds used an unsupported URN scheme. Migrate it once while
+      // retaining registrations and every already-supported host identifier.
+      if (host is! String || host.startsWith('urn:waveform:')) {
+        _vault['host'] = _newHostId();
         await _save();
       }
     } catch (_) {
