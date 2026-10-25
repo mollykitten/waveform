@@ -877,6 +877,89 @@ void main() {
     },
   );
 
+  testWidgets(
+    'standard track buttons expose one named enabled semantic action and update after activation',
+    (tester) async {
+      final track = realTrack('owned');
+      final next = realTrack('next');
+      final queue = [track, next];
+      final player = _PlaybackSpy(track);
+      final api = _TrackActionsApi();
+      container.dispose();
+      container = ProviderContainer(
+        overrides: [
+          playerControllerProvider.overrideWith(() => player),
+          soundcloudApiProvider.overrideWithValue(api),
+          authControllerProvider.overrideWithBuild(
+            (ref, notifier) => const SoundcloudAuth(clientId: 'test'),
+          ),
+        ],
+      );
+      await show(
+        tester,
+        size: const Size(960, 640),
+        child: Column(
+          children: [
+            TrackRow(track: track, queue: queue),
+            TrackRow(track: next, queue: queue),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+      void expectButton(String label) {
+        final finder = find.semantics.byLabel(label);
+        expect(
+          finder,
+          findsOne,
+          reason: 'one actionable node owns the role and accessible name',
+        );
+        expect(
+          finder.evaluate().single,
+          isSemantics(
+            label: label,
+            isButton: true,
+            isFocusable: true,
+            hasEnabledState: true,
+            isEnabled: true,
+            hasTapAction: true,
+          ),
+        );
+      }
+
+      expectButton('pause track owned');
+      expectButton('play track next');
+      expectButton('like track owned');
+      expectButton('like track next');
+      tester.semantics.tap(find.semantics.byLabel('pause track owned'));
+      await tester.pumpAndSettle();
+      expect(player.toggles, 1);
+      expectButton('play track owned');
+      expect(find.semantics.byLabel('pause track owned'), findsNothing);
+      tester.semantics.tap(find.semantics.byLabel('like track owned'));
+      await tester.pumpAndSettle();
+      expect(api.likes, [('owned', true)]);
+      expectButton('unlike track owned');
+      expect(find.semantics.byLabel('like track owned'), findsNothing);
+      expectButton('like track next');
+      tester.semantics.tap(find.semantics.byLabel('like track next'));
+      await tester.pumpAndSettle();
+      expect(api.likes, [('owned', true), ('next', true)]);
+      expectButton('unlike track next');
+      tester.semantics.tap(find.semantics.byLabel('unlike track owned'));
+      await tester.pumpAndSettle();
+      expect(api.likes.last, ('owned', false));
+      expectButton('like track owned');
+      expectButton('unlike track next');
+      tester.semantics.tap(find.semantics.byLabel('play track next'));
+      await tester.pumpAndSettle();
+      expect(player.playedQueue!.map((item) => item.id), ['owned', 'next']);
+      expectButton('pause track next');
+      expectButton('play track owned');
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
   testWidgets('hero pauses hidden and responds to reduced motion dynamically', (
     tester,
   ) async {
