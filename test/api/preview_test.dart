@@ -32,7 +32,7 @@ void main() {
       expect(track.blocked, isTrue);
       expect(track.streamCandidates, isEmpty);
       expect(track.durationMs, 231184);
-      expect(track.copyWith(minted: true).blocked, isTrue);
+      expect(track.copyWith(waveform: const [0.5]).blocked, isTrue);
     },
   );
 

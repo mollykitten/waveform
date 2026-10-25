@@ -176,7 +176,7 @@ class _Header extends StatelessWidget {
         ),
       );
     }
-    // Залогинен → профиль-карточка (тап → свой /artist). ◆ — лёгкий web3-акцент.
+    // Залогинен → профиль-карточка (тап → свой /artist). ◆ — лёгкий lime-акцент.
     final handle = me?.handle;
     return Pressable(
       onTap: handle == null

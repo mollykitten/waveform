@@ -6,7 +6,7 @@ import 'colors.dart';
 /// Дизайн-система Waveform.
 ///
 /// - Inter — основной текст и заголовки.
-/// - JetBrains Mono — все числа, тайм-коды, адреса кошельков, тех. метки
+/// - JetBrains Mono — все числа, тайм-коды, тех. метки
 ///   (через [AppTheme.mono]).
 /// - Брутальные углы: радиус 3px. Тонкие границы: 0.5px.
 abstract final class AppTheme {
@@ -43,8 +43,8 @@ abstract final class AppTheme {
     width: borderWidth,
   );
 
-  /// Моноширинный стиль (JetBrains Mono) для чисел, тайм-кодов,
-  /// адресов кошельков и технических меток.
+  /// Моноширинный стиль (JetBrains Mono) для чисел, тайм-кодов
+  /// и технических меток.
   static TextStyle mono({
     double size = 12,
     Color color = AppColors.textMid,
