@@ -349,6 +349,114 @@ void main() {
     );
   }
 
+  for (final useToggle in [false, true]) {
+    testWidgets('paused wave rereads shuffle order toggle $useToggle', (
+      tester,
+    ) async {
+      final tracks = List.generate(4, (i) => realTrack('${i + 1}'));
+      container.dispose();
+      container = ProviderContainer(
+        overrides: [
+          authControllerProvider.overrideWithBuild(
+            (ref, notifier) => const SoundcloudAuth(clientId: 'test'),
+          ),
+          aiSettingsProvider.overrideWithBuild(
+            (ref, notifier) =>
+                const AiSettingsState(ready: true, config: testConfig),
+          ),
+          soundcloudApiProvider.overrideWithValue(TestSoundcloud()),
+          audioEngineProvider.overrideWithValue(engine),
+          likedTracksProvider.overrideWith(StubLikedTracks.new),
+          talkerProvider.overrideWithValue(Talker()),
+          recommendationsProvider.overrideWithBuild(
+            (ref, notifier) => RecommendationState(
+              items: [for (final track in tracks) Recommendation(track, 'fit')],
+            ),
+          ),
+          waveControllerProvider.overrideWithBuild(
+            (ref, notifier) => const WaveState(active: true),
+          ),
+        ],
+      );
+      final player = container.read(playerControllerProvider.notifier);
+      player.play(tracks.first, queue: tracks);
+      const capture = ValueKey('shuffle-capture');
+      await show(tester, captureKey: capture);
+      await tester.pumpAndSettle();
+      player.toggle();
+      await tester.pumpAndSettle();
+      expect(container.read(playerControllerProvider).isPlaying, isFalse);
+
+      player.setShuffle(true);
+      // Make the shuffled tail differ deterministically, even if random
+      // shuffle happened to preserve the original queue order.
+      final linearTail = tracks.skip(1).toList();
+      if (listEquals(player.upcomingTracks, linearTail)) {
+        player.reorderUpcoming(0, 2);
+      }
+      await tester.pumpAndSettle();
+      final shuffledTail = player.upcomingTracks.toList();
+      expect(shuffledTail, isNot(linearTail));
+      // Mount with the completed shuffled order so a missing subscription
+      // cannot be masked by the UI retaining its original linear order.
+      await tester.pumpWidget(const SizedBox.shrink());
+      await show(tester, captureKey: capture);
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widgetList<WaveQueueRow>(find.byType(WaveQueueRow))
+            .map((row) => row.track.id),
+        [tracks.first, ...shuffledTail].map((track) => track.id),
+      );
+      final version = container.read(playerControllerProvider).queueVersion;
+      if (useToggle) {
+        player.toggleShuffle();
+      } else {
+        player.setShuffle(false);
+      }
+      await tester.pumpAndSettle();
+      expect(player.upcomingTracks, linearTail);
+      expect(container.read(playerControllerProvider).queueVersion, version);
+      if (File('build/visual-review/.capture-wave').existsSync()) {
+        final boundary = tester.renderObject<RenderRepaintBoundary>(
+          find.byKey(capture),
+        );
+        await tester.runAsync(() async {
+          final image = await boundary.toImage();
+          final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+          await File(
+            'build/visual-review/wave-shuffle-$useToggle.png',
+          ).writeAsBytes(bytes!.buffer.asUint8List());
+          image.dispose();
+        });
+      }
+      expect(
+        tester
+            .widgetList<WaveQueueRow>(find.byType(WaveQueueRow))
+            .map((row) => row.track.id),
+        tracks.map((track) => track.id),
+        reason: 'paused wave must refresh without a track or playback change',
+      );
+      if (useToggle) {
+        player.toggleShuffle();
+      } else {
+        player.setShuffle(true);
+      }
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widgetList<WaveQueueRow>(find.byType(WaveQueueRow))
+            .map((row) => row.track.id),
+        [tracks.first, ...player.upcomingTracks].map((track) => track.id),
+        reason: 'read the shuffled order after the controller recomputes it',
+      );
+      expect(container.read(playerControllerProvider).isPlaying, isFalse);
+      expect(container.read(playerControllerProvider).queueVersion, version);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+  }
+
   testWidgets(
     'foreign queue retains start and consent instead of toggling playback',
     (tester) async {

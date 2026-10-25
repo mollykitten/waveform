@@ -130,6 +130,7 @@ class _RecommendationsScreenState extends ConsumerState<RecommendationsScreen> {
         (state) => (
           track: state.track,
           playing: state.isPlaying,
+          shuffle: state.shuffle,
           queueVersion: state.queueVersion,
         ),
       ),
