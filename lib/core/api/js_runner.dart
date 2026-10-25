@@ -18,7 +18,8 @@ class WebviewJsRunner implements JsRunner {
   final Webview _wv;
 
   @override
-  Future<void> launch(String url) async => _wv.launch(url);
+  Future<void> launch(String url) async =>
+      _wv.launch(url, triggerOnUrlRequestEvent: false);
 
   @override
   Future<String?> eval(String javaScript) => _wv.evaluateJavaScript(javaScript);

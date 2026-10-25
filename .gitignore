@@ -56,6 +56,13 @@ docs/superpowers/
 # Hermes kanban worker worktrees (`hermes kanban create --workspace worktree`)
 .worktrees/
 
-# Superset local configuration and runtime ownership
+# приватный Widevine-профиль устройства, не коммитится
+assets/widevine/*.wvd
+
+# Local secrets / per-user Superset overrides
+.env
+.env.json
 .superset/config.local.json
+
+# Superset runtime ownership
 .superset/runtime-owner*.json

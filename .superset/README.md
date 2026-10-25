@@ -12,6 +12,10 @@ internal guide for working on waveform in superset.
   them or copy build artifacts, secrets, or authentication state between worktrees.
 - `run` and `teardown` are empty: creating or deleting a workspace does not
   automatically start or stop the app.
+- this minimal lifecycle replaces the previous `.superset/setup.sh`,
+  `.superset/run.sh`, and `.superset/teardown.sh`; those scripts are removed
+  so fallback discovery cannot launch or stop the app. the optional
+  `.superset/site.sh` and `ports.json` remain available for the site workflow.
 - keep personal additions in ignored `.superset/config.local.json`.
 - verification on fresh HEAD with Flutter 3.41.0 completed successfully, but
   `flutter pub get` changed five versions in `pubspec.lock`: `matcher`, `meta`,
@@ -81,7 +85,7 @@ mappings above. their inline commands work in any branch without requiring
 the launcher file; the file-based commands above remain an alternative.
 
 the shared setup config takes effect for new workspaces once it is integrated
-into the project's base branch. these uncommitted branch changes do not change
+into the project's base branch. these branch changes do not change
 the global default for every workspace. a temporary superset workspace verified
 the exact config successfully: workspace setup ran `flutter pub get` and
 generated its own `.dart_tool/` directory.

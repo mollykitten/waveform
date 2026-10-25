@@ -9,6 +9,7 @@ import '../../core/api/soundcloud_api.dart';
 import '../../core/audio/audio_engine.dart';
 import '../../core/audio/playback_prefs.dart';
 import '../../core/audio/waveform_audio_handler.dart';
+import '../../core/drm/drm_stream_service.dart';
 import '../../core/log/talker.dart';
 import '../../shared/models/track.dart';
 
@@ -360,9 +361,10 @@ class PlayerController extends Notifier<PlayerState> {
   Future<void> _load(Track track) async {
     final token = ++_loadToken;
     final candidates = track.streamCandidates;
-    // Нет незашифрованных источников (мок/не streamable) — тихо (UI
-    // оптимистичен, реальный «играет» придёт из движка).
-    if (candidates.isEmpty) return;
+    // Нет незашифрованных источников — возможен GO+ (Widevine). Ни тех, ни
+    // других (мок/не streamable) — тихо (UI оптимистичен, реальный «играет»
+    // придёт из движка).
+    if (candidates.isEmpty && track.drmStreamCandidates.isEmpty) return;
     final api = ref.read(soundcloudApiProvider);
     for (final candidate in candidates) {
       try {
@@ -384,8 +386,30 @@ class PlayerController extends Notifier<PlayerState> {
         // пробуем следующий источник
       }
     }
+    // GO+ (ctr-encrypted-hls): Widevine-дешифровка ядром scdrm в локальный
+    // файл — сетевой трафик + транскод всего трека, поэтому идём после
+    // обычных кандидатов (они дешевле).
+    if (track.drmStreamCandidates.isNotEmpty) {
+      try {
+        final uri = await ref.read(drmStreamServiceProvider).prepare(track);
+        if (token != _loadToken) return;
+        if (uri != null) {
+          await _engine.load(uri);
+          if (token != _loadToken) return;
+          _startedAt = DateTime.now();
+          _deadStreak = 0;
+          unawaited(_preloadAfter(track));
+          return;
+        }
+      } catch (e, st) {
+        ref
+            .read(talkerProvider)
+            .warning('drm stream failed: ${track.title}', e, st);
+        if (token != _loadToken) return;
+      }
+    }
     // Все кандидаты исчерпаны: трек удалён/недоступен или остались только
-    // зашифрованные источники.
+    // зашифрованные источники, которые и DRM не расшевелил.
     ref.read(talkerProvider).warning('no playable stream: ${track.title}');
     _markUnplayable(token, track);
   }
@@ -416,14 +440,20 @@ class PlayerController extends Notifier<PlayerState> {
   Future<void> _preloadAfter(Track current) async {
     final token = ++_preloadToken;
     final n = _upNext;
-    if (n == null || n.streamCandidates.isEmpty) {
+    if (n == null ||
+        (n.streamCandidates.isEmpty && n.drmStreamCandidates.isEmpty)) {
       await _engine.preloadNext(null);
       return;
     }
     try {
-      final url = await ref
-          .read(soundcloudApiProvider)
-          .resolveStreamUrl(n.streamCandidates.first);
+      // Обычные кандидаты — только резолв первого (сам стрим тянет движок).
+      // GO+ без незашифрованных кандидатов — полная дешифровка в файл
+      // (тяжёлая, но фоновая; результат переиспользуется кэшем сервиса).
+      final url = n.streamCandidates.isNotEmpty
+          ? await ref
+                .read(soundcloudApiProvider)
+                .resolveStreamUrl(n.streamCandidates.first)
+          : await ref.read(drmStreamServiceProvider).prepare(n);
       if (token != _preloadToken) return; // пользователь переключился
       if (url == null) {
         await _engine.preloadNext(null);

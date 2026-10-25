@@ -43,7 +43,7 @@ final _dioProvider = Provider<Dio>((ref) {
   return dio;
 });
 
-final _clientIdResolverProvider = Provider<ClientIdResolver>(
+final clientIdResolverProvider = Provider<ClientIdResolver>(
   (ref) => ClientIdResolver(ref.read(_dioProvider)),
 );
 
@@ -58,7 +58,7 @@ final webviewApiExecutorProvider = Provider<WebviewApiExecutor?>((ref) {
   final supported = Platform.isMacOS || Platform.isLinux || Platform.isWindows;
   if (mock || !authed || !supported) return null;
 
-  final ids = ref.watch(_clientIdResolverProvider);
+  final ids = ref.watch(clientIdResolverProvider);
   final ex = WebviewApiExecutor(
     createRunner: () async {
       // hidden:true → окно создаётся невидимым (macOS-патч вендоренного
@@ -101,7 +101,7 @@ final soundcloudApiProvider = Provider<SoundcloudApi>((ref) {
   if (mock) return const MockSoundcloudApi();
   return HttpSoundcloudApi(
     ref.watch(_dioProvider),
-    ref.watch(_clientIdResolverProvider),
+    ref.watch(clientIdResolverProvider),
     auth: ref.watch(authControllerProvider),
     executor: ref.watch(webviewApiExecutorProvider),
     talker: ref.watch(talkerProvider),
