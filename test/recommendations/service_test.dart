@@ -137,6 +137,48 @@ void main() {
     },
   );
 
+  test(
+    'continuation excludes recommended ids before ranking without retries',
+    () async {
+      client.replies[1] =
+          '{"recommendations":[{"id":"1","reason":"another possible fit"}]}';
+      final result = await service.generate(
+        config: testConfig,
+        consent: testConsent,
+        apiKey: '',
+        mood: 'night',
+        useListening: false,
+        cancelToken: CancelToken(),
+        excludedTrackIds: {'2'},
+      );
+      expect(result.single.track.id, '1');
+      final candidates = jsonDecode(client.payloads.last)['candidates'] as List;
+      expect(candidates.map((dynamic item) => item['id']), ['1']);
+      expect(jsonDecode(client.payloads.first)['exclude_ids'], ['2']);
+      expect(api.searches.length, 2);
+    },
+  );
+
+  test(
+    'continuation stops when all search candidates were already recommended',
+    () async {
+      await expectLater(
+        service.generate(
+          config: testConfig,
+          consent: testConsent,
+          apiKey: '',
+          mood: 'night',
+          useListening: false,
+          cancelToken: CancelToken(),
+          excludedTrackIds: {'1', '2'},
+        ),
+        throwsA(AiFailure.noTracks),
+      );
+      expect(client.payloads.length, 1);
+      expect(api.searches.length, 2);
+    },
+  );
+
   test('search errors are safe and never become a fake AI fallback', () async {
     api.failSearch = true;
     await expectLater(generate(), throwsA(AiFailure.source));

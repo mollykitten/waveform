@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -12,56 +13,60 @@ import 'package:waveform_app/core/audio/audio_engine.dart';
 import 'package:waveform_app/core/log/talker.dart';
 import 'package:waveform_app/core/recommendations/ai_config.dart';
 import 'package:waveform_app/core/recommendations/providers.dart';
+import 'package:waveform_app/core/recommendations/models.dart';
 import 'package:waveform_app/features/player/player_controller.dart';
 import 'package:waveform_app/features/recommendations/ai_settings_section.dart';
 import 'package:waveform_app/features/recommendations/recommendations_screen.dart';
-import 'package:waveform_app/shared/widgets/track_row.dart';
 import 'package:waveform_app/shared/widgets/top_bar.dart';
+import 'package:waveform_app/shared/widgets/track_row.dart';
 
 import '../support/fake_audio_engine.dart';
 import '../support/stub_liked_tracks.dart';
 import 'support.dart';
-
-class MemoryConfigStore extends AiConfigStore {
-  AiConfig config = const AiConfig();
-  Completer<void>? pending;
-  @override
-  Future<AiConfig> load() async => config;
-  @override
-  Future<void> save(AiConfig value) async {
-    if (pending != null) await pending!.future;
-    config = value;
-  }
-}
+import 'ui_test_support.dart';
 
 void main() {
   late ProviderContainer container;
   late ScriptedAi client;
+  late TestSoundcloud api;
+  late WaveTestSettings settings;
   late FakeAudioEngine engine;
-  late MemoryConfigStore store;
+  var signedIn = false;
 
-  setUp(() async {
+  setUp(() {
+    signedIn = false;
+    settings = WaveTestSettings();
     client = ScriptedAi();
+    api = TestSoundcloud()
+      ..tracks = List.generate(4, (i) => realTrack('${i + 1}'));
+    client.replies[1] = jsonEncode({
+      'recommendations': [
+        for (final id in ['2', '1', '3', '4'])
+          {'id': id, 'reason': 'a possible fit'},
+      ],
+    });
     engine = FakeAudioEngine();
-    store = MemoryConfigStore();
     container = ProviderContainer(
       overrides: [
         authControllerProvider.overrideWithBuild(
-          (ref, notifier) => const SoundcloudAuth(clientId: 'test'),
+          (ref, notifier) => SoundcloudAuth(
+            clientId: 'ui-test',
+            userToken: signedIn ? 'synthetic-test-account' : null,
+          ),
         ),
-        aiConfigStoreProvider.overrideWithValue(store),
+        aiSettingsProvider.overrideWith(() => settings),
+        aiListeningIdentityProvider.overrideWith(
+          (ref) async => 'ui-test-profile',
+        ),
         aiClientProvider.overrideWithValue(client),
-        soundcloudApiProvider.overrideWithValue(TestSoundcloud()),
+        soundcloudApiProvider.overrideWithValue(api),
         audioEngineProvider.overrideWithValue(engine),
         likedTracksProvider.overrideWith(StubLikedTracks.new),
         talkerProvider.overrideWithValue(Talker()),
       ],
     );
-    container.listen(aiSettingsProvider, (_, _) {});
-    await Future<void>.delayed(const Duration(milliseconds: 20));
   });
-
-  tearDown(() async {
+  tearDown(() {
     container.dispose();
     engine.dispose();
   });
@@ -87,166 +92,260 @@ void main() {
     await tester.pump();
   }
 
-  testWidgets('unconfigured state is explicit and never calls model', (
+  Future<void> connect() =>
+      container.read(aiSettingsProvider.notifier).connectChatGpt();
+
+  Future<void> approve(WidgetTester tester) async {
+    await tester.tap(find.byKey(const ValueKey('play-my-wave')));
+    await tester.pumpAndSettle(
+      const Duration(milliseconds: 100),
+      EnginePhase.sendSemanticsUpdate,
+      const Duration(seconds: 2),
+    );
+    expect(find.text('make my wave personal'), findsOneWidget);
+    await tester.tap(find.text('allow and play'));
+    await tester.pumpAndSettle(
+      const Duration(milliseconds: 100),
+      EnginePhase.sendSemanticsUpdate,
+      const Duration(seconds: 2),
+    );
+  }
+
+  testWidgets('connect once without metadata or generation before play', (
     tester,
   ) async {
     await show(tester);
-    expect(find.text('configure your model first'), findsOneWidget);
-    final button = tester.widget<FilledButton>(find.byType(FilledButton));
-    expect(button.onPressed, isNull);
+    expect(find.text('my wave'), findsOneWidget);
+    expect(find.text('continue with ChatGPT'), findsOneWidget);
+    expect(
+      tester
+          .widget<FilledButton>(find.byKey(const ValueKey('play-my-wave')))
+          .onPressed,
+      isNull,
+    );
+    expect(find.byType(TextField), findsNothing);
+    settings.pendingConnect = Completer<void>();
+    await tester.tap(find.text('continue with ChatGPT'));
+    await tester.pump();
+    expect(find.text('connecting…'), findsOneWidget);
+    expect(api.likesCalls, 0);
+    expect(api.historyCalls, 0);
     expect(client.payloads, isEmpty);
+    settings.pendingConnect!.complete();
+    await tester.pumpAndSettle(
+      const Duration(milliseconds: 100),
+      EnginePhase.sendSemanticsUpdate,
+      const Duration(seconds: 2),
+    );
+    expect(settings.connections, 1);
+    expect(find.text('connected to ChatGPT'), findsOneWidget);
+    expect(client.payloads, isEmpty);
+    expect(find.text('continue with ChatGPT'), findsNothing);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  for (final clear in [false, true]) {
-    testWidgets('leaving settings during ${clear ? 'clear' : 'save'} is safe', (
-      tester,
-    ) async {
-      await container.read(aiSettingsProvider.notifier).save(testConfig);
+  testWidgets(
+    'declining consent sends no listening data and never starts playback',
+    (tester) async {
+      signedIn = true;
+      await connect();
+      await show(tester);
+      await tester.tap(find.byKey(const ValueKey('play-my-wave')));
+      await tester.pumpAndSettle(
+        const Duration(milliseconds: 100),
+        EnginePhase.sendSemanticsUpdate,
+        const Duration(seconds: 2),
+      );
+      expect(api.likesCalls, 0);
+      expect(api.historyCalls, 0);
+      expect(client.payloads, isEmpty);
+      await tester.tap(find.text('not now'));
+      await tester.pumpAndSettle(
+        const Duration(milliseconds: 100),
+        EnginePhase.sendSemanticsUpdate,
+        const Duration(seconds: 2),
+      );
+      expect(settings.consentChanges, 0);
+      expect(client.payloads, isEmpty);
+      expect(container.read(playerControllerProvider).track, isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets(
+    'one consent automatically uses listening/current track and plays real queue',
+    (tester) async {
+      signedIn = true;
+      await connect();
+      final current = realTrack('current');
+      container.read(playerControllerProvider.notifier).play(current);
+      client.replies[1] =
+          '{"recommendations":[{"id":"1","reason":"first fit"},'
+          '{"id":"2","reason":"another fit"},'
+          '{"id":"3","reason":"another fit"},'
+          '{"id":"4","reason":"another fit"}]}';
+      await show(tester);
+      await approve(tester);
+      expect(settings.lastUseListening, isTrue);
+      expect(settings.lastCurrentTrack, same(current));
+      expect(api.likesCalls, 1);
+      expect(api.historyCalls, 1);
+      expect(settings.consentChanges, 1);
+      expect(client.payloads, hasLength(2));
+      final player = container.read(playerControllerProvider.notifier);
+      expect(
+        container.read(playerControllerProvider).track,
+        same(api.tracks.first),
+      );
+      expect(player.upcomingTracks, api.tracks.skip(1).toList());
+      expect(engine.lastLoadedUrl, 'https://play.invalid/stream.mp3');
+      expect(find.byType(CheckboxListTile), findsNothing);
+      expect(find.byType(TextField), findsNothing);
+
+      client.replies.addAll([
+        '{"queries":["ambient"]}',
+        jsonEncode({
+          'recommendations': [
+            for (final id in ['2', '1', '3', '4'])
+              {'id': id, 'reason': 'a possible fit'},
+          ],
+        }),
+      ]);
+      await tester.tap(find.byKey(const ValueKey('play-my-wave')));
+      await tester.pumpAndSettle(
+        const Duration(milliseconds: 100),
+        EnginePhase.sendSemanticsUpdate,
+        const Duration(seconds: 2),
+      );
+      expect(find.text('make my wave personal'), findsNothing);
+      expect(settings.consentChanges, 1);
+      expect(client.payloads, hasLength(4));
+      expect(
+        container.read(playerControllerProvider).track,
+        same(api.tracks[1]),
+      );
+      await tester.pumpWidget(const SizedBox.shrink());
+
+      // Re-entering the view reuses core consent rather than asking per visit.
+      client.replies.addAll([
+        '{"queries":["ambient"]}',
+        jsonEncode({
+          'recommendations': [
+            for (final id in ['1', '2', '3', '4'])
+              {'id': id, 'reason': 'a possible fit'},
+          ],
+        }),
+      ]);
+      await show(tester);
+      expect(client.payloads, hasLength(4));
+      await tester.tap(find.byKey(const ValueKey('play-my-wave')));
+      await tester.pumpAndSettle(
+        const Duration(milliseconds: 100),
+        EnginePhase.sendSemanticsUpdate,
+        const Duration(seconds: 2),
+      );
+      expect(find.text('make my wave personal'), findsNothing);
+      expect(settings.consentChanges, 1);
+      expect(client.payloads, hasLength(6));
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets('optional mood stays unobtrusive and is sent only after play', (
+    tester,
+  ) async {
+    await connect();
+    await show(tester);
+    expect(find.byType(TextField), findsNothing);
+    await tester.tap(find.text('add a mood (optional)'));
+    await tester.pump();
+    await tester.enterText(
+      find.byKey(const ValueKey('wave-mood')),
+      'quiet evening',
+    );
+    expect(client.payloads, isEmpty);
+    await approve(tester);
+    expect(jsonDecode(client.payloads.first)['mood'], 'quiet evening');
+    expect(settings.lastUseListening, isFalse);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets(
+    'destination change revokes approval and discards the old dialog',
+    (tester) async {
+      await connect();
+      await show(tester);
+      await tester.tap(find.byKey(const ValueKey('play-my-wave')));
+      await tester.pumpAndSettle(
+        const Duration(milliseconds: 100),
+        EnginePhase.sendSemanticsUpdate,
+        const Duration(seconds: 2),
+      );
+      const custom = AiConfig(
+        backend: AiBackend.openAi,
+        endpoint: 'https://custom.example/v1',
+        model: 'test-model',
+      );
+      await settings.save(custom);
+      await tester.tap(find.text('allow and play'));
+      await tester.pumpAndSettle(
+        const Duration(milliseconds: 100),
+        EnginePhase.sendSemanticsUpdate,
+        const Duration(seconds: 2),
+      );
+      expect(client.payloads, isEmpty);
+      await tester.tap(find.byKey(const ValueKey('play-my-wave')));
+      await tester.pumpAndSettle(
+        const Duration(milliseconds: 100),
+        EnginePhase.sendSemanticsUpdate,
+        const Duration(seconds: 2),
+      );
+      expect(find.text('sent to ${custom.destination}'), findsOneWidget);
+      await tester.tap(find.text('not now'));
+      await tester.pumpAndSettle(
+        const Duration(milliseconds: 100),
+        EnginePhase.sendSemanticsUpdate,
+        const Duration(seconds: 2),
+      );
+      expect(
+        container.read(aiSettingsProvider).config.listeningConsent,
+        isFalse,
+      );
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets(
+    '960x640 supports connection, consent and result queue without overflow',
+    (tester) async {
+      await connect();
       await show(
         tester,
-        child: const SingleChildScrollView(child: AiSettingsSection()),
-      );
-      store.pending = Completer<void>();
-      await tester.tap(
-        find.text(clear ? 'clear AI settings and key' : 'save AI settings'),
-      );
-      await tester.pump();
-      await tester.pumpWidget(const SizedBox.shrink());
-      store.pending!.complete();
-      await tester.pump();
-      expect(tester.takeException(), isNull);
-    });
-  }
-
-  testWidgets('pending clear cannot race with replacement edits and save', (
-    tester,
-  ) async {
-    await container.read(aiSettingsProvider.notifier).save(testConfig);
-    await show(
-      tester,
-      child: const SingleChildScrollView(child: AiSettingsSection()),
-    );
-    final endpoint = find.widgetWithText(TextField, 'endpoint base URL');
-    final model = find.widgetWithText(TextField, 'model name');
-    store.pending = Completer<void>();
-    await tester.tap(find.text('clear AI settings and key'));
-    await tester.pump();
-    final fieldsLocked = tester
-        .widgetList<TextField>(find.byType(TextField))
-        .every((field) => field.enabled == false);
-    final actionsLocked = tester
-        .widgetList<TextButton>(find.byType(TextButton))
-        .every((button) => button.onPressed == null);
-    final protocolLocked =
-        tester
-            .widget<DropdownButtonFormField<AiBackend>>(
-              find.byType(DropdownButtonFormField<AiBackend>),
-            )
-            .onChanged ==
-        null;
-    final save = tester.widget<TextButton>(
-      find.widgetWithText(TextButton, 'save AI settings'),
-    );
-    // Attempt the reported overlap whenever the UI mistakenly permits it.
-    if (!fieldsLocked && save.onPressed != null) {
-      await tester.enterText(endpoint, 'https://replacement.example/v1');
-      await tester.enterText(model, 'replacement');
-      await tester.enterText(
-        find.byType(TextField).last,
-        'REPLACEMENT_TEST_KEY',
-      );
-      await tester.tap(find.text('save AI settings'));
-      await tester.pump();
-    }
-    store.pending!.complete();
-    await tester.pump();
-    expect(
-      container.read(aiSettingsProvider).config.isValid,
-      isFalse,
-      reason:
-          'clear must not report success while an overlapping save stays active',
-    );
-    expect(fieldsLocked, isTrue);
-    expect(actionsLocked, isTrue);
-    expect(protocolLocked, isTrue);
-    expect(save.onPressed, isNull);
-    expect(tester.widget<TextField>(endpoint).controller!.text, isEmpty);
-    store.pending = null;
-    await tester.enterText(endpoint, 'https://replacement.example/v1');
-    await tester.enterText(model, 'replacement');
-    await tester.tap(find.text('save AI settings'));
-    await tester.pump();
-    expect(
-      container.read(aiSettingsProvider).config.endpoint,
-      'https://replacement.example/v1',
-    );
-    expect(
-      tester.widget<TextField>(endpoint).controller!.text,
-      'https://replacement.example/v1',
-    );
-    await tester.pumpWidget(const SizedBox.shrink());
-  });
-
-  testWidgets('discover navigation fits the minimum desktop width', (
-    tester,
-  ) async {
-    await show(
-      tester,
-      child: const Align(
-        alignment: Alignment.topLeft,
-        child: SizedBox(
-          width: 960,
-          child: TopBar(location: '/recommendations'),
+        size: const Size(960, 640),
+        child: const Stack(
+          children: [
+            RecommendationsScreen(),
+            Align(
+              alignment: Alignment.topCenter,
+              child: TopBar(location: '/recommendations'),
+            ),
+          ],
         ),
-      ),
-    );
-    expect(find.text('discover'), findsOneWidget);
-    expect(tester.takeException(), isNull);
-    await tester.pumpWidget(const SizedBox.shrink());
-  });
+      );
+      expect(tester.takeException(), isNull);
+      await approve(tester);
+      await tester.scrollUntilVisible(
+        find.byType(TrackRow).first,
+        150,
+        scrollable: find.byType(Scrollable).first,
+      );
+      expect(find.byType(TrackRow), findsWidgets);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
 
-  testWidgets('960x640 supports approval, results and discover navigation', (
-    tester,
-  ) async {
-    await container.read(aiSettingsProvider.notifier).save(testConfig);
-    await show(
-      tester,
-      size: const Size(960, 640),
-      child: const Stack(
-        children: [
-          RecommendationsScreen(),
-          Align(
-            alignment: Alignment.topCenter,
-            child: TopBar(location: '/recommendations'),
-          ),
-        ],
-      ),
-    );
-    expect(tester.takeException(), isNull);
-    await tester.enterText(find.byType(TextField), 'quiet evening');
-    await tester.scrollUntilVisible(
-      find.text('generate recommendations'),
-      150,
-      scrollable: find.byType(Scrollable).first,
-    );
-    await tester.tap(find.text('generate recommendations'));
-    await tester.pumpAndSettle();
-    expect(find.text(testConfig.destination), findsOneWidget);
-    expect(tester.takeException(), isNull);
-    await tester.tap(find.text('approve and generate'));
-    await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(
-      find.byType(TrackRow),
-      150,
-      scrollable: find.byType(Scrollable).first,
-    );
-    expect(find.text('model suggestion: a possible fit'), findsOneWidget);
-    expect(tester.takeException(), isNull);
-    await tester.pumpWidget(const SizedBox.shrink());
-  });
-
-  testWidgets('AI configuration fits the 960x640 desktop viewport', (
+  testWidgets('advanced provider fields are collapsed by default', (
     tester,
   ) async {
     await show(
@@ -256,116 +355,196 @@ void main() {
         child: Center(child: SizedBox(width: 640, child: AiSettingsSection())),
       ),
     );
-    await tester.scrollUntilVisible(
-      find.text('save AI settings'),
-      150,
-      scrollable: find.byType(Scrollable).first,
+    expect(find.text('continue with ChatGPT'), findsOneWidget);
+    expect(find.byType(TextField), findsNothing);
+    await tester.tap(find.text('advanced settings'));
+    await tester.pumpAndSettle(
+      const Duration(milliseconds: 100),
+      EnginePhase.sendSemanticsUpdate,
+      const Duration(seconds: 2),
     );
+    expect(find.widgetWithText(TextField, 'endpoint base URL'), findsOneWidget);
+    expect(find.widgetWithText(TextField, 'model name'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('cancel approval sends nothing; approved real results play', (
+  testWidgets(
+    'pending custom clear serializes edits/save and survives view disposal',
+    (tester) async {
+      await connect();
+      await show(
+        tester,
+        child: const SingleChildScrollView(child: AiSettingsSection()),
+      );
+      await tester.tap(find.text('advanced settings'));
+      await tester.pumpAndSettle(
+        const Duration(milliseconds: 100),
+        EnginePhase.sendSemanticsUpdate,
+        const Duration(seconds: 2),
+      );
+      final endpoint = find.widgetWithText(TextField, 'endpoint base URL');
+      final model = find.widgetWithText(TextField, 'model name');
+      await tester.enterText(endpoint, 'https://custom.example/v1');
+      await tester.enterText(model, 'custom-model');
+      await tester.enterText(
+        find.byType(TextField).last,
+        'UI_TEST_SESSION_KEY',
+      );
+      await tester.tap(find.text('save custom provider'));
+      await tester.pump();
+      expect(container.read(aiSettingsProvider).hasSessionKey, isTrue);
+      expect(
+        tester.widget<TextField>(find.byType(TextField).last).controller!.text,
+        isEmpty,
+      );
+      settings.pendingWrite = Completer<void>();
+      await tester.tap(find.text('clear custom settings'));
+      await tester.pump();
+      expect(
+        tester
+            .widgetList<TextField>(find.byType(TextField))
+            .every((field) => field.enabled == false),
+        isTrue,
+      );
+      expect(
+        tester
+            .widget<TextButton>(
+              find.widgetWithText(TextButton, 'save custom provider'),
+            )
+            .onPressed,
+        isNull,
+      );
+      expect(
+        tester
+            .widget<DropdownButtonFormField<AiBackend>>(
+              find.byType(DropdownButtonFormField<AiBackend>),
+            )
+            .onChanged,
+        isNull,
+      );
+      await tester.pumpWidget(const SizedBox.shrink());
+      settings.pendingWrite!.complete();
+      await tester.pump();
+      expect(
+        container.read(aiSettingsProvider).config.backend,
+        AiBackend.chatGpt,
+      );
+      expect(container.read(aiSettingsProvider).hasSessionKey, isFalse);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('account switch is available inside advanced settings', (
     tester,
   ) async {
-    await container.read(aiSettingsProvider.notifier).save(testConfig);
-    await show(tester);
-    await tester.enterText(find.byType(TextField), 'quiet night');
-    await tester.tap(find.text('generate recommendations'));
-    await tester.pumpAndSettle();
-    expect(find.text(testConfig.destination), findsOneWidget);
-    expect(find.textContaining('up to 40 public SoundCloud'), findsOneWidget);
-    expect(client.payloads, isEmpty);
-    await tester.tap(find.text('cancel'));
-    await tester.pumpAndSettle();
-    expect(client.payloads, isEmpty);
-    await tester.tap(find.text('generate recommendations'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('approve and generate'));
-    await tester.pumpAndSettle();
-    expect(find.byType(TrackRow), findsOneWidget);
-    expect(find.text('model suggestion: a possible fit'), findsOneWidget);
-    final track = tester.widget<TrackRow>(find.byType(TrackRow)).track;
-    await tester.tap(
-      find
-          .descendant(
-            of: find.byType(TrackRow),
-            matching: find.byIcon(Icons.play_arrow),
-          )
-          .first,
-    );
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 500));
-    expect(container.read(playerControllerProvider).track, same(track));
-    expect(container.read(playerControllerProvider).isPlaying, isTrue);
-    expect(engine.lastLoadedUrl, 'https://play.invalid/stream.mp3');
-    expect(client.payloads.length, 2);
-    expect(tester.takeException(), isNull);
-    await tester.pumpWidget(const SizedBox.shrink());
-  });
-
-  testWidgets('malformed model output shows safe retry state', (tester) async {
-    await container.read(aiSettingsProvider.notifier).save(testConfig);
-    client.replies[0] = 'SECRET model stack trace';
-    await show(tester);
-    await tester.enterText(find.byType(TextField), 'night');
-    await tester.tap(find.text('generate recommendations'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('approve and generate'));
-    await tester.pumpAndSettle();
-    expect(
-      find.textContaining('invalid recommendation response'),
-      findsOneWidget,
-    );
-    expect(find.text('retry with approval'), findsOneWidget);
-    expect(find.byType(TrackRow), findsNothing);
-    expect(find.textContaining('SECRET'), findsNothing);
-    await tester.pumpWidget(const SizedBox.shrink());
-  });
-
-  testWidgets('settings save session key, revoke consent and clear', (
-    tester,
-  ) async {
+    await connect();
     await show(
       tester,
       child: const SingleChildScrollView(child: AiSettingsSection()),
     );
-    await tester.enterText(
-      find.widgetWithText(TextField, 'endpoint base URL'),
-      testConfig.endpoint,
-    );
-    await tester.enterText(
-      find.widgetWithText(TextField, 'model name'),
-      'model',
-    );
-    await tester.enterText(find.byType(TextField).last, 'SESSION_SECRET');
-    await tester.tap(find.text('save AI settings'));
-    await tester.pump();
-    await tester.runAsync(() async {
-      await Future<void>.delayed(const Duration(milliseconds: 30));
-    });
-    await tester.pump();
-    expect(container.read(aiSettingsProvider).hasSessionKey, isTrue);
-    expect(
-      tester.widget<TextField>(find.byType(TextField).last).controller!.text,
-      isEmpty,
-    );
-    await tester.runAsync(
-      () =>
-          container.read(aiSettingsProvider.notifier).setListeningConsent(true),
-    );
-    await tester.pump();
-    await tester.tap(find.text('revoke listening metadata consent'));
-    await tester.pump();
-    expect(container.read(aiSettingsProvider).config.listeningConsent, isFalse);
-    await tester.tap(find.text('clear AI settings and key'));
-    await tester.pump();
-    await tester.runAsync(() async {
-      await Future<void>.delayed(const Duration(milliseconds: 30));
-    });
-    await tester.pump();
-    expect(container.read(aiSettingsProvider).config.isValid, isFalse);
-    expect(container.read(aiSettingsProvider).hasSessionKey, isFalse);
+    expect(find.text('use another ChatGPT account'), findsNothing);
+    await tester.tap(find.text('advanced settings'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('use another ChatGPT account'));
+    await tester.tap(find.text('use another ChatGPT account'));
+    await tester.pumpAndSettle();
+    expect(settings.usedNewAccount, isTrue);
+    expect(settings.connections, 2);
     await tester.pumpWidget(const SizedBox.shrink());
   });
+
+  testWidgets(
+    'denied reconnect stays visible for an already connected account',
+    (tester) async {
+      settings = WaveTestSettings(
+        initial: const AiSettingsState(
+          ready: true,
+          config: AiConfig(backend: AiBackend.chatGpt),
+          chatGptConnected: true,
+          error: AiFailure.credentials,
+        ),
+      )..connectionFailure = AiFailure.credentials;
+      await show(tester);
+      expect(
+        find.textContaining('ChatGPT access expired or was denied'),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('reconnect ChatGPT'));
+      await tester.pumpAndSettle();
+      expect(settings.connections, 1);
+      expect(container.read(aiSettingsProvider).chatGptConnected, isTrue);
+      expect(
+        find.textContaining('ChatGPT access expired or was denied'),
+        findsOneWidget,
+      );
+      expect(find.text('reconnect ChatGPT'), findsOneWidget);
+      expect(find.textContaining('session key'), findsNothing);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets('malformed result shows safe retry and leaves player alone', (
+    tester,
+  ) async {
+    await connect();
+    client.replies[0] = 'PRIVATE raw model error';
+    await show(tester);
+    await approve(tester);
+    expect(
+      find.textContaining('invalid recommendation response'),
+      findsOneWidget,
+    );
+    expect(find.text('try again'), findsOneWidget);
+    expect(find.textContaining('PRIVATE'), findsNothing);
+    expect(container.read(playerControllerProvider).track, isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets(
+    'wave refills after screen disposal and continues beyond two batches',
+    (tester) async {
+      await connect();
+      api.tracks = List.generate(16, (i) => realTrack('${i + 1}'));
+      client.replies.clear();
+      for (var batch = 0; batch < 4; batch++) {
+        client.replies.add('{"queries":["ambient"]}');
+        client.replies.add(
+          jsonEncode({
+            'recommendations': [
+              for (var index = 0; index < 4; index++)
+                {'id': '${batch * 4 + index + 1}', 'reason': 'a possible fit'},
+            ],
+          }),
+        );
+      }
+      await show(tester);
+      expect(client.payloads, isEmpty);
+      await approve(tester);
+      expect(client.payloads, hasLength(2));
+      await tester.pumpWidget(const SizedBox.shrink());
+      final player = container.read(playerControllerProvider.notifier);
+      for (var i = 0; i < 10; i++) {
+        player.next();
+        await tester.pumpAndSettle(
+          const Duration(milliseconds: 100),
+          EnginePhase.sendSemanticsUpdate,
+          const Duration(seconds: 2),
+        );
+      }
+      expect(client.payloads, hasLength(8));
+      expect(container.read(recommendationsProvider).items, hasLength(16));
+      player.toggle();
+      player.toggle();
+      await tester.pumpAndSettle(
+        const Duration(milliseconds: 100),
+        EnginePhase.sendSemanticsUpdate,
+        const Duration(seconds: 2),
+      );
+      expect(client.payloads, hasLength(8));
+      expect(find.text('make my wave personal'), findsNothing);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
 }

@@ -22,6 +22,8 @@ lib/
 
 you need a recent [flutter](https://docs.flutter.dev/get-started/install) sdk with desktop enabled
 
+linux builds also need `libsecret-1-dev` for protected ChatGPT credentials, plus the gtk, webkit2gtk and libsoup development packages listed in [the release workflow](../.github/workflows/release.yml). running ChatGPT sign-in on linux requires an unlocked secret service such as gnome keyring or kwallet; credentials are never saved to a plaintext fallback
+
 ```bash
 flutter pub get
 flutter run -d macos      # or -d windows / -d linux

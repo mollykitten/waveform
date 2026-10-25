@@ -6,7 +6,7 @@ import 'package:dio/dio.dart';
 import 'ai_config.dart';
 import 'models.dart';
 
-/// A single, explicit user approval covers both stages of one generation.
+/// A destination-bound authorization snapshot covers both stages of a batch.
 class AiConsent {
   const AiConsent({required this.destination, required this.listening});
   final String destination;
@@ -48,7 +48,8 @@ class HttpAiClient implements AiClient {
     required String data,
     required CancelToken cancelToken,
   }) async {
-    if (!config.isValid ||
+    if (config.backend == AiBackend.chatGpt ||
+        !config.isValid ||
         consent.destination != config.destination ||
         apiKey.length > 4096 ||
         RegExp(r'[\r\n]').hasMatch(apiKey)) {

@@ -8,7 +8,7 @@ import 'ai_client.dart';
 import 'ai_config.dart';
 import 'models.dart';
 
-/// One user-initiated generation, with no automatic or deterministic fallback.
+/// One bounded model-generated batch, ranked from genuine SoundCloud results.
 class RecommendationService {
   const RecommendationService({required this.api, required this.client});
   final SoundcloudApi api;
@@ -22,6 +22,7 @@ class RecommendationService {
     required bool useListening,
     required CancelToken cancelToken,
     Track? currentTrack,
+    Set<String> excludedTrackIds = const {},
   }) async {
     final requestMood = validatedMood(mood);
     if (!config.isValid ||
@@ -66,6 +67,13 @@ class RecommendationService {
     final context = {
       'mood': requestMood,
       'seeds': uniqueSeeds.values.map(trackMetadata).toList(),
+      if (excludedTrackIds.isNotEmpty)
+        'exclude_ids': excludedTrackIds
+            .toList()
+            .reversed
+            .take(100)
+            .map((id) => boundedText(id, 64))
+            .toList(),
     };
     final plan = await client.complete(
       config: config,
@@ -92,7 +100,9 @@ class RecommendationService {
             .timeout(const Duration(seconds: 25));
         check();
         for (final track in result.tracks.take(40)) {
-          if (_eligible(track) && candidates.length < 40) {
+          if (_eligible(track) &&
+              !excludedTrackIds.contains(track.id) &&
+              candidates.length < 40) {
             candidates.putIfAbsent(track.id, () => track);
           }
         }
