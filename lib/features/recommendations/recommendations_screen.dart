@@ -8,14 +8,10 @@ import '../../core/api/soundcloud_auth.dart';
 import '../../core/recommendations/ai_config.dart';
 import '../../core/recommendations/models.dart';
 import '../../core/recommendations/providers.dart';
-import '../../shared/widgets/cover_art.dart';
-import '../../shared/widgets/pressable.dart';
-import '../../shared/widgets/track_context_menu.dart';
 import '../../shared/models/track.dart';
-import '../../shared/format.dart';
 import '../player/player_controller.dart';
-import 'package:flutter/gestures.dart';
 import '../../shared/widgets/form_controls.dart';
+import '../../shared/widgets/track_row.dart';
 import 'wave_controller.dart';
 import 'wave_controls.dart';
 import 'widgets/wave_hero.dart';
@@ -426,8 +422,8 @@ class _RecommendationsScreenState extends ConsumerState<RecommendationsScreen> {
   }
 }
 
-/// A compact queue row with the same playback, navigation and context actions.
-class WaveQueueRow extends ConsumerWidget {
+/// Standard track controls with optional individual recommendation context.
+class WaveQueueRow extends StatelessWidget {
   const WaveQueueRow({
     super.key,
     required this.track,
@@ -439,117 +435,24 @@ class WaveQueueRow extends ConsumerWidget {
   final String? reason;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final playback = ref.watch(
-      playerControllerProvider.select(
-        (state) => (id: state.track?.id, playing: state.isPlaying),
-      ),
-    );
-    final current = playback.id == track.id;
-    final player = ref.read(playerControllerProvider.notifier);
-    return Listener(
-      onPointerDown: (event) {
-        if (event.buttons == kSecondaryButton) {
-          showTrackContextMenu(
-            context: context,
-            ref: ref,
-            track: track,
-            queue: queue,
-            globalPosition: event.position,
-          );
-        }
-      },
-      child: Container(
-        key: ValueKey('wave-row-${track.id}'),
-        constraints: const BoxConstraints(minHeight: 56),
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-        decoration: BoxDecoration(
-          color: current ? AppColors.surface2 : Colors.transparent,
-          borderRadius: AppTheme.borderRadius,
+  Widget build(BuildContext context) => Column(
+    key: ValueKey('wave-row-${track.id}'),
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      TrackRow(track: track, queue: queue),
+      if (reason != null)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+          child: Tooltip(
+            message: reason!,
+            child: Text(
+              reason!,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: formTextStyle,
+            ),
+          ),
         ),
-        child: Row(
-          children: [
-            Semantics(
-              label: current && playback.playing
-                  ? 'pause ${track.title}'
-                  : 'play ${track.title}',
-              child: Pressable(
-                onTap: () => current
-                    ? player.toggle()
-                    : player.play(track, queue: queue),
-                child: SizedBox(
-                  width: 32,
-                  height: 36,
-                  child: Icon(
-                    current && playback.playing
-                        ? Icons.pause_rounded
-                        : Icons.play_arrow_rounded,
-                    size: 20,
-                    color: current ? AppColors.acid : AppColors.textMid,
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Pressable(
-              onTap: () => context.push('/track/${track.id}'),
-              child: CoverArt(
-                seed: track.id,
-                imageUrl: track.coverUrl,
-                size: 40,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Pressable(
-                    onTap: () => context.push('/track/${track.id}'),
-                    child: Text(
-                      track.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        height: 1.5,
-                        fontWeight: FontWeight.w500,
-                        color: AppColors.textHi,
-                      ),
-                    ),
-                  ),
-                  Pressable(
-                    onTap: () => context.push(
-                      '/artist/${Uri.encodeComponent(track.artistHandle)}',
-                    ),
-                    child: Text(
-                      track.artist,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: formTextStyle,
-                    ),
-                  ),
-                  if (reason != null)
-                    Tooltip(
-                      message: reason!,
-                      child: Text(
-                        reason!,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: formTextStyle,
-                      ),
-                    ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 12),
-            Text(
-              Fmt.time(track.duration),
-              style: AppTheme.mono(size: 11, color: AppColors.textMid),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+    ],
+  );
 }

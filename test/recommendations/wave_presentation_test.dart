@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -13,6 +14,8 @@ import 'package:talker_flutter/talker_flutter.dart';
 import 'package:waveform_app/app/theme/app_theme.dart';
 import 'package:waveform_app/app/theme/colors.dart';
 import 'package:waveform_app/core/api/liked_tracks.dart';
+import 'package:waveform_app/core/api/reposted_tracks.dart';
+import 'package:waveform_app/core/api/soundcloud_api.dart';
 import 'package:waveform_app/core/api/providers.dart';
 import 'package:waveform_app/core/api/soundcloud_auth.dart';
 import 'package:waveform_app/core/audio/audio_engine.dart';
@@ -28,6 +31,9 @@ import 'package:waveform_app/shared/providers/waveform_samples.dart';
 import 'package:waveform_app/features/recommendations/recommendations_screen.dart';
 import 'package:waveform_app/features/recommendations/widgets/wave_hero.dart';
 import 'package:waveform_app/shared/widgets/form_controls.dart';
+import 'package:waveform_app/shared/widgets/pressable.dart';
+import 'package:waveform_app/shared/widgets/track_row.dart';
+import 'package:waveform_app/shared/widgets/waveform_view.dart';
 
 import '../support/fake_audio_engine.dart';
 import '../support/stub_liked_tracks.dart';
@@ -56,6 +62,37 @@ class _PlaybackSpy extends PlayerController {
   final Track current;
   final bool foreign;
   int toggles = 0;
+  List<Track> _upcoming = [realTrack('next')];
+  List<Track>? playedQueue;
+  double? soughtFraction;
+  void publishUpcoming(List<Track> tracks) {
+    _upcoming = tracks;
+    state = state.copyWith(queueVersion: state.queueVersion + 1);
+  }
+
+  @override
+  void play(Track track, {List<Track>? queue}) {
+    playedQueue = queue == null ? null : List.of(queue);
+    final index = queue?.indexWhere((item) => item.id == track.id) ?? -1;
+    _upcoming = index < 0 ? [] : queue!.skip(index + 1).toList();
+    state = state.copyWith(
+      track: track,
+      isPlaying: true,
+      queueVersion: state.queueVersion + 1,
+    );
+  }
+
+  @override
+  void seekFraction(double fraction) {
+    soughtFraction = fraction;
+    state = state.copyWith(
+      position: Duration(
+        milliseconds: (fraction * state.track!.durationMs).round(),
+      ),
+      seekVersion: state.seekVersion + 1,
+    );
+  }
+
   void advance(int milliseconds) =>
       state = state.copyWith(position: Duration(milliseconds: milliseconds));
   @override
@@ -64,11 +101,34 @@ class _PlaybackSpy extends PlayerController {
     isPlaying: true,
   );
   @override
-  List<Track> get upcomingTracks => [realTrack('next')];
+  List<Track> get upcomingTracks => List.unmodifiable(_upcoming);
   @override
   void toggle() {
     toggles++;
     state = state.copyWith(isPlaying: !state.isPlaying);
+  }
+}
+
+class _TrackActionsApi extends TestSoundcloud {
+  @override
+  Future<({List<Track> tracks, String? nextHref})> likesPage({
+    String? nextHref,
+    int limit = 50,
+  }) async => (tracks: const <Track>[], nextHref: null);
+  final likes = <(String, bool)>[];
+  final reposts = <(String, bool)>[];
+  @override
+  Future<LikeOutcome> setLiked(String id, bool liked) async {
+    likes.add((id, liked));
+    return LikeOutcome.ok;
+  }
+
+  @override
+  Future<Set<String>> repostedTrackIds() async => {};
+  @override
+  Future<LikeOutcome> setReposted(String id, bool reposted) async {
+    reposts.add((id, reposted));
+    return LikeOutcome.ok;
   }
 }
 
@@ -283,6 +343,8 @@ void main() {
               (ref, notifier) => WaveState(active: true, discovering: refill),
             ),
             playerControllerProvider.overrideWith(() => player),
+            soundcloudApiProvider.overrideWithValue(TestSoundcloud()),
+            likedTracksProvider.overrideWith(StubLikedTracks.new),
             authControllerProvider.overrideWithBuild(
               (ref, notifier) => const SoundcloudAuth(clientId: 'test'),
             ),
@@ -370,6 +432,8 @@ void main() {
             (ref, notifier) => const WaveState(active: true),
           ),
           playerControllerProvider.overrideWith(() => player),
+          soundcloudApiProvider.overrideWithValue(TestSoundcloud()),
+          likedTracksProvider.overrideWith(StubLikedTracks.new),
           authControllerProvider.overrideWithBuild(
             (ref, notifier) => const SoundcloudAuth(clientId: 'test'),
           ),
@@ -415,6 +479,8 @@ void main() {
     container = ProviderContainer(
       overrides: [
         playerControllerProvider.overrideWith(() => player),
+        soundcloudApiProvider.overrideWithValue(TestSoundcloud()),
+        likedTracksProvider.overrideWith(StubLikedTracks.new),
         waveformSamplesProvider(
           'hero-real',
         ).overrideWith((ref) async => [0, 1, 1]),
@@ -630,6 +696,8 @@ void main() {
                 (ref, notifier) => WaveState(active: mode != 'idle'),
               ),
               playerControllerProvider.overrideWith(() => player),
+              soundcloudApiProvider.overrideWithValue(TestSoundcloud()),
+              likedTracksProvider.overrideWith(StubLikedTracks.new),
               authControllerProvider.overrideWithBuild(
                 (ref, notifier) => const SoundcloudAuth(clientId: 'test'),
               ),
@@ -695,6 +763,119 @@ void main() {
       }
     }
   }
+
+  testWidgets(
+    'standard wave rows support shared like, repost, pause and seek without losing queue',
+    (tester) async {
+      final track = realTrack('owned');
+      final player = _PlaybackSpy(track);
+      final api = _TrackActionsApi();
+      container.dispose();
+      container = ProviderContainer(
+        overrides: [
+          aiSettingsProvider.overrideWithBuild(
+            (ref, notifier) =>
+                const AiSettingsState(ready: true, config: testConfig),
+          ),
+          recommendationsProvider.overrideWithBuild(
+            (ref, notifier) => RecommendationState(
+              items: [
+                Recommendation(track, 'same real reason'),
+                Recommendation(realTrack('next'), 'same real reason'),
+                Recommendation(realTrack('third'), 'same real reason'),
+              ],
+            ),
+          ),
+          waveControllerProvider.overrideWithBuild(
+            (ref, notifier) => const WaveState(active: true),
+          ),
+          playerControllerProvider.overrideWith(() => player),
+          authControllerProvider.overrideWithBuild(
+            (ref, notifier) => const SoundcloudAuth(clientId: 'test'),
+          ),
+          soundcloudApiProvider.overrideWithValue(api),
+        ],
+      );
+      await show(
+        tester,
+        size: const Size(1280, 800),
+        captureKey: const ValueKey('standard-row-capture'),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widgetList<TrackRow>(find.byType(TrackRow))
+            .map((row) => row.track.id),
+        ['owned', 'next'],
+      );
+      final owned = find.byKey(const ValueKey('wave-row-owned'));
+      Finder control(IconData icon) => find.ancestor(
+        of: find.descendant(of: owned, matching: find.byIcon(icon)),
+        matching: find.byType(Pressable),
+      );
+      await tester.ensureVisible(owned);
+      await tester.tap(control(Icons.favorite_border));
+      await tester.pumpAndSettle();
+      expect(api.likes, [('owned', true)]);
+      expect(container.read(likedTracksProvider), contains('owned'));
+      await tester.tap(control(Icons.favorite));
+      await tester.pumpAndSettle();
+      expect(api.likes, [('owned', true), ('owned', false)]);
+      expect(container.read(likedTracksProvider), isNot(contains('owned')));
+      await tester.tap(control(Icons.pause));
+      await tester.pump();
+      expect(player.toggles, 1);
+      expect(container.read(playerControllerProvider).isPlaying, isFalse);
+      await tester.tap(control(Icons.play_arrow));
+      await tester.pump();
+      expect(player.toggles, 2);
+      final waveform = find.descendant(
+        of: owned,
+        matching: find.byType(WaveformView),
+      );
+      await tester.tapAt(tester.getRect(waveform).center);
+      await tester.pump();
+      expect(player.soughtFraction, closeTo(.5, .02));
+      expect(
+        container.read(playerControllerProvider).position.inMilliseconds,
+        closeTo(track.durationMs / 2, 1000),
+      );
+      await tester.tap(owned, buttons: kSecondaryButton);
+      await tester.pumpAndSettle();
+      expect(find.text('play next'), findsOneWidget);
+      expect(find.text('open track page'), findsOneWidget);
+      await tester.tap(find.text('repost'));
+      await tester.pumpAndSettle();
+      expect(api.reposts, [('owned', true)]);
+      expect(container.read(repostedTracksProvider), contains('owned'));
+      player.publishUpcoming([realTrack('third'), realTrack('next')]);
+      await tester.pump();
+      expect(
+        tester
+            .widgetList<TrackRow>(find.byType(TrackRow))
+            .map((row) => row.track.id),
+        ['owned', 'third', 'next'],
+      );
+      expect(find.text('same real reason'), findsOneWidget);
+      final next = find.byKey(const ValueKey('wave-row-next'));
+      await tester.ensureVisible(next);
+      final nextPlay = find.ancestor(
+        of: find.descendant(of: next, matching: find.byIcon(Icons.play_arrow)),
+        matching: find.byType(Pressable),
+      );
+      await tester.tap(nextPlay);
+      await tester.pump();
+      expect(player.playedQueue!.map((item) => item.id), [
+        'owned',
+        'third',
+        'next',
+      ]);
+      expect(container.read(playerControllerProvider).track!.id, 'next');
+      expect(client.payloads, isEmpty);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
 
   testWidgets('hero pauses hidden and responds to reduced motion dynamically', (
     tester,
