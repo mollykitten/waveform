@@ -409,6 +409,10 @@ class _ConsentAction extends StatelessWidget {
 }
 
 class _WaveTuning extends StatelessWidget {
+  static const _inputBorder = OutlineInputBorder(
+    borderRadius: AppTheme.borderRadius,
+    borderSide: AppTheme.borderSideStatic,
+  );
   const _WaveTuning({
     required this.mood,
     required this.enabled,
@@ -443,11 +447,27 @@ class _WaveTuning extends StatelessWidget {
           minLines: 1,
           maxLines: 2,
           style: const TextStyle(fontSize: 14),
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
             labelText: 'what would you like to hear?',
             hintText: 'a mood, an artist, a direction — without links',
             counterText: '',
-            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            filled: true,
+            fillColor: AppColors.bg,
+            isDense: true,
+            labelStyle: const TextStyle(fontSize: 12, color: AppColors.textMid),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 12,
+            ),
+            border: _inputBorder,
+            enabledBorder: _inputBorder,
+            disabledBorder: _inputBorder,
+            focusedBorder: _inputBorder.copyWith(
+              borderSide: const BorderSide(
+                color: AppColors.acid,
+                width: AppTheme.borderWidth,
+              ),
+            ),
           ),
         ),
         const SizedBox(height: 10),
