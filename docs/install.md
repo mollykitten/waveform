@@ -5,11 +5,16 @@ builds are attached to every github release. test builds and news go to telegram
 **macos.** needs macos 12 monterey or later starting after v0.3.0
 1. grab `waveform-macos-vX.Y.Z.dmg` from the [latest release](https://github.com/mollykitten/waveform/releases/latest)
 2. drag waveform into applications
-3. open it. it's signed with developer id and notarized, gatekeeper won't ask
+3. open `Waveform.app`. the release workflow requires developer id signing,
+   accepted notarization and a validated stapled ticket before packaging. macos
+   may still show its normal first-open confirmation; clean-system installation
+   must be checked separately
 
 **windows.**
 1. grab `waveform-windows-vX.Y.Z.zip` and unzip
-2. run `Waveform.exe`. smartscreen says "unknown publisher" the first time (no ev cert yet), click more info → run anyway
+2. run `waveform_app.exe` with the extracted libraries and data beside it. builds
+   are unsigned; smartscreen may warn about an unknown publisher, depending on
+   the machine's policy
 
 **linux.**
 1. grab `waveform-linux-vX.Y.Z.tar.gz`

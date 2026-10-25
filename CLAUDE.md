@@ -101,13 +101,15 @@ lib/
 6. ✅ Поиск: экран `/search?q=` с вкладками tracks/people/playlists (search/tracks|users|playlists), поле в шапке submit→навигация
 
 ### Путь развития (с 2026-10)
-**Горизонт 0 — выпустить то, что есть.** Код на 0.4.0 (следующий тег — `v0.4.0`), но опубликованных релизов нет:
-все прогоны `release.yml` по тегу v0.1.0 упали. Последний (2026-05-28): macOS собрался
-и подписался, но `notarytool submit --wait` (без `--timeout`) висел ~3 ч и вышел с
-ошибкой; Linux падает на `flutter build linux` за 3 с; Windows проходит. Логи прогонов
-уже удалены — нужен свежий прогон с выводом `notarytool log`. Починить пайплайн, выпустить текущий код, обновить
-доки под реальную версию, проверить нотаризацию на чистой macOS. Пока это не закрыто,
-новые фичи не берём.
+**Горизонт 0 — выпустить то, что есть.** Код на 0.4.0 (следующий тег — `v0.4.0`), опубликованных релизов пока нет.
+Сухой прогон [40156324361](https://github.com/mollykitten/waveform/actions/runs/40156324361)
+от 2026-10-25 на SHA `4e4f87463f77f7e077724a1d73ffd7be9836edcc`: macOS собрался
+и подписался; notarization вернул HTTP 403 — обязательное соглашение Apple
+не подписано или истекло. Staple и DMG пропущены, Windows и Linux прошли.
+Это старый SHA: он не подтверждает сборку текущего main после #56. Нужно
+урегулировать соглашение Apple, прогнать финальный main без тега и проверить
+артефакты/нотаризацию на чистой macOS; процесс — [docs/releasing.md](docs/releasing.md).
+До публикации текущего кода новые фичи не берём.
 
 **Горизонт 1 — платформенный паритет** (тезис «кроссплатформенность как условие»):
 - медиа-клавиши и now-playing на Windows (SMTC) и Linux (MPRIS) — сейчас только macOS;
@@ -323,8 +325,10 @@ PostgreSQL с векторным индексом, фоновые jobs с вер
   `dart run flutter_launcher_icons` → macOS .icns + Windows .ico.
 
 ### Pre-release дел user'у
-1. **Apple-секреты в GitHub** (Settings → Secrets → Actions): см.
-   список выше (Phase 0). Без них release.yml упадёт на codesign step.
+1. **Apple-подготовка**: секреты перечислены выше (Phase 0). В сухом
+   прогоне 2026-10-25 импорт сертификата и подпись прошли; текущий
+   наблюдавшийся блокер — обязательное соглашение Apple, HTTP 403 при
+   notarization. Нужен успешный прогон финального main после его принятия.
 2. **Last.fm** (опционально): зарегистрировать Waveform на
    last.fm/api/account/create → положить `LASTFM_API_KEY` и
    `LASTFM_SHARED_SECRET` ещё двумя GitHub Actions secrets (рядом
@@ -337,10 +341,12 @@ PostgreSQL с векторным индексом, фоновые jobs с вер
 3. **Иконка приложения**: положить квадратный PNG в
    `assets/icon/icon.png` → `dart run flutter_launcher_icons` →
    `flutter clean && flutter build macos`.
-4. **Тег `v0.4.0`** (решено 2026-10). Сначала сухой прогон без публикации:
-   `gh workflow run release.yml --ref <ветка>` (publish-джоб гейтится на
-   тег). Зелёный → `git tag v0.4.0 && git push origin v0.4.0`, в CHANGELOG
-   заменить «unreleased» на дату.
+4. **Тег `v0.4.0`** (решено 2026-10). Сначала CI и сухой прогон финального
+   main без публикации: `gh workflow run release.yml --ref main`
+   (publish-джоб гейтится на тег). Проверить совпадение SHA и результаты
+   платформ; macOS обязателен, Windows/Linux best effort. Дату в CHANGELOG
+   ставить только при готовности публикации, затем проверить итоговый SHA
+   повторно и пушить только `v0.4.0`: см. [docs/releasing.md](docs/releasing.md).
 
 ## Идеи / бэклог
 - **Light theme** + system-appearance follow.

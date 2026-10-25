@@ -1,58 +1,61 @@
-<!--
-This file is the body for every GitHub Release published by release.yml.
-Edit before tagging if you want release-specific notes; otherwise it
-documents how to install Waveform on each platform.
--->
+<!-- release.yml uses this file as the github release body. -->
 
-## Install
+## waveform v0.4.0
 
-### macOS
+my wave recommendations with chatgpt or custom providers, continuous queue
+refill, local listening graph vectors, macos output selection and a native
+airplay picker, plus keyboard accessibility and reduced-motion improvements.
+see the [changelog](https://github.com/mollykitten/waveform/blob/main/CHANGELOG.md)
+for the full changes, including the optional developer worker notifier.
 
-1. Download `waveform-macos-<version>.dmg` from the **Assets** below.
-2. Open the DMG and drag **waveform_app** into your **Applications** folder.
-3. Double-click **waveform_app** in Applications.
+## install
 
-The app is **signed with our Apple Developer ID and notarized by Apple**, so
-macOS opens it without any Gatekeeper prompts.
+### macos (12+)
 
-### Windows
+1. download `waveform-macos-v0.4.0.dmg` from the assets below.
+2. open the DMG and drag `Waveform.app` into applications.
+3. open waveform from applications.
 
-1. Download `waveform-windows-<version>.zip` and unzip it anywhere.
-2. Run `waveform_app.exe`.
+the release workflow requires developer id signing, accepted apple
+notarization and a validated stapled ticket before creating the DMG.
+macos may still show its normal first-open confirmation. signing and
+notarization do not replace checking the downloaded app on a clean macos system.
 
-Windows SmartScreen will show **"Windows protected your PC — Unknown
-publisher"** because we don't yet have a Windows code-signing EV certificate.
-Click **More info → Run anyway** once; subsequent launches are clean.
+### windows (when a zip is attached)
 
-### Linux
+1. download `waveform-windows-v0.4.0.zip` and extract the entire archive.
+2. run `waveform_app.exe` with the extracted libraries and data beside it.
 
-1. Download `waveform-linux-<version>.tar.gz`.
-2. Extract it: `tar xzf waveform-linux-<version>.tar.gz -C ~/waveform`
-3. Run `~/waveform/waveform_app`.
+windows builds are unsigned. smartscreen may warn about an unknown publisher;
+the exact warning and available actions depend on the machine's policy.
 
-You may need to install `libsecret-1-0` and a GTK runtime if your distro
-doesn't have them.
+### linux (when an archive is attached)
 
-## What is this?
+1. download `waveform-linux-v0.4.0.tar.gz`.
+2. create a directory: `mkdir -p ~/waveform`.
+3. extract: `tar xzf waveform-linux-v0.4.0.tar.gz -C ~/waveform`.
+4. run `~/waveform/waveform_app`; keep the bundled libraries and data beside it.
 
-Waveform is a minimal cross-platform **desktop SoundCloud client** built with
-Flutter. See the [README](https://github.com/mollybyte/waveform#readme) for the
-full picture.
+system GTK, webkit2gtk 4.1, libsoup 3 and libsecret runtimes are required;
+package names vary by distribution.
 
-> **Status:** early WIP. Use it with your own SoundCloud account, expect rough
-> edges, and please file issues at
-> https://github.com/mollybyte/waveform/issues.
+## known limitations
 
-## Known limitations
+- early software, primarily exercised on macos. windows and linux have less
+  runtime coverage; OS media controls currently work on macos only.
+- chatgpt interactive OAuth, subscription access, keychain restart/refresh/logout,
+  live inference, native playback/refill and musical recommendation quality
+  still require manual validation. local structural vectors are not audio
+  embeddings; no backend service or model weights are included.
+- physical airplay receiver playback and switching outputs during playback
+  still require hardware verification. airplay mode conservatively suspends
+  gapless/crossfade until a local output is selected.
+- go+ DRM fallback is macos-only and requires a user-supplied device profile.
+  no device profile is bundled. without one, encrypted-only tracks can be
+  unavailable and skipped; there is no locked-track badge.
+- this unofficial client uses soundcloud's undocumented `api-v2` and is not
+  affiliated with soundcloud. use your own account and expect rough edges.
 
-- **GO+ tracks won't play.** SoundCloud serves them as DRM-encrypted HLS that
-  `just_audio` can't decode on desktop; they're labelled `🔒 GO+` and skipped.
-- **macOS-first.** Windows and Linux build, but are less exercised.
-- This client uses SoundCloud's undocumented `api-v2`; the project is not
-  affiliated with SoundCloud.
-
-## Source code
-
-https://github.com/mollybyte/waveform
-
-🤖 Built and published by GitHub Actions.
+[readme](https://github.com/mollykitten/waveform#readme) ·
+[issues](https://github.com/mollykitten/waveform/issues) ·
+[source](https://github.com/mollykitten/waveform)

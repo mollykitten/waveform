@@ -61,6 +61,7 @@ class AiSettingsState {
 class AiSettingsController extends Notifier<AiSettingsState> {
   String _sessionKey = '';
   int _restoreVersion = 0;
+  int _connectionVersion = 0;
   bool _connected = false;
   String? _accountLabel;
   bool _connecting = false;
@@ -283,15 +284,19 @@ class AiSettingsController extends Notifier<AiSettingsState> {
   Future<void> connectChatGpt({bool newAccount = false}) async {
     if (_connecting) return;
     final version = ++_restoreVersion;
+    final connectionVersion = ++_connectionVersion;
     _connecting = true;
     _connectionState();
     try {
       final auth = ref.read(chatGptAuthProvider);
       final before = auth.account?.binding;
       await auth.signIn(newAccount: newAccount);
-      if (!ref.mounted || version != _restoreVersion) return;
+      if (!ref.mounted || connectionVersion != _connectionVersion) return;
+      // SoundCloud changes revoke consent but do not cancel ChatGPT sign-in.
+      // Reconcile persisted credentials without restoring stale configuration.
       _connected = auth.account?.connected == true;
       _accountLabel = auth.account?.label;
+      if (version != _restoreVersion) return;
       final keep =
           before == auth.account?.binding &&
           state.config.backend == AiBackend.chatGpt;
@@ -319,6 +324,7 @@ class AiSettingsController extends Notifier<AiSettingsState> {
 
   Future<void> disconnectChatGpt() async {
     ++_restoreVersion;
+    ++_connectionVersion;
     _connected = false;
     _accountLabel = null;
     final next = state.config.withConsent(false);

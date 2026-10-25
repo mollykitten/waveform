@@ -8,32 +8,73 @@ All notable changes to Waveform are documented here. Format follows
 
 ## [0.4.0] — unreleased
 
-GO+ playback on macOS, a new icon, and a release pipeline that can actually ship.
+my wave recommendations, macos audio output controls, keyboard accessibility,
+and release preparation. includes the merged work in #50–#56.
 
-### Added
-- **GO+ tracks play on macOS** through a bundled Widevine decryption core
-  (`scdrm`, Go over `dart:ffi`), as a fallback after regular streams. Needs
+### added
+- **my wave** searches and ranks real soundcloud tracks with an explicitly
+  configured openai-compatible or ollama provider. model settings live in
+  settings; listening metadata requires consent. no model server is bundled.
+- **chatgpt connection** with browser PKCE, signed identity validation and OS
+  secure storage, account/destination-bound metadata consent, and continuous
+  queue refill. local structural vectors rank a bounded related-track pool
+  using account-isolated listening evidence, diversity and exploration; these
+  are graph vectors, not audio embeddings.
+- **macos audio output selection** lists real core audio devices and routes
+  waveform's players without changing the system default. a native airplay
+  picker stays attached to the active player; opening it conservatively
+  suspends gapless/crossfade until a local output is selected.
+- **keyboard activation, focus and semantics** for shared controls and player
+  collapse controls; reduced motion extends to routes and transient UI.
+- **opt-in developer worker notifier** delivers completed ACP worker messages
+  to a coordinator with durable identities, retries and journal replay. its
+  python regressions run in CI; no active watcher or credentials are shipped.
+- **go+ tracks play on macos** through a bundled Widevine decryption core
+  (`scdrm`, go over `dart:ffi`), as a fallback after regular streams. needs
   your own device profile in `assets/widevine/device.wvd`; it's never shipped.
-- **Copy-link button** in both player layouts; selectable track title and
+- **copy-link button** in both player layouts; selectable track title and
   description.
-- **New app icon, SVG logo** and a static landing page.
+- **new app icon, svg logo** and a static landing page.
 
-### Changed
-- **macOS 12 Monterey is now the minimum supported version.** Runner, tests,
-  and CocoaPods targets use a consistent minimum compatible with Xcode 27.
-- **Web3 removed.** The `◆ minted` badge and wallet placeholders are gone;
+### changed
+- **my wave presentation** uses animated ribbons, compact tune controls and
+  optional mood controls. generation preserves the queue until results play.
+- desktop account controls stay aligned 16px from the window edge.
+- **macos 12 monterey is now the minimum supported version.** runner, tests,
+  and cocoapods targets use a consistent minimum compatible with xcode 27.
+- **web3 removed.** the `◆ minted` badge and wallet placeholders are gone;
   lime stays as a secondary accent for markers.
-- **The `🔒 GO+` locked-track badge is gone**; unplayable tracks get the
+- **the `🔒 GO+` locked-track badge is gone**; unplayable tracks get the
   common "unavailable — skipped" notice.
-- Docs moved from the README into `docs/`.
+- docs moved from the README into `docs/`.
 
-### Fixed
-- Reduced motion is respected by press states and skeleton pulses.
-- Windows sign-in navigation no longer gets intercepted.
-- WebView engines start through their own titlebar entrypoint.
-- The ⌘K search trigger stays in sync with query edits.
-- Release pipeline: bounded notarization wait with the Apple log on failure,
-  missing Linux webkit/libsoup build deps, publish waits for all platforms.
+### fixed
+- chatgpt sign-in state stays consistent after a soundcloud account switch or
+  logout without restoring revoked listening consent.
+- player source generations and swap recovery preserve playback intent,
+  reject stale preloads after queue edits, and avoid attributing outgoing
+  audio to a pending track.
+- audio output binding keeps pause/resume and active-player state coherent.
+- collection navigation avoids invalid hero tags.
+- reduced motion is respected by press states and skeleton pulses.
+- windows sign-in navigation no longer gets intercepted.
+- webview engines start through their own titlebar entrypoint.
+- the ⌘K search trigger stays in sync with query edits.
+- release workflow uses a bounded notarization wait, retrieves the apple log
+  when a submission id is available, installs linux webkit/libsoup/libsecret
+  build dependencies, and waits for all platforms before the publish gate.
+
+### validation limits
+- interactive chatgpt OAuth with an eligible account, subscription access,
+  keychain restart/refresh/logout, live inference, native playback/refill and
+  musical recommendation quality still require manual validation.
+- physical airplay receiver playback and switching outputs during playback
+  still require hardware verification; a compiled picker is not that evidence.
+- the older [dry run on 2026-10-25](https://github.com/mollykitten/waveform/actions/runs/40156324361)
+  built and signed macos and built windows/linux, but apple rejected notarization
+  with HTTP 403 for a missing or expired required agreement. staple and DMG
+  creation were skipped. it ran SHA `4e4f87463f77f7e077724a1d73ffd7be9836edcc`,
+  so the release candidate still needs its own successful dry run.
 
 ## [0.3.0] — 2026-06-10
 
