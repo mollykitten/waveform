@@ -4,10 +4,17 @@ import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:waveform_app/app/theme/app_theme.dart';
 
 const _fontFiles = {
-  'Inter-Regular': 'inter.ttf',
-  'JetBrainsMono-Regular': 'jetbrains-mono.ttf',
+  'Inter-Regular': 'Inter-Regular.ttf',
+  'Inter-Medium': 'Inter-Medium.ttf',
+  'Inter-SemiBold': 'Inter-SemiBold.ttf',
+  'Inter-Bold': 'Inter-Bold.ttf',
+  'JetBrainsMono-Regular': 'JetBrainsMono-Regular.ttf',
+  'JetBrainsMono-Medium': 'JetBrainsMono-Medium.ttf',
+  'JetBrainsMono-SemiBold': 'JetBrainsMono-SemiBold.ttf',
+  'JetBrainsMono-Bold': 'JetBrainsMono-Bold.ttf',
 };
 
 /// Shared real-font fixtures; capture tests skip when these are unavailable.
@@ -83,4 +90,7 @@ Future<void> installVisualTestFonts() async {
         if (fontBytes.containsKey(key)) return fontBytes[key];
         return null;
       });
+  AppTheme.dark;
+  AppTheme.mono();
+  await GoogleFonts.pendingFonts();
 }

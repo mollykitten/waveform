@@ -49,6 +49,14 @@ and release preparation. includes the merged work in #50–#56.
 - docs moved from the README into `docs/`.
 
 ### fixed
+- settings and my wave forms share compact controls, consistent labels and
+  spacing, with grouped connections and mood settings.
+- the owned wave control pauses and resumes playback; compact rows show the
+  actual upcoming queue and preserve recommendation reasons.
+- my wave background reacts to fetched soundcloud waveform envelopes during
+  advancing playback, not an fft/pcm spectrum; the envelope reaction stops
+  when hidden or paused.
+- audio output uses an icon-only trigger and shows full device names in its menu.
 - chatgpt authorization uses a persisted supported UUIDv4 host identifier and
   migrates the legacy format without changing saved account credentials.
 - initial profile lookup failures retry with bounded backoff; listening

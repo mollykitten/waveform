@@ -8,7 +8,7 @@ import '../../core/recommendations/ai_config.dart';
 import '../../core/recommendations/models.dart';
 import '../../core/recommendations/providers.dart';
 import '../../shared/widgets/section_header.dart';
-import '../../shared/widgets/pressable.dart';
+import '../../shared/widgets/form_controls.dart';
 import 'wave_controls.dart';
 
 class AiSettingsSection extends ConsumerStatefulWidget {
@@ -111,53 +111,80 @@ class _AiSettingsSectionState extends ConsumerState<AiSettingsSection> {
           onConnect: () => _run(controller.connectChatGpt),
           onDisconnect: () => _run(controller.disconnectChatGpt),
           message: settings.error?.message ?? _message,
+          accountLabel: settings.chatGptAccountLabel,
+          footer: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 12),
+                child: Divider(
+                  height: .5,
+                  thickness: .5,
+                  color: AppColors.border,
+                ),
+              ),
+              WaveControlRow(
+                information: Text(
+                  settings.config.listeningConsent
+                      ? 'personalisation is on for this destination and account.'
+                      : 'listening metadata stays private until you allow it when starting your wave.',
+                  style: formTextStyle,
+                ),
+                actions:
+                    settings.config.listeningConsent ||
+                        (settings.chatGptConnected &&
+                            settings.config.backend != AiBackend.chatGpt)
+                    ? Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          if (settings.config.listeningConsent)
+                            FormAction(
+                              kind: FormActionKind.quiet,
+                              onTap: busy
+                                  ? null
+                                  : () => _run(
+                                      () =>
+                                          controller.setListeningConsent(false),
+                                    ),
+                              label: 'turn off personalisation',
+                            ),
+                          if (settings.chatGptConnected &&
+                              settings.config.backend != AiBackend.chatGpt)
+                            FormAction(
+                              kind: FormActionKind.quiet,
+                              onTap: busy
+                                  ? null
+                                  : () => _run(controller.useChatGpt),
+                              label: 'use ChatGPT for my wave',
+                            ),
+                        ],
+                      )
+                    : null,
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  FormAction(
+                    onTap: busy ? null : () => context.go('/recommendations'),
+                    label: 'open my wave',
+                  ),
+                  if (settings.error == AiFailure.credentials &&
+                      settings.chatGptConnected)
+                    FormAction(
+                      onTap: busy
+                          ? null
+                          : () => _run(controller.connectChatGpt),
+                      label: 'reconnect ChatGPT',
+                    ),
+                ],
+              ),
+            ],
+          ),
         ),
-        if (settings.error == AiFailure.credentials &&
-            settings.chatGptConnected)
-          TextButton(
-            onPressed: busy ? null : () => _run(controller.connectChatGpt),
-            child: const Text('reconnect ChatGPT'),
-          ),
-        if (settings.chatGptConnected && settings.chatGptAccountLabel != null)
-          Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: Text(
-              settings.chatGptAccountLabel!,
-              style: AppTheme.mono(size: 11, color: AppColors.textMid),
-            ),
-          ),
-        if (settings.chatGptConnected &&
-            settings.config.backend != AiBackend.chatGpt)
-          TextButton(
-            onPressed: busy ? null : () => _run(controller.useChatGpt),
-            child: const Text('use ChatGPT for my wave'),
-          ),
-        const SizedBox(height: 12),
-        Text(
-          settings.config.listeningConsent
-              ? 'personalisation is on for this destination and account.'
-              : 'listening metadata stays private until you allow it when starting your wave.',
-          style: const TextStyle(
-            color: AppColors.textMid,
-            fontSize: 12,
-            height: 1.5,
-          ),
-        ),
-        if (settings.config.listeningConsent)
-          TextButton(
-            onPressed: busy
-                ? null
-                : () => _run(() => controller.setListeningConsent(false)),
-            child: const Text('turn off personalisation'),
-          ),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: TextButton(
-            onPressed: busy ? null : () => context.go('/recommendations'),
-            child: const Text('open my wave'),
-          ),
-        ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 24),
         DecoratedBox(
           decoration: BoxDecoration(
             border: AppTheme.border(),
@@ -165,35 +192,38 @@ class _AiSettingsSectionState extends ConsumerState<AiSettingsSection> {
           ),
           child: ExpansionTile(
             key: const ValueKey('wave-advanced-settings'),
-            title: Text(
-              'advanced settings',
-              style: AppTheme.mono(size: 12, color: AppColors.textMid),
-            ),
-            subtitle: const Text(
-              'use your own provider',
-              style: TextStyle(color: AppColors.textLow, fontSize: 11),
-            ),
+            title: Text('advanced settings', style: formHeadingStyle),
+            subtitle: const Text('use your own provider', style: formTextStyle),
             shape: const Border(),
             collapsedShape: const Border(),
+            tilePadding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 4,
+            ),
+            expandedCrossAxisAlignment: CrossAxisAlignment.stretch,
             childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
             children: [
-              TextButton(
-                onPressed: busy
+              FormAction(
+                kind: FormActionKind.quiet,
+                onTap: busy
                     ? null
                     : () => _run(
                         () => controller.connectChatGpt(newAccount: true),
                       ),
-                child: const Text('use another ChatGPT account'),
+                label: 'use another ChatGPT account',
+                icon: Icons.switch_account_outlined,
+                iconSize: 16,
+                padding: const EdgeInsets.symmetric(vertical: 8),
               ),
               const Text(
                 'custom providers are optional. changing the destination '
                 'revokes listening consent. no model server is started or downloaded.',
-                style: TextStyle(color: AppColors.textMid, fontSize: 12),
+                style: formTextStyle,
               ),
               const SizedBox(height: 12),
               Wrap(
-                spacing: 6,
-                runSpacing: 6,
+                spacing: 8,
+                runSpacing: 8,
                 children: [
                   for (final backend in [AiBackend.openAi, AiBackend.ollama])
                     Semantics(
@@ -210,7 +240,7 @@ class _AiSettingsSectionState extends ConsumerState<AiSettingsSection> {
                     ),
                 ],
               ),
-              const SizedBox(height: 14),
+              const SizedBox(height: 12),
               _ConfigField(
                 fieldKey: const ValueKey('ai-endpoint'),
                 controller: _endpoint,
@@ -237,25 +267,27 @@ class _AiSettingsSectionState extends ConsumerState<AiSettingsSection> {
                 label: 'API key · session only',
                 obscure: true,
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 8),
               Text(
                 settings.hasSessionKey
                     ? 'session key set · leave blank to keep it'
                     : 'optional for local models · never saved to disk',
-                style: const TextStyle(fontSize: 11, color: AppColors.textMid),
+                style: formTextStyle,
               ),
               const SizedBox(height: 12),
               const Text(
                 'HTTPS is required for remote providers. HTTP is only '
                 'allowed on loopback. your provider may charge for requests.',
-                style: TextStyle(color: AppColors.textMid, fontSize: 12),
+                style: formTextStyle,
               ),
               if (_message != null) ...[
                 const SizedBox(height: 8),
-                Text(_message!, style: AppTheme.mono(size: 11)),
+                Text(_message!, style: formTextStyle),
               ],
+              const SizedBox(height: 8),
               Wrap(
-                spacing: 12,
+                spacing: 8,
+                runSpacing: 8,
                 children: [
                   _ConfigAction(
                     onTap: busy ? null : _save,
@@ -275,8 +307,6 @@ class _AiSettingsSectionState extends ConsumerState<AiSettingsSection> {
     );
   }
 }
-
-const _labelStyle = TextStyle(fontSize: 12, color: AppColors.textMid);
 
 class _ConfigField extends StatelessWidget {
   const _ConfigField({
@@ -300,12 +330,9 @@ class _ConfigField extends StatelessWidget {
   final bool obscure;
 
   @override
-  Widget build(BuildContext context) {
-    const border = OutlineInputBorder(
-      borderRadius: AppTheme.borderRadius,
-      borderSide: AppTheme.borderSideStatic,
-    );
-    return TextField(
+  Widget build(BuildContext context) => FormFieldLabel(
+    label: label,
+    child: TextField(
       key: fieldKey,
       controller: controller,
       enabled: enabled,
@@ -314,36 +341,12 @@ class _ConfigField extends StatelessWidget {
       autocorrect: false,
       enableSuggestions: false,
       cursorColor: AppColors.acid,
-      style: technical
-          ? AppTheme.mono(size: 12, color: AppColors.textHi)
-          : const TextStyle(fontSize: 12, color: AppColors.textHi),
-      decoration: InputDecoration(
-        labelText: label,
-        floatingLabelBehavior: FloatingLabelBehavior.always,
-        labelStyle: _labelStyle,
-        floatingLabelStyle: _labelStyle,
-        hintText: hint,
-        hintStyle: AppTheme.mono(size: 12, color: AppColors.textLow),
-        counterText: '',
-        filled: true,
-        fillColor: AppColors.bg,
-        isDense: true,
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 12,
-          vertical: 12,
-        ),
-        border: border,
-        enabledBorder: border,
-        disabledBorder: border,
-        focusedBorder: border.copyWith(
-          borderSide: const BorderSide(
-            color: AppColors.acid,
-            width: AppTheme.borderWidth,
-          ),
-        ),
-      ),
-    );
-  }
+      style: technical || obscure
+          ? AppTheme.mono(size: 13, color: AppColors.textHi)
+          : const TextStyle(fontSize: 13, height: 1.5, color: AppColors.textHi),
+      decoration: formInputDecoration(hint: hint),
+    ),
+  );
 }
 
 class _ConfigAction extends StatelessWidget {
@@ -354,27 +357,10 @@ class _ConfigAction extends StatelessWidget {
   final bool active;
 
   @override
-  Widget build(BuildContext context) => Pressable(
-    enabled: onTap != null,
+  Widget build(BuildContext context) => FormAction(
+    label: label,
     onTap: onTap,
-    child: Opacity(
-      opacity: onTap == null ? 0.4 : 1,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-        decoration: BoxDecoration(
-          color: active ? AppColors.acid : AppColors.bg,
-          borderRadius: AppTheme.borderRadius,
-          border: AppTheme.border(active ? AppColors.acid : AppColors.border),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w500,
-            color: active ? AppColors.bg : AppColors.textHi,
-          ),
-        ),
-      ),
-    ),
+    kind: active ? FormActionKind.primary : FormActionKind.secondary,
+    selected: active,
   );
 }
