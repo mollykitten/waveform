@@ -220,6 +220,83 @@ void main() {
   });
   tearDown(() => auth.close());
 
+  for (final legacyHost in [null, 'urn:waveform:legacy-installation']) {
+    test(
+      'authorize sends a persisted UUIDv4 host ID '
+      '${legacyHost == null ? 'for a new installation' : 'after legacy migration'}',
+      () async {
+        if (legacyHost != null) {
+          store.value = jsonEncode({'host': legacyHost});
+        }
+        await auth.signIn();
+        final host = authorization.queryParameters['ext_agent_host_id'];
+        expect(
+          host,
+          matches(
+            r'^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-'
+            r'[89ab][0-9a-f]{3}-[0-9a-f]{12}$',
+          ),
+        );
+        expect(jsonDecode(store.writes.first)['host'], host);
+        final restored = ChatGptAuth(store: store);
+        addTearDown(restored.close);
+        await restored.restore();
+        expect(restored.account?.binding, auth.account?.binding);
+        expect(jsonDecode(store.value!)['host'], host);
+        callback = FakeCallback();
+        await auth.signIn();
+        expect(authorization.queryParameters['ext_agent_host_id'], host);
+        await auth.signOut();
+        expect(jsonDecode(store.value!)['host'], host);
+      },
+    );
+  }
+
+  test('legacy host migration preserves stored account credentials', () async {
+    final registration = {
+      'client_id': 'oaiapp_test',
+      'subject': 'subject-one',
+      'email': 'person@example.com',
+      'access_token': 'SYNTHETIC_ACCESS',
+      'refresh_token': 'SYNTHETIC_REFRESH',
+    };
+    store.value = jsonEncode({
+      'host': 'urn:waveform:legacy-installation',
+      'active': 'oaiapp_test',
+      'accounts': [registration],
+    });
+    await auth.restore();
+    final migrated = jsonDecode(store.value!);
+    expect(migrated['accounts'], [registration]);
+    expect(migrated['active'], 'oaiapp_test');
+    final restored = ChatGptAuth(store: store);
+    addTearDown(restored.close);
+    await restored.restore();
+    expect(store.writes, hasLength(1));
+    expect(jsonDecode(store.value!), migrated);
+    expect(restored.account?.connected, isTrue);
+  });
+
+  test(
+    'existing supported host stays stable across sign-in and logout',
+    () async {
+      const host = 'urn:uuid:12345678-1234-4123-8123-123456789abc';
+      store.value = jsonEncode({'host': host});
+      await auth.restore();
+      expect(store.writes, isEmpty);
+      await auth.signIn();
+      expect(authorization.queryParameters['ext_agent_host_id'], host);
+      await auth.signOut();
+      final restored = ChatGptAuth(store: store);
+      addTearDown(restored.close);
+      await restored.restore();
+      expect(jsonDecode(store.value!)['host'], host);
+      callback = FakeCallback();
+      await auth.signIn();
+      expect(authorization.queryParameters['ext_agent_host_id'], host);
+    },
+  );
+
   for (final nextToken in ['soundcloud-two', null]) {
     test('completed ChatGPT sign-in is reflected after SoundCloud '
         '${nextToken == null ? 'logout' : 'account switch'}', () async {
