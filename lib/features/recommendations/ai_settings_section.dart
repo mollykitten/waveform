@@ -141,6 +141,7 @@ class _AiSettingsSectionState extends ConsumerState<AiSettingsSection> {
                       },
               ),
               TextField(
+                key: const ValueKey<String>('ai-endpoint'),
                 controller: _endpoint,
                 enabled: !_busy,
                 maxLength: 500,
@@ -153,6 +154,7 @@ class _AiSettingsSectionState extends ConsumerState<AiSettingsSection> {
                 ),
               ),
               TextField(
+                key: const ValueKey<String>('ai-model'),
                 controller: _model,
                 enabled: !_busy,
                 maxLength: 120,
@@ -161,6 +163,7 @@ class _AiSettingsSectionState extends ConsumerState<AiSettingsSection> {
                 decoration: const InputDecoration(labelText: 'model name'),
               ),
               TextField(
+                key: const ValueKey<String>('ai-session-key'),
                 controller: _key,
                 enabled: !_busy,
                 obscureText: true,
