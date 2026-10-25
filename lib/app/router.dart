@@ -110,7 +110,7 @@ final appRouter = GoRouter(
         GoRoute(path: '/', pageBuilder: (c, s) => _page(c, const HomeScreen())),
         GoRoute(
           path: '/recommendations',
-          pageBuilder: (c, s) => _page(const RecommendationsScreen()),
+          pageBuilder: (c, s) => _page(c, const RecommendationsScreen()),
         ),
         GoRoute(
           path: '/feed',
