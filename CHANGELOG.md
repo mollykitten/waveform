@@ -6,9 +6,34 @@ All notable changes to Waveform are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.4.0] — unreleased
+
+GO+ playback on macOS, a new icon, and a release pipeline that can actually ship.
+
+### Added
+- **GO+ tracks play on macOS** through a bundled Widevine decryption core
+  (`scdrm`, Go over `dart:ffi`), as a fallback after regular streams. Needs
+  your own device profile in `assets/widevine/device.wvd`; it's never shipped.
+- **Copy-link button** in both player layouts; selectable track title and
+  description.
+- **New app icon, SVG logo** and a static landing page.
+
 ### Changed
 - **macOS 12 Monterey is now the minimum supported version.** Runner, tests,
   and CocoaPods targets use a consistent minimum compatible with Xcode 27.
+- **Web3 removed.** The `◆ minted` badge and wallet placeholders are gone;
+  lime stays as a secondary accent for markers.
+- **The `🔒 GO+` locked-track badge is gone**; unplayable tracks get the
+  common "unavailable — skipped" notice.
+- Docs moved from the README into `docs/`.
+
+### Fixed
+- Reduced motion is respected by press states and skeleton pulses.
+- Windows sign-in navigation no longer gets intercepted.
+- WebView engines start through their own titlebar entrypoint.
+- The ⌘K search trigger stays in sync with query edits.
+- Release pipeline: bounded notarization wait with the Apple log on failure,
+  missing Linux webkit/libsoup build deps, publish waits for all platforms.
 
 ## [0.3.0] — 2026-06-10
 

@@ -13,7 +13,7 @@
 
 - **live soundcloud data** from the internal `api-v2`, no mocks in the shipping app
 - **per-user login** through soundcloud's real sign-in page in an embedded webview. token goes to `getApplicationSupportDirectory()`
-- **real hls playback** via [`just_audio`](https://pub.dev/packages/just_audio) (avplayer on macos). engine ops are serialized so volume, progress and play/pause never desync mid-transition. progressive fallback when hls fails. encrypted hls (`cbc-/ctr-encrypted-hls`, the go+ tracks) gets detected and skipped with a notice
+- **real hls playback** via [`just_audio`](https://pub.dev/packages/just_audio) (avplayer on macos). engine ops are serialized so volume, progress and play/pause never desync mid-transition. progressive fallback when hls fails. encrypted hls (`cbc-/ctr-encrypted-hls`, the go+ tracks) plays on macos through the `scdrm` decryption core if you supply your own widevine device profile, otherwise it's skipped with a notice
 - **true shuffle with history**, previous goes back to what actually played, no repeats inside a cycle
 - **perceptual volume** (cubic taper), so the slider isn't all in the bottom 5 %
 - **real waveforms everywhere**: lists, player, feed and track page show the same soundcloud waveform, cached, with a procedural shape while it loads

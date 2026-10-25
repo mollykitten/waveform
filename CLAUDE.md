@@ -101,7 +101,7 @@ lib/
 6. ✅ Поиск: экран `/search?q=` с вкладками tracks/people/playlists (search/tracks|users|playlists), поле в шапке submit→навигация
 
 ### Путь развития (с 2026-10)
-**Горизонт 0 — выпустить то, что есть.** Код на 0.3.0+, но опубликованных релизов нет:
+**Горизонт 0 — выпустить то, что есть.** Код на 0.4.0 (следующий тег — `v0.4.0`), но опубликованных релизов нет:
 все прогоны `release.yml` по тегу v0.1.0 упали. Последний (2026-05-28): macOS собрался
 и подписался, но `notarytool submit --wait` (без `--timeout`) висел ~3 ч и вышел с
 ошибкой; Linux падает на `flutter build linux` за 3 с; Windows проходит. Логи прогонов
@@ -138,11 +138,18 @@ lib/
   на живом аккаунте — при провале деградирует до session-local + лог.
 - **Progressive-фолбэк стрима.** `Track.streamCandidates` несёт все
   транскодинги (HLS → progressive); плеер перебирает их, пока один не
-  заиграет. Зашифрованные (`cbc-/ctr-encrypted-hls`) транскодинги отсеиваются
-  (just_audio их не играет). Любая неудачная загрузка триггерит видимое
-  уведомление (AppShell `ref.listen`), не silent skip. **GO+-детекция и бейдж
-  `🔒 GO+` убраны (решение владельца 2026-10):** такие треки ничем не
-  выделяются в UI — общий «unavailable — skipped».
+  заиграет. Зашифрованные (`cbc-/ctr-encrypted-hls`) транскодинги из
+  обычных кандидатов отсеиваются (just_audio их не играет). Любая неудачная
+  загрузка триггерит видимое уведомление (AppShell `ref.listen`), не silent
+  skip. Бейджа `🔒 GO+` нет: такие треки в UI ничем не выделяются.
+- **GO+ через DRM (решение владельца 2026-10, правило переписано).** Играть
+  GO+ (`ctr-encrypted-hls`, Widevine CENC) — допустимо. Go-ядро
+  `third_party/scdrm` → `libscdrm.dylib` по `dart:ffi`
+  (`lib/core/drm/`), фолбэк после обычных кандидатов: лицензия → расшифровка
+  → mp3 в кэш. Только macOS. Профиль устройства `assets/widevine/device.wvd`
+  пользователь кладёт сам; **в git и в релизные сборки он не попадает
+  никогда** (в `.gitignore`, CI его не имеет). Без профиля DRM выключен и
+  трек — общий «unavailable — skipped».
 - **Tiles ↔ list переключатель.** `viewModeProvider` + `ViewToggle` + новый
   `CollectionRow` — в library + search/playlists. Персистится в `prefs.json`.
 - **Экран /settings.** Account (avatar + sign in/out), view (тогл), cache
@@ -309,8 +316,10 @@ lib/
 3. **Иконка приложения**: положить квадратный PNG в
    `assets/icon/icon.png` → `dart run flutter_launcher_icons` →
    `flutter clean && flutter build macos`.
-4. **Тег** следующей версии (0.3.x/0.4.0 — решает владелец): релизов на GitHub
-   ещё нет, все прогоны release.yml на v0.1.0 падали — сначала починить пайплайн.
+4. **Тег `v0.4.0`** (решено 2026-10). Сначала сухой прогон без публикации:
+   `gh workflow run release.yml --ref <ветка>` (publish-джоб гейтится на
+   тег). Зелёный → `git tag v0.4.0 && git push origin v0.4.0`, в CHANGELOG
+   заменить «unreleased» на дату.
 
 ## Идеи / бэклог
 - **True-shuffle по всей коллекции (likes).** Для плейлиста сделано
