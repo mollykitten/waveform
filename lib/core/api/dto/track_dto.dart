@@ -16,10 +16,7 @@ class TranscodingDto {
   final String protocol; // hls / progressive
   final String mimeType;
 
-  /// Превью-сниппет (~30с) вместо полного трека — так api-v2 отдаёт треки,
-  /// недоступные в регионе, и бесплатную часть GO+. Играть его как трек нельзя:
-  /// источник кончается задолго до `full_duration`, и completion-гейт плеера
-  /// принимал это за ложный конец → плеер замирал.
+  /// Whether the source contains only a preview of the full track.
   final bool snipped;
 
   bool get isHls => protocol == 'hls';
@@ -60,10 +57,9 @@ class TrackDto {
     this.repostsCount = 0,
     this.commentCount = 0,
     this.streamable = true,
-    this.policy,
-    this.monetizationModel,
     this.publisherArtist,
     this.transcodings = const [],
+    this.policy,
   });
 
   final int id;
@@ -81,40 +77,25 @@ class TrackDto {
   final int repostsCount;
   final int commentCount;
   final bool streamable;
-  final String? policy; // ALLOW / SNIP / BLOCK
-  final String?
-  monetizationModel; // NOT_APPLICABLE / AD_SUPPORTED / SUB_HIGH_TIER
+
   /// `publisher_metadata.artist` — реальный исполнитель (может отличаться от
   /// загрузившего). Web показывает именно его. null/пусто → берём username.
   final String? publisherArtist;
   final List<TranscodingDto> transcodings;
+  final String? policy;
 
-  /// GO+ (платная подписка): полный поток зашифрован, бесплатно — только сниппет.
-  /// Такие треки наш клиент проиграть не может.
-  ///
-  /// `policy`/`monetization_model` присутствуют только в полном объекте
-  /// `/tracks/{id}` (в выдаче search/stream/likes их нет), поэтому главный
-  /// надёжный признак — **наличие зашифрованного транскодинга**: у бесплатных
-  /// треков `cbc-/ctr-encrypted-hls` не бывает.
-  bool get isGoPlus =>
-      policy == 'SNIP' ||
-      monetizationModel == 'SUB_HIGH_TIER' ||
-      transcodings.any((t) => t.isEncrypted);
-
-  /// Полный поток трека недоступен (заблокирован в регионе / правообладателем):
-  /// `policy == 'BLOCK'` или все незашифрованные источники — лишь сниппеты.
-  /// GO+ сюда не относим — у него своя причина ([isGoPlus]).
+  /// Explicitly blocked, or only preview sources remain after DRM filtering.
   bool get isBlocked =>
-      !isGoPlus &&
-      (policy == 'BLOCK' ||
-          (transcodings.isNotEmpty &&
-              transcodings.every((t) => t.snipped || t.isEncrypted)));
+      policy == 'BLOCK' ||
+      (transcodings.any((t) => !t.isEncrypted) &&
+          transcodings.where((t) => !t.isEncrypted).every((t) => t.snipped));
 
   factory TrackDto.fromJson(Map<String, dynamic> j) {
     final media = asMap(j['media']);
     return TrackDto(
       id: asInt(j['id']),
       title: asStr(j['title']),
+      policy: j['policy'] as String?,
       // api-v2 отдаёт duration в мс; full_duration — без сниппета.
       durationMs: asInt(j['full_duration'] ?? j['duration']),
       user: UserDto.fromJson(asMap(j['user'])),
@@ -129,8 +110,6 @@ class TrackDto {
       repostsCount: asInt(j['reposts_count']),
       commentCount: asInt(j['comment_count']),
       streamable: asBool(j['streamable'], true),
-      policy: j['policy'] as String?,
-      monetizationModel: j['monetization_model'] as String?,
       publisherArtist: () {
         final v = asMap(j['publisher_metadata'])['artist'];
         return v is String && v.trim().isNotEmpty ? v : null;

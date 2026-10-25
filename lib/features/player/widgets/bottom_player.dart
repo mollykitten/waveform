@@ -1,5 +1,6 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -8,8 +9,8 @@ import '../../../app/theme/colors.dart';
 import '../../../shared/action_feedback.dart';
 import '../../../shared/format.dart';
 import '../../../shared/models/track.dart';
+import '../../../shared/url_share.dart';
 import '../../../shared/widgets/cover_art.dart';
-import '../../../shared/widgets/go_plus_badge.dart';
 import '../../../shared/widgets/pressable.dart';
 import '../../../shared/widgets/live_waveform.dart';
 import '../player_controller.dart';
@@ -106,10 +107,6 @@ class BottomPlayer extends ConsumerWidget {
                           ),
                         ),
                       ),
-                      if (track.goPlus) ...[
-                        const SizedBox(width: 6),
-                        const GoPlusBadge(),
-                      ],
                     ],
                   ),
                   const SizedBox(height: 2),
@@ -152,8 +149,14 @@ class BottomPlayer extends ConsumerWidget {
                 if (context.mounted) showLikeOutcome(context, outcome);
               },
             ),
+            const _CopyLinkButton(),
             const SizedBox(width: 4),
-            _Volume(volume: player.volume, muted: player.muted, onChanged: c.setVolume, onToggleMute: c.toggleMute),
+            _Volume(
+              volume: player.volume,
+              muted: player.muted,
+              onChanged: c.setVolume,
+              onToggleMute: c.toggleMute,
+            ),
             const SizedBox(width: 4),
             // Collapse → 44px-bar с минимальными контролами.
             _IconBtn(
@@ -170,6 +173,49 @@ class BottomPlayer extends ConsumerWidget {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// Copies the playing track, independently of the current page's context link.
+class _CopyLinkButton extends ConsumerWidget {
+  const _CopyLinkButton();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final url = ref.watch(
+      playerControllerProvider.select((state) => state.track?.permalinkUrl),
+    );
+    final enabled = url != null && url.trim().isNotEmpty;
+    final shortcut = Theme.of(context).platform == TargetPlatform.macOS
+        ? '⌘⇧C'
+        : 'Ctrl+Shift+C';
+    // Keep button activation local: the shell maps Space to play/pause.
+    return Shortcuts(
+      shortcuts: const {
+        SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
+        SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
+      },
+      child: IconButton(
+        tooltip: 'copy link · $shortcut',
+        icon: const Icon(Icons.link, size: 18, semanticLabel: 'Copy link'),
+        style: IconButton.styleFrom(
+          fixedSize: const Size(32, 32),
+          minimumSize: const Size(32, 32),
+          padding: EdgeInsets.zero,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          foregroundColor: AppColors.textMid,
+          disabledForegroundColor: AppColors.textLow,
+        ),
+        onPressed: !enabled
+            ? null
+            : () => copyToClipboard(
+                context,
+                url,
+                message: 'link copied',
+                ref: ref,
+              ),
       ),
     );
   }
@@ -242,11 +288,7 @@ class _Volume extends StatelessWidget {
         children: [
           Tooltip(
             message: isMuted ? 'muted' : '${(volume * 100).round()}%',
-            child: _IconBtn(
-              icon: icon,
-              enabled: true,
-              onTap: onToggleMute,
-            ),
+            child: _IconBtn(icon: icon, enabled: true, onTap: onToggleMute),
           ),
           SizedBox(
             width: 84,
@@ -381,6 +423,7 @@ class _CollapsedBar extends ConsumerWidget {
             onTap: onPlayPause,
           ),
           _IconBtn(icon: Icons.skip_next, enabled: enabled, onTap: onNext),
+          const _CopyLinkButton(),
           _IconBtn(icon: Icons.expand_less, enabled: true, onTap: onExpand),
         ],
       ),

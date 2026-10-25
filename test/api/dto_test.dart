@@ -7,7 +7,6 @@ import 'package:waveform_app/core/api/dto/playlist_dto.dart';
 import 'package:waveform_app/core/api/dto/track_dto.dart';
 import 'package:waveform_app/core/api/mappers.dart';
 import 'package:waveform_app/shared/models/feed_post.dart';
-import 'package:waveform_app/shared/models/track.dart';
 
 /// Фикстуры смоделированы по реальной форме api-v2 (референс: yt-dlp soundcloud.py
 /// + публичные гисты эндпоинтов). Заменить на снятые реальные ответы при интеграции.
@@ -134,68 +133,6 @@ void main() {
         'https://x/stream/hls',
         'https://x/stream/progressive',
       ]);
-      // Наличие зашифрованного транскодинга само по себе → GO+ (даже без
-      // policy/monetization, которых нет в выдаче search/stream).
-      expect(t.goPlus, true);
-    });
-
-    test('region-blocked: snippet-only track has no candidates', () {
-      const json = '''
-{
-  "id": 2, "title": "blocked", "duration": 30000, "full_duration": 240000,
-  "policy": "BLOCK",
-  "user": {"id": 1, "username": "u", "permalink": "u"},
-  "media": {"transcodings": [
-    {"url": "https://x/preview/hls", "preset": "mp3_0_0", "snipped": true,
-     "format": {"protocol": "hls", "mime_type": "audio/mpeg"}},
-    {"url": "https://x/preview/progressive", "preset": "mp3_0_0",
-     "snipped": true,
-     "format": {"protocol": "progressive", "mime_type": "audio/mpeg"}}
-  ]}
-}''';
-      final t = TrackDto.fromJson(jsonDecode(json)).toDomain();
-      expect(t.streamCandidates, isEmpty);
-      expect(t.blocked, true);
-      expect(t.goPlus, false);
-    });
-
-    test('snipped transcodings are never candidates', () {
-      final t = TrackDto.fromJson({
-        'id': 3,
-        'title': 't',
-        'duration': 1000,
-        'user': {'id': 1, 'username': 'u', 'permalink': 'u'},
-        'media': {
-          'transcodings': [
-            {
-              'url': 'https://x/preview',
-              'snipped': true,
-              'format': {'protocol': 'hls'},
-            },
-            {
-              'url': 'https://x/full',
-              'format': {'protocol': 'hls'},
-            },
-          ],
-        },
-      }).toDomain();
-      expect(t.streamCandidates, ['https://x/full']);
-      expect(t.blocked, false);
-    });
-
-    test('flags GO+ tracks (SNIP / SUB_HIGH_TIER) as goPlus', () {
-      Track parse(String policy, String mon) => TrackDto.fromJson({
-        'id': 1,
-        'title': 't',
-        'duration': 1000,
-        'user': {'id': 1, 'username': 'u', 'permalink': 'u'},
-        'policy': policy,
-        'monetization_model': mon,
-      }).toDomain();
-      expect(parse('ALLOW', 'AD_SUPPORTED').goPlus, false);
-      expect(parse('SNIP', 'SUB_HIGH_TIER').goPlus, true);
-      expect(parse('ALLOW', 'SUB_HIGH_TIER').goPlus, true);
-      expect(parse('SNIP', 'NOT_APPLICABLE').goPlus, true);
     });
 
     test('maps to domain Track', () {

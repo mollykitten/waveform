@@ -157,11 +157,7 @@ class _AppShellState extends ConsumerState<AppShell> {
       next,
     ) {
       if (next == null || next.seq == prev?.seq) return;
-      final msg = next.goPlus
-          ? '“${next.title}” is GO+ only — can’t play without a subscription'
-          : next.blocked
-          ? '“${next.title}” isn’t available in your region — skipped'
-          : '“${next.title}” is unavailable — skipped';
+      final msg = '“${next.title}” is unavailable — skipped';
       showToast(context, msg, duration: const Duration(seconds: 3));
     });
 
