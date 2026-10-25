@@ -52,6 +52,7 @@ dependencies:
   talker_riverpod_logger: ^5.1.16
   talker_dio_logger: ^5.1.16
   crypto: ^3.0.7
+  ffi: ^2.1.0
   window_manager: ^0.5.1
   app_links: ^6.3.2
 
@@ -91,6 +92,12 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+  # Widevine-профиль устройства (device.wvd) для дешифровки GO+ (core/drm/).
+  # Файл в репозитории нет — приватный ключ устройства; без него DRM
+  # выключен (см. assets/widevine/README.md).
+  assets:
+    - assets/widevine/
 
   # To add assets to your application, add an assets section, like this:
   # assets:

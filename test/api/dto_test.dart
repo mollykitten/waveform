@@ -135,6 +135,36 @@ void main() {
       ]);
     });
 
+    test(
+      'GO+ ctr-encrypted-hls → drmStreamCandidates по приоритету пресетов',
+      () {
+        const json = '''
+{
+  "id": 2, "title": "go+ track", "duration": 1000,
+  "user": {"id": 1, "username": "u", "permalink": "u"},
+  "media": {"transcodings": [
+    {"url": "https://x/stream/ctr-abr", "preset": "abr_sq",
+     "format": {"protocol": "ctr-encrypted-hls", "mime_type": "audio/mpegurl"}},
+    {"url": "https://x/stream/ctr-96", "preset": "aac_96k",
+     "format": {"protocol": "ctr-encrypted-hls", "mime_type": "audio/mp4"}},
+    {"url": "https://x/stream/ctr-160", "preset": "aac_160k",
+     "format": {"protocol": "ctr-encrypted-hls", "mime_type": "audio/mp4"}},
+    {"url": "https://x/stream/hls", "preset": "opus_0_0",
+     "format": {"protocol": "hls", "mime_type": "audio/ogg"}}
+  ]}
+}''';
+        final t = TrackDto.fromJson(jsonDecode(json)).toDomain();
+        // Зашифрованные не попадают в ordinary-кандидаты (just_audio их не ест).
+        expect(t.streamCandidates, ['https://x/stream/hls']);
+        // Честный AAC вперёд, abr-мастер — последним.
+        expect(t.drmStreamCandidates, [
+          'https://x/stream/ctr-160',
+          'https://x/stream/ctr-96',
+          'https://x/stream/ctr-abr',
+        ]);
+      },
+    );
+
     test('maps to domain Track', () {
       final t = dto.toDomain();
       expect(t.id, '250011541');
