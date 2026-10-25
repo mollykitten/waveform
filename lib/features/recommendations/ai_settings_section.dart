@@ -8,6 +8,7 @@ import '../../core/recommendations/ai_config.dart';
 import '../../core/recommendations/models.dart';
 import '../../core/recommendations/providers.dart';
 import '../../shared/widgets/section_header.dart';
+import '../../shared/widgets/pressable.dart';
 
 /// User-owned endpoint configuration. The key field is never restored to UI.
 class AiSettingsSection extends ConsumerStatefulWidget {
@@ -23,6 +24,7 @@ class _AiSettingsSectionState extends ConsumerState<AiSettingsSection> {
   AiBackend _backend = AiBackend.openAi;
   bool _initialized = false;
   bool _busy = false;
+  bool _showDetails = false;
   String? _message;
 
   @override
@@ -117,108 +119,140 @@ class _AiSettingsSectionState extends ConsumerState<AiSettingsSection> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                'use your own model endpoint. nothing is sent until '
-                'you generate and approve the destination and data.',
+                'your model, your endpoint',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
               ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<AiBackend>(
-                initialValue: _backend,
-                decoration: const InputDecoration(labelText: 'model protocol'),
-                items: const [
-                  DropdownMenuItem(
-                    value: AiBackend.openAi,
-                    child: Text('OpenAI-compatible'),
-                  ),
-                  DropdownMenuItem(
-                    value: AiBackend.ollama,
-                    child: Text('Ollama (native)'),
-                  ),
+              const SizedBox(height: 6),
+              const Text(
+                'nothing is sent until you generate and approve '
+                'the destination and data.',
+                style: TextStyle(fontSize: 12, color: AppColors.textMid),
+              ),
+              const SizedBox(height: 16),
+              const Text('model protocol', style: _labelStyle),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  for (final backend in AiBackend.values)
+                    Semantics(
+                      selected: _backend == backend,
+                      child: _ConfigAction(
+                        label: backend == AiBackend.openAi
+                            ? 'OpenAI-compatible'
+                            : 'Ollama (native)',
+                        active: _backend == backend,
+                        onTap: _busy
+                            ? null
+                            : () => setState(() => _backend = backend),
+                      ),
+                    ),
                 ],
-                onChanged: _busy
-                    ? null
-                    : (value) {
-                        if (value != null) setState(() => _backend = value);
-                      },
               ),
-              TextField(
-                key: const ValueKey<String>('ai-endpoint'),
+              const SizedBox(height: 14),
+              _ConfigField(
+                fieldKey: const ValueKey<String>('ai-endpoint'),
                 controller: _endpoint,
                 enabled: !_busy,
                 maxLength: 500,
-                autocorrect: false,
-                enableSuggestions: false,
-                decoration: const InputDecoration(
-                  labelText: 'endpoint base URL',
-                  hintText:
-                      'https://api.openai.com/v1 or http://localhost:11434',
-                ),
+                label: 'endpoint base URL',
+                hint: 'https://api.openai.com/v1',
+                technical: true,
               ),
-              TextField(
-                key: const ValueKey<String>('ai-model'),
+              const SizedBox(height: 12),
+              _ConfigField(
+                fieldKey: const ValueKey<String>('ai-model'),
                 controller: _model,
                 enabled: !_busy,
                 maxLength: 120,
-                autocorrect: false,
-                enableSuggestions: false,
-                decoration: const InputDecoration(labelText: 'model name'),
+                label: 'model name',
               ),
-              TextField(
-                key: const ValueKey<String>('ai-session-key'),
+              const SizedBox(height: 12),
+              _ConfigField(
+                fieldKey: const ValueKey<String>('ai-session-key'),
                 controller: _key,
                 enabled: !_busy,
-                obscureText: true,
                 maxLength: 4096,
-                autocorrect: false,
-                enableSuggestions: false,
-                decoration: InputDecoration(
-                  labelText:
-                      'API key — session only (optional for local models)',
-                  helperText: settings.hasSessionKey
-                      ? 'a session key is set; leave blank to keep it'
-                      : 'no key stored; paste one if your endpoint requires it',
+                label: 'API key · session only',
+                obscure: true,
+              ),
+              const SizedBox(height: 6),
+              Text(
+                settings.hasSessionKey
+                    ? 'session key set · leave blank to keep it'
+                    : 'optional for local models · never saved to disk',
+                style: const TextStyle(fontSize: 11, color: AppColors.textMid),
+              ),
+              const SizedBox(height: 14),
+              Pressable(
+                onTap: () => setState(() => _showDetails = !_showDetails),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        _showDetails ? Icons.expand_less : Icons.expand_more,
+                        size: 14,
+                        color: AppColors.textMid,
+                      ),
+                      const SizedBox(width: 4),
+                      const Text('connection & privacy', style: _labelStyle),
+                    ],
+                  ),
                 ),
               ),
-              const SizedBox(height: 8),
-              const Text(
-                'remote endpoints require HTTPS. HTTP is allowed only '
-                'for localhost, 127.0.0.1 or ::1. changing the destination '
-                'revokes listening consent and clears the previous key. '
-                'no model is installed or downloaded by Waveform.',
-              ),
+              if (_showDetails)
+                const Padding(
+                  padding: EdgeInsets.only(top: 6),
+                  child: Text(
+                    'remote endpoints require HTTPS; HTTP is local only '
+                    '(localhost, 127.0.0.1 or ::1). changing the destination '
+                    'revokes listening consent and clears the previous key. '
+                    'Waveform does not install or download models.',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: AppColors.textMid,
+                      height: 1.5,
+                    ),
+                  ),
+                ),
               if (settings.config.listeningConsent)
-                TextButton(
-                  onPressed: _busy
+                _ConfigAction(
+                  onTap: _busy
                       ? null
                       : () => ref
                             .read(aiSettingsProvider.notifier)
                             .setListeningConsent(false),
-                  child: const Text('revoke listening metadata consent'),
+                  label: 'revoke listening metadata consent',
                 ),
               if (_message != null) ...[
                 const SizedBox(height: 8),
-                Text(_message!, style: AppTheme.mono(size: 11)),
+                Text(_message!, style: _labelStyle),
               ],
               if (settings.error != null)
                 const Text(
                   'configuration could not be read or saved; '
                   'review the fields and save again',
                 ),
+              const SizedBox(height: 16),
               Wrap(
-                spacing: 12,
+                spacing: 8,
+                runSpacing: 8,
                 children: [
-                  TextButton(
-                    onPressed: _busy ? null : _save,
-                    child: const Text('save AI settings'),
+                  _ConfigAction(
+                    onTap: _busy ? null : _save,
+                    label: 'save AI settings',
+                    active: true,
                   ),
-                  TextButton(
-                    onPressed: _busy
-                        ? null
-                        : () => context.go('/recommendations'),
-                    child: const Text('open recommendations'),
+                  _ConfigAction(
+                    onTap: _busy ? null : () => context.go('/recommendations'),
+                    label: 'open recommendations',
                   ),
-                  TextButton(
-                    onPressed: _busy ? null : _clear,
-                    child: const Text('clear AI settings and key'),
+                  _ConfigAction(
+                    onTap: _busy ? null : _clear,
+                    label: 'clear AI settings and key',
                   ),
                 ],
               ),
@@ -228,4 +262,107 @@ class _AiSettingsSectionState extends ConsumerState<AiSettingsSection> {
       ],
     );
   }
+}
+
+const _labelStyle = TextStyle(fontSize: 12, color: AppColors.textMid);
+
+class _ConfigField extends StatelessWidget {
+  const _ConfigField({
+    required this.fieldKey,
+    required this.controller,
+    required this.enabled,
+    required this.maxLength,
+    required this.label,
+    this.hint,
+    this.technical = false,
+    this.obscure = false,
+  });
+
+  final Key fieldKey;
+  final TextEditingController controller;
+  final bool enabled;
+  final int maxLength;
+  final String label;
+  final String? hint;
+  final bool technical;
+  final bool obscure;
+
+  @override
+  Widget build(BuildContext context) {
+    const border = OutlineInputBorder(
+      borderRadius: AppTheme.borderRadius,
+      borderSide: AppTheme.borderSideStatic,
+    );
+    return TextField(
+      key: fieldKey,
+      controller: controller,
+      enabled: enabled,
+      maxLength: maxLength,
+      obscureText: obscure,
+      autocorrect: false,
+      enableSuggestions: false,
+      cursorColor: AppColors.acid,
+      style: technical
+          ? AppTheme.mono(size: 12, color: AppColors.textHi)
+          : const TextStyle(fontSize: 12, color: AppColors.textHi),
+      decoration: InputDecoration(
+        labelText: label,
+        floatingLabelBehavior: FloatingLabelBehavior.always,
+        labelStyle: _labelStyle,
+        floatingLabelStyle: _labelStyle,
+        hintText: hint,
+        hintStyle: AppTheme.mono(size: 12, color: AppColors.textLow),
+        counterText: '',
+        filled: true,
+        fillColor: AppColors.bg,
+        isDense: true,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: 12,
+        ),
+        border: border,
+        enabledBorder: border,
+        disabledBorder: border,
+        focusedBorder: border.copyWith(
+          borderSide: const BorderSide(
+            color: AppColors.acid,
+            width: AppTheme.borderWidth,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ConfigAction extends StatelessWidget {
+  const _ConfigAction({required this.label, this.onTap, this.active = false});
+
+  final String label;
+  final VoidCallback? onTap;
+  final bool active;
+
+  @override
+  Widget build(BuildContext context) => Pressable(
+    enabled: onTap != null,
+    onTap: onTap,
+    child: Opacity(
+      opacity: onTap == null ? 0.4 : 1,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+        decoration: BoxDecoration(
+          color: active ? AppColors.acid : AppColors.bg,
+          borderRadius: AppTheme.borderRadius,
+          border: AppTheme.border(active ? AppColors.acid : AppColors.border),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w500,
+            color: active ? AppColors.bg : AppColors.textHi,
+          ),
+        ),
+      ),
+    ),
+  );
 }
