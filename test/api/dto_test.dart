@@ -7,7 +7,6 @@ import 'package:waveform_app/core/api/dto/playlist_dto.dart';
 import 'package:waveform_app/core/api/dto/track_dto.dart';
 import 'package:waveform_app/core/api/mappers.dart';
 import 'package:waveform_app/shared/models/feed_post.dart';
-import 'package:waveform_app/shared/models/track.dart';
 
 /// Фикстуры смоделированы по реальной форме api-v2 (референс: yt-dlp soundcloud.py
 /// + публичные гисты эндпоинтов). Заменить на снятые реальные ответы при интеграции.
@@ -130,26 +129,10 @@ void main() {
   ]}
 }''';
       final t = TrackDto.fromJson(jsonDecode(json)).toDomain();
-      expect(t.streamCandidates,
-          ['https://x/stream/hls', 'https://x/stream/progressive']);
-      // Наличие зашифрованного транскодинга само по себе → GO+ (даже без
-      // policy/monetization, которых нет в выдаче search/stream).
-      expect(t.goPlus, true);
-    });
-
-    test('flags GO+ tracks (SNIP / SUB_HIGH_TIER) as goPlus', () {
-      Track parse(String policy, String mon) => TrackDto.fromJson({
-            'id': 1,
-            'title': 't',
-            'duration': 1000,
-            'user': {'id': 1, 'username': 'u', 'permalink': 'u'},
-            'policy': policy,
-            'monetization_model': mon,
-          }).toDomain();
-      expect(parse('ALLOW', 'AD_SUPPORTED').goPlus, false);
-      expect(parse('SNIP', 'SUB_HIGH_TIER').goPlus, true);
-      expect(parse('ALLOW', 'SUB_HIGH_TIER').goPlus, true);
-      expect(parse('SNIP', 'NOT_APPLICABLE').goPlus, true);
+      expect(t.streamCandidates, [
+        'https://x/stream/hls',
+        'https://x/stream/progressive',
+      ]);
     });
 
     test('maps to domain Track', () {
@@ -188,35 +171,41 @@ void main() {
 
   group('publisher_metadata.artist', () {
     test('publisher_metadata.artist overrides uploader username', () {
-      final json = jsonDecode('''
+      final json =
+          jsonDecode('''
   {
     "id": 1, "title": "T", "duration": 1000, "full_duration": 1000,
     "permalink_url": "https://soundcloud.com/up/t",
     "user": {"id": 7, "username": "uploader_acct", "permalink": "uploader_acct"},
     "publisher_metadata": {"artist": "Real Artist Name"}
-  }''') as Map<String, dynamic>;
+  }''')
+              as Map<String, dynamic>;
       final track = TrackDto.fromJson(json).toDomain();
-      expect(track.artist, 'Real Artist Name');      // display = metadata
+      expect(track.artist, 'Real Artist Name'); // display = metadata
       expect(track.artistPermalink, 'uploader_acct'); // link = uploader
     });
 
     test('falls back to username when publisher artist absent/blank', () {
-      final json = jsonDecode('''
+      final json =
+          jsonDecode('''
   {
     "id": 2, "title": "T2", "duration": 1000,
     "user": {"id": 8, "username": "soloacct", "permalink": "soloacct"},
     "publisher_metadata": {"artist": "  "}
-  }''') as Map<String, dynamic>;
+  }''')
+              as Map<String, dynamic>;
       final track = TrackDto.fromJson(json).toDomain();
       expect(track.artist, 'soloacct');
     });
 
     test('no publisher_metadata at all falls back to username', () {
-      final json = jsonDecode('''
+      final json =
+          jsonDecode('''
   {
     "id": 3, "title": "T3", "duration": 1000,
     "user": {"id": 9, "username": "plainacct", "permalink": "plainacct"}
-  }''') as Map<String, dynamic>;
+  }''')
+              as Map<String, dynamic>;
       final track = TrackDto.fromJson(json).toDomain();
       expect(track.artist, 'plainacct');
     });

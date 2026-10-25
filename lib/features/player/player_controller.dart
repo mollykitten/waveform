@@ -14,7 +14,7 @@ import '../../shared/models/track.dart';
 
 /// Событие «трек не проигрался» — для всплывающего уведомления в UI.
 /// [seq] растёт с каждым событием, чтобы listener срабатывал и на повтор.
-typedef Unplayable = ({int seq, String title, bool goPlus});
+typedef Unplayable = ({int seq, String title});
 
 /// Состояние плеера. Прогресс/признак «играет» приходят из [AudioEngine]
 /// (just_audio); очередь next/previous — реальный список с экрана.
@@ -51,7 +51,7 @@ class PlayerState {
   /// `notifier.upcomingTracks` для актуального списка.
   final int queueVersion;
 
-  /// Последний непроигравшийся трек (GO+/недоступен) — UI показывает уведомление.
+  /// Последний непроигравшийся трек — UI показывает уведомление.
   final Unplayable? unplayable;
 
   /// Доля воспроизведённого (0..1) — для оранжевой части waveform.
@@ -360,17 +360,9 @@ class PlayerController extends Notifier<PlayerState> {
   Future<void> _load(Track track) async {
     final token = ++_loadToken;
     final candidates = track.streamCandidates;
-    // Нет незашифрованных источников: GO+ → сообщаем причину; иначе мок/не
-    // streamable — тихо (UI оптимистичен, реальный «играет» придёт из движка).
-    if (candidates.isEmpty) {
-      if (track.goPlus) {
-        ref
-            .read(talkerProvider)
-            .warning('GO+ only (subscription): ${track.title}');
-        _markUnplayable(token, track);
-      }
-      return;
-    }
+    // Нет незашифрованных источников (мок/не streamable) — тихо (UI
+    // оптимистичен, реальный «играет» придёт из движка).
+    if (candidates.isEmpty) return;
     final api = ref.read(soundcloudApiProvider);
     for (final candidate in candidates) {
       try {
@@ -392,30 +384,20 @@ class PlayerController extends Notifier<PlayerState> {
         // пробуем следующий источник
       }
     }
-    // Все кандидаты исчерпаны. GO+ → свободный поток лишь сниппет/протух, полный
-    // зашифрован; иначе трек удалён/недоступен.
-    ref
-        .read(talkerProvider)
-        .warning(
-          track.goPlus
-              ? 'GO+ only (subscription): ${track.title}'
-              : 'no playable stream: ${track.title}',
-        );
+    // Все кандидаты исчерпаны: трек удалён/недоступен или остались только
+    // зашифрованные источники.
+    ref.read(talkerProvider).warning('no playable stream: ${track.title}');
     _markUnplayable(token, track);
   }
 
-  /// Помечает текущий трек непроигрываемым (с видимой причиной — GO+/недоступен)
+  /// Помечает текущий трек непроигрываемым (видимая причина «unavailable»)
   /// и в очереди перескакивает на следующий, но не более [_maxDeadSkips] подряд,
-  /// чтобы цепочка мёртвых/GO+ треков не пролистала всю очередь.
+  /// чтобы цепочка мёртвых треков не пролистала всю очередь.
   void _markUnplayable(int token, Track track) {
     if (token != _loadToken || state.track?.id != track.id) return;
     state = state.copyWith(
       isPlaying: false,
-      unplayable: (
-        seq: ++_unplayableSeq,
-        title: track.title,
-        goPlus: track.goPlus,
-      ),
+      unplayable: (seq: ++_unplayableSeq, title: track.title),
     );
     if (_queue.length > 1 && ++_deadStreak < _maxDeadSkips) {
       next();
@@ -428,13 +410,13 @@ class PlayerController extends Notifier<PlayerState> {
   int _preloadToken = 0;
 
   /// Готовит следующий трек ([_upNext]) в теневом движке: резолвит первый
-  /// candidate, кидает engine.preloadNext. Тихо отказывается на GO+/пустых.
+  /// candidate, кидает engine.preloadNext. Тихо отказывается на пустых.
   /// [current] оставлен для совместимости вызова — целевой трек берётся из
   /// [_upNext], чтобы preload и фактический переход выбрали один и тот же трек.
   Future<void> _preloadAfter(Track current) async {
     final token = ++_preloadToken;
     final n = _upNext;
-    if (n == null || n.streamCandidates.isEmpty || n.goPlus) {
+    if (n == null || n.streamCandidates.isEmpty) {
       await _engine.preloadNext(null);
       return;
     }
