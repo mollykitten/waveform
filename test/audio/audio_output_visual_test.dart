@@ -236,8 +236,4 @@ Future<void> _capture(WidgetTester tester, Key key, String filename) async {
 }
 
 // Fetch real font files before widget tests; their default client returns 400.
-class _FontHttpOverrides extends HttpOverrides {
-  @override
-  HttpClient createHttpClient(SecurityContext? context) =>
-      super.createHttpClient(context);
-}
+class _FontHttpOverrides extends HttpOverrides {}
