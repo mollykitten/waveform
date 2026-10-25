@@ -113,11 +113,18 @@ void WebView::OnWebviewControllerCreated() {
 
   UpdateBounds();
 
-  // Always use single window to load web page.
+  // waveform patch: в видимом окне window.open() НЕ перехватываем — WebView2
+  // сам открывает попап-окно (общий профиль/cookie, живой window.opener). Без
+  // этого OAuth-вход через Google/Apple/Facebook грузился в то же окно, терял
+  // opener и зависал. Скрытый фоновый "sync"-webview по-прежнему грузит всё в
+  // себя, чтобы попапы не вылезали на экран.
   webview_->add_NewWindowRequested(
       Callback<ICoreWebView2NewWindowRequestedEventHandler>(
-          [](ICoreWebView2 *sender,
-             ICoreWebView2NewWindowRequestedEventArgs *args) {
+          [this](ICoreWebView2 *sender,
+                 ICoreWebView2NewWindowRequestedEventArgs *args) {
+            if (::IsWindowVisible(view_window_.get())) {
+              return S_OK;
+            }
             wil::unique_cotaskmem_string url;
             HRESULT hr = args->get_Uri(&url);
             if (SUCCEEDED(hr) && url) {

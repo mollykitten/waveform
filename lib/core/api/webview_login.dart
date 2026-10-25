@@ -9,6 +9,11 @@ import 'package:desktop_webview_window/desktop_webview_window.dart';
 /// Ключевой момент: SoundCloud ставит `oauth_token` ещё ДО логина (гостевой),
 /// поэтому каждый кандидат проверяется через [validate] (запрос `/me`). Окно
 /// закрываем только когда токен реально опознан как пользовательский.
+///
+/// Реальный popup/opener не означает поддержку Google sign-in: Google
+/// запрещает OAuth в embedded user-agent под контролем приложения. Не
+/// подменяем User-Agent и не обходим отказ провайдера; см. docs/research/
+/// google-sign-in-verification.md для ограничений и разрешённого пути.
 abstract final class WebviewLogin {
   static Future<bool> available() => WebviewWindow.isWebviewAvailable();
 
