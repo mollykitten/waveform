@@ -5,7 +5,10 @@ internal guide for working on waveform in superset.
 ## setup
 
 - use Flutter 3.41.0, matching CI, and create fresh worktrees from current
-  `origin/main`; the primary checkout may be behind.
+  `origin/main`; the primary checkout may be behind. after workspace creation,
+  verify its base with `git rev-parse HEAD origin/main`. one observed roadmap
+  planning worktree started at local `main` (`4bc6d7d`) while `origin/main` was
+  `0ac370d`; treat this as a workspace-specific incident, not a universal rule.
 - `.superset/config.json` runs only `flutter pub get`. enable
   `waitForSetupBeforeAgent: true` in superset settings so agents wait for setup.
 - each worktree owns its `.dart_tool/` and `build/` directories. do not symlink
@@ -48,35 +51,130 @@ that it has exited, and clear your record. the next owner launches from their
 own worktree and records their own app ID and DTD URI. do not use `pkill` or stop
 another workspace's apps or processes.
 
-## agent launches
+## agent sessions
 
-run from the current workspace root:
+ACP sessions started through the CLI do not push completion into the coordinator's
+conversation. while workers run, check `sessions list` and read completed
+`agent_message` results with `sessions read`; do not monitor only launch config.
+`SUPERSET_WORKER_DONE` is a text marker, not a notification event. consume and
+verify finished results before dispatching more work, then stop unused processes
+while keeping chat history.
+
+prefer Superset ACP chat sessions and open them in chat panes for planning,
+implementation, review, and checks. superset CLI 1.40 exposes `sessions create`,
+`sessions read`, `sessions send`, and `sessions open`; an installed orchestration
+skill that only documents terminals does not describe this CLI capability.
+example advisory planning launch:
+
+```sh
+superset sessions create --local --workspace <workspace-id> --agent claude \
+  --mode bypassPermissions \
+  --prompt "give read-only recommendations; do not edit files"
+superset sessions open --local --workspace <workspace-id> --session <session-id>
+```
+
+use these model and mode choices:
+
+| workflow | agent | model | ACP mode | reasoning / effort |
+| --- | --- | --- | --- | --- |
+| implementation | Codex ACP | `gpt-6.1-sol` | `agent-full-access` | `medium` |
+| risky work or review | Codex ACP | `gpt-6.1-sol` | `agent-full-access` | `high` |
+| mechanical work or checks | Codex ACP | `gpt-6-luna` | `agent-full-access` | `medium` |
+| planning recommendations | Claude ACP | Fable preferred; select in picker and verify | `bypassPermissions` | target: `high` |
+
+use `gpt-6-astra` for planning only when Fable through ACP is unavailable. the
+sessions CLI has no effort flag. planning prompts must request recommendations
+only and explicitly say not to edit files; `bypassPermissions` is the session
+mode, while advisory-only behavior comes from the prompt. claude's ACP options
+list includes `claude-fable-5-1[1m]`, but the CLI rejects that ID as
+unsupported. the CLI accepts `claude-fable-5-1`, yet a created session still
+reported Opus. select Fable in the ACP model picker and verify the session
+before relying on it;
+never infer the selected model from the create argument. codex exposes
+`reasoning_effort`, while Claude exposes `effort`. inspect exact IDs and values
+through a bounded read that prints only the harness and model/mode/effort
+options, omitting prompts, tool output, and large config or skills payloads:
+
+```sh
+superset sessions read --local --workspace <workspace-id> --session <session-id> \
+  --limit 100 --json |
+  jq '[.envelopes[] | select(.event.type == "session") |
+    {harness: .event.session.harness,
+     options: [.event.session.configOptions[]? |
+       select(.id == "model" or .id == "mode" or .id == "effort" or .id == "reasoning_effort") |
+       {id, currentValue}]}]'
+```
+
+the existing `.superset/agent.sh` and pinned script-bar buttons are legacy
+terminal launchers and may still select Fable for `plan`; they are not proof of
+ACP harness, model, or reasoning settings. for terminal-launched agents, use:
 
 ```sh
 sh .superset/agent.sh implement|review|check|plan [prompt]
 ```
 
-choose one mode in place of `implement|review|check|plan`:
+the script runs the selected CLI in the current terminal. prefer ACP sessions
+for new agent work.
 
-| mode | CLI | model | reasoning / effort | role |
-| --- | --- | --- | --- | --- |
-| `implement` | Codex | `gpt-6.1-sol` | `medium` | implementation |
-| `review` | Codex | `gpt-6.1-sol` | `high` | review the current diff without edits |
-| `check` | Codex | `gpt-6-luna` | `medium` | verification without edits |
-| `plan` | Claude | `fable` | `high` | advice and planning, permission mode `plan` |
+## worker completion notifier
 
-```sh
-sh .superset/agent.sh implement
-sh .superset/agent.sh review
-sh .superset/agent.sh check
-sh .superset/agent.sh plan
+`.superset/worker_notifier.py` bridges one explicit worker ACP session to one
+coordinator ACP session. It reads only completed `agent_message` items carrying
+`SUPERSET_WORKER_DONE` or `SUPERSET_WORKER_BLOCKED`; it does not forward tool
+output, reasoning, or raw logs. The marker must be a standalone unquoted line
+outside fenced code blocks, and the matching ACP turn must be completed. Keep
+its per-user JSON config outside the repo:
+
+```json
+{
+  "source": {"workspace": "worker-workspace-id", "session": "worker-session-id"},
+  "target": {"workspace": "coordinator-workspace-id", "session": "coordinator-session-id"},
+  "task": "worker task name",
+  "since_ms": 1792890000000
+}
 ```
 
-four project-scoped saved buttons are available in the superset scripts bar:
-`waveform · implement`, `waveform · review`, `waveform · check`, and
-`waveform · plan`. all four are pinned and ready, using the model and effort
-mappings above. their inline commands work in any branch without requiring
-the launcher file; the file-based commands above remain an alternative.
+Set `since_ms` to the Unix epoch in milliseconds from which this watcher should
+accept completions. It processes all newer undelivered completion markers in
+chronological order, then stores a source-and-target-scoped checkpoint. Watch
+mode polls every 10 seconds by default and exits with an unavailable status if
+the source session disappears on a direct `sessions read`. The capped list is
+used only for metadata fallback, not to decide that the source is absent. Start
+with
+`--dry-run` to inspect the short message without sending or marking it delivered:
+
+```sh
+python3 .superset/worker_notifier.py --config ~/.config/superset/worker-notifier.json --dry-run
+python3 .superset/worker_notifier.py --config ~/.config/superset/worker-notifier.json
+python3 .superset/worker_notifier.py --config ~/.config/superset/worker-notifier.json --watch --interval 10
+```
+
+delivery state is stored atomically under
+`~/.local/state/superset/worker-notifier-state.json`; successful sends persist
+delivered identities before the next send. completion checkpoints record
+progress but never exclude undelivered identities. existing checkpoint files
+remain readable; rescanning from `since_ms` recovers older missed completions.
+each poll follows opaque `nextBefore` cursors through the available history,
+without treating item timestamps or lexical epoch order as journal boundaries.
+history beyond 100 pages fails before sending or changing state; long histories
+therefore require operator attention. this conservative scan also costs more
+reads per poll than stopping at a timestamp. dedupe is target-scoped;
+checkpoints are scoped to the
+source provider session and target, so a different coordinator can receive the
+same result. The notifier rejects identical source and target sessions and uses
+a process lock. It reads completed
+`event.type: item` messages only when `item.completedAtMs` is present. A
+stopped source gets one final history read; an explicit direct-read not-found
+response is reported unavailable. Use a distinct `--state` path for each
+concurrent watcher. Review the config and dry-run output before enabling sends.
+
+## accepted roadmap recommendations
+
+these are planning recommendations, not completed work: validate a release
+before starting another large feature; keep sampled statistics and error
+reporting honest about their coverage; prioritize queue accessibility; revisit
+theme tokens and mini-window mode afterward. the listening heatmap remains
+blocked on confirming the live play-history contract.
 
 the shared setup config takes effect for new workspaces once it is integrated
 into the project's base branch. these branch changes do not change
