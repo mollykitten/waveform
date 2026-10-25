@@ -155,7 +155,7 @@ void main() {
       testWidgets('wave capture ${tune ? 'tune open' : 'idle'} '
           '${size.width.toInt()}x${size.height.toInt()}', (tester) async {
         await captureWave(tester, size, tune);
-      });
+      }, skip: !visualTestFontsAvailable);
     }
   }
 
