@@ -1,5 +1,9 @@
+import 'dart:ui' show SemanticsAction;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:waveform_app/app/theme/colors.dart';
 import 'package:waveform_app/shared/widgets/pressable.dart';
 
 const _pressableKey = ValueKey('pressable');
@@ -55,6 +59,238 @@ Future<TestGesture> _press(WidgetTester tester) async {
 }
 
 void main() {
+  testWidgets('tab focuses button and Enter and Space activate once', (
+    tester,
+  ) async {
+    var taps = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Pressable(onTap: () => taps++, child: const Text('activate')),
+        ),
+      ),
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    expect(taps, 1);
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    expect(taps, 2);
+  });
+
+  testWidgets('button exposes one enabled semantic tap action', (tester) async {
+    final semantics = tester.ensureSemantics();
+    var taps = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Pressable(onTap: () => taps++, child: const Text('activate')),
+        ),
+      ),
+    );
+    expect(
+      tester.getSemantics(find.text('activate')),
+      matchesSemantics(
+        label: 'activate',
+        isButton: true,
+        hasEnabledState: true,
+        isEnabled: true,
+        isFocusable: true,
+        hasTapAction: true,
+      ),
+    );
+    final node = tester.getSemantics(find.text('activate'));
+    node.owner!.performAction(node.id, SemanticsAction.tap);
+    expect(taps, 1);
+    semantics.dispose();
+  });
+
+  testWidgets('disabled button is skipped and cannot activate', (tester) async {
+    final semantics = tester.ensureSemantics();
+    var disabledTaps = 0;
+    var enabledTaps = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Column(
+            children: [
+              Pressable(
+                enabled: false,
+                onTap: () => disabledTaps++,
+                child: const Text('disabled'),
+              ),
+              Pressable(
+                onTap: () => enabledTaps++,
+                child: const Text('enabled'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    expect(
+      tester.getSemantics(find.text('disabled')),
+      matchesSemantics(
+        label: 'disabled',
+        isButton: true,
+        hasEnabledState: true,
+      ),
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    expect(disabledTaps, 0);
+    expect(enabledTaps, 2);
+    semantics.dispose();
+  });
+
+  testWidgets('focused button consumes repeats and parent Space shortcut', (
+    tester,
+  ) async {
+    var taps = 0;
+    var globalTaps = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: CallbackShortcuts(
+          bindings: {
+            const SingleActivator(LogicalKeyboardKey.space): () => globalTaps++,
+          },
+          child: Scaffold(
+            body: Pressable(onTap: () => taps++, child: const Text('activate')),
+          ),
+        ),
+      ),
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.pump();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.space);
+    await tester.sendKeyRepeatEvent(LogicalKeyboardKey.space);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.space);
+    expect(taps, 1);
+    expect(globalTaps, 0);
+  });
+
+  testWidgets('structural wrapper preserves child button and text input', (
+    tester,
+  ) async {
+    var taps = 0;
+    final controller = TextEditingController();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Pressable(
+            child: Column(
+              children: [
+                TextButton(onPressed: () => taps++, child: const Text('child')),
+                TextField(controller: controller),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    expect(taps, 1);
+    await tester.tap(find.byType(TextField));
+    await tester.enterText(find.byType(TextField), 'typed text');
+    expect(controller.text, 'typed text');
+    await tester.pumpWidget(const SizedBox());
+    controller.dispose();
+  });
+
+  testWidgets('nested button handles keyboard and pointer without parent tap', (
+    tester,
+  ) async {
+    var parentTaps = 0;
+    var childTaps = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Pressable(
+            onTap: () => parentTaps++,
+            child: TextButton(
+              onPressed: () => childTaps++,
+              child: const Text('child'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('child'));
+    await tester.pump();
+    Focus.of(tester.element(find.text('child'))).requestFocus();
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    expect(childTaps, 2);
+    expect(parentTaps, 0);
+  });
+
+  testWidgets('focused button shows border and disabling releases focus', (
+    tester,
+  ) async {
+    var enabled = true;
+    var taps = 0;
+    late StateSetter update;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: StatefulBuilder(
+            builder: (context, setState) {
+              update = setState;
+              return Pressable(
+                enabled: enabled,
+                onTap: () => taps++,
+                child: const Text('activate'),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.pump();
+    final decoration =
+        tester
+                .widget<DecoratedBox>(
+                  find.descendant(
+                    of: find.byType(Pressable),
+                    matching: find.byType(DecoratedBox),
+                  ),
+                )
+                .decoration
+            as BoxDecoration;
+    expect(decoration.border!.top.color, AppColors.acid);
+    expect(decoration.border!.top.width, 0.5);
+    update(() => enabled = false);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    expect(taps, 0);
+    expect(FocusManager.instance.primaryFocus?.debugLabel, isNot('Pressable'));
+  });
+
+  testWidgets('active wrapper does not steal Space from focused text field', (
+    tester,
+  ) async {
+    var taps = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Pressable(onTap: () => taps++, child: const TextField()),
+        ),
+      ),
+    );
+    await tester.tap(find.byType(TextField));
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    expect(taps, 0);
+    expect(tester.testTextInput.isVisible, isTrue);
+  });
+
   testWidgets('active press keeps default scale, timing and single tap', (
     tester,
   ) async {

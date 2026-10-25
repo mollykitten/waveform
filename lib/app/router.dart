@@ -14,28 +14,88 @@ import '../features/track/track_screen.dart';
 import 'app_shell.dart';
 
 /// Мягкий переход экрана: fade + лёгкий подъём (apple-like).
-CustomTransitionPage<void> _page(Widget child) {
-  return CustomTransitionPage<void>(
+CustomTransitionPage<void> _page(BuildContext context, Widget child) {
+  final reducedMotion = MediaQuery.disableAnimationsOf(context);
+  return AppTransitionPage(
     child: child,
-    transitionDuration: const Duration(milliseconds: 240),
-    reverseTransitionDuration: const Duration(milliseconds: 160),
+    transitionDuration: reducedMotion
+        ? Duration.zero
+        : const Duration(milliseconds: 240),
+    reverseTransitionDuration: reducedMotion
+        ? Duration.zero
+        : const Duration(milliseconds: 160),
     transitionsBuilder: (context, animation, secondary, child) {
+      final reducedMotion = MediaQuery.disableAnimationsOf(context);
       final curved = CurvedAnimation(
         parent: animation,
         curve: Curves.easeOutCubic,
       );
       return FadeTransition(
-        opacity: curved,
+        opacity: reducedMotion ? const AlwaysStoppedAnimation(1) : curved,
         child: SlideTransition(
-          position: Tween(
-            begin: const Offset(0, 0.015),
-            end: Offset.zero,
-          ).animate(curved),
+          position: reducedMotion
+              ? const AlwaysStoppedAnimation(Offset.zero)
+              : Tween(
+                  begin: const Offset(0, 0.015),
+                  end: Offset.zero,
+                ).animate(curved),
           child: child,
         ),
       );
     },
   );
+}
+
+/// Keeps route animation timing in sync with accessibility preference changes.
+class AppTransitionPage extends CustomTransitionPage<void> {
+  const AppTransitionPage({
+    required super.child,
+    required super.transitionsBuilder,
+    required super.transitionDuration,
+    required super.reverseTransitionDuration,
+    super.key,
+  });
+
+  @override
+  Route<void> createRoute(BuildContext context) => _AppTransitionRoute(this);
+}
+
+class _AppTransitionRoute extends PageRouteBuilder<void> {
+  _AppTransitionRoute(AppTransitionPage page)
+    : super(
+        settings: page,
+        transitionDuration: page.transitionDuration,
+        reverseTransitionDuration: page.reverseTransitionDuration,
+        pageBuilder: (_, _, _) => page.child,
+      );
+
+  AppTransitionPage get _page => settings as AppTransitionPage;
+
+  @override
+  void changedInternalState() {
+    controller?.duration = _page.transitionDuration;
+    controller?.reverseDuration = _page.reverseTransitionDuration;
+    super.changedInternalState();
+  }
+
+  @override
+  Widget buildPage(
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+  ) => Semantics(
+    scopesRoute: true,
+    explicitChildNodes: true,
+    child: _page.child,
+  );
+
+  @override
+  Widget buildTransitions(
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) => _page.transitionsBuilder(context, animation, secondaryAnimation, child);
 }
 
 final appRouter = GoRouter(
@@ -46,24 +106,25 @@ final appRouter = GoRouter(
       builder: (context, state, child) =>
           AppShell(location: state.uri.path, child: child),
       routes: [
-        GoRoute(path: '/', pageBuilder: (c, s) => _page(const HomeScreen())),
+        GoRoute(path: '/', pageBuilder: (c, s) => _page(c, const HomeScreen())),
         GoRoute(
           path: '/feed',
-          pageBuilder: (c, s) => _page(const FeedScreen()),
+          pageBuilder: (c, s) => _page(c, const FeedScreen()),
         ),
         GoRoute(
           path: '/library',
           pageBuilder: (c, s) =>
-              _page(LibraryScreen(initialTab: s.uri.queryParameters['tab'])),
+              _page(c, LibraryScreen(initialTab: s.uri.queryParameters['tab'])),
         ),
         GoRoute(
           path: '/track/:id',
           pageBuilder: (c, s) =>
-              _page(TrackScreen(trackId: s.pathParameters['id']!)),
+              _page(c, TrackScreen(trackId: s.pathParameters['id']!)),
         ),
         GoRoute(
           path: '/artist/:handle',
           pageBuilder: (c, s) => _page(
+            c,
             ArtistScreen(
               handle: Uri.decodeComponent(s.pathParameters['handle']!),
             ),
@@ -72,20 +133,20 @@ final appRouter = GoRouter(
         GoRoute(
           path: '/search',
           pageBuilder: (c, s) =>
-              _page(SearchScreen(query: s.uri.queryParameters['q'] ?? '')),
+              _page(c, SearchScreen(query: s.uri.queryParameters['q'] ?? '')),
         ),
         GoRoute(
           path: '/playlist/:id',
           pageBuilder: (c, s) =>
-              _page(PlaylistScreen(id: s.pathParameters['id']!)),
+              _page(c, PlaylistScreen(id: s.pathParameters['id']!)),
         ),
         GoRoute(
           path: '/settings',
-          pageBuilder: (c, s) => _page(const SettingsScreen()),
+          pageBuilder: (c, s) => _page(c, const SettingsScreen()),
         ),
         GoRoute(
           path: '/stats',
-          pageBuilder: (c, s) => _page(const StatsScreen()),
+          pageBuilder: (c, s) => _page(c, const StatsScreen()),
         ),
       ],
     ),

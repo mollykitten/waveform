@@ -37,7 +37,7 @@ class _OmniboxDropdownState extends ConsumerState<OmniboxDropdown>
   late final AnimationController _entry = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 200),
-  )..forward();
+  );
 
   // Подсветка результата для ↑/↓ + Enter. Считается от плоского списка,
   // который пересобирается каждый build (см. _buildItems).
@@ -57,6 +57,16 @@ class _OmniboxDropdownState extends ConsumerState<OmniboxDropdown>
       );
       FocusScope.of(context).requestFocus(_focus);
     });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _entry.value = 1;
+    } else if (_entry.isDismissed) {
+      _entry.forward();
+    }
   }
 
   @override

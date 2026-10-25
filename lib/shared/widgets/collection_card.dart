@@ -128,7 +128,10 @@ class _Cover extends StatelessWidget {
             right: item.isCircular ? size / 2 - 18 : 8,
             bottom: 8,
             child: AnimatedOpacity(
-              duration: AppTheme.motion,
+              key: ValueKey(MediaQuery.disableAnimationsOf(context)),
+              duration: MediaQuery.disableAnimationsOf(context)
+                  ? Duration.zero
+                  : AppTheme.motion,
               opacity: hover ? 1 : 0,
               child: Container(
                 width: 36,
@@ -211,6 +214,9 @@ class _Plate extends StatelessWidget {
 }
 
 Widget _maybeHero({required Collection item, required Widget child}) {
+  // Missing API ids map to '0'; they do not identify a shared cover.
+  if (item.id.isEmpty || item.id == '0') return child;
+
   switch (item.target) {
     case CollectionTarget.track:
       return Hero(tag: 'cover-track-${item.id}', child: child);

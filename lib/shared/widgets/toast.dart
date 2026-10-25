@@ -109,24 +109,54 @@ class _ToastLayer extends StatelessWidget {
   }
 }
 
-class _ToastCard extends StatelessWidget {
+class _ToastCard extends StatefulWidget {
   const _ToastCard({super.key, required this.entry, required this.onDismiss});
   final _ToastEntry entry;
   final VoidCallback onDismiss;
 
   @override
+  State<_ToastCard> createState() => _ToastCardState();
+}
+
+class _ToastCardState extends State<_ToastCard>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _entry = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 200),
+  );
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _entry.value = 1;
+    } else if (_entry.isDismissed) {
+      _entry.forward();
+    }
+  }
+
+  @override
+  void dispose() {
+    _entry.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return TweenAnimationBuilder<double>(
-      tween: Tween<double>(begin: 0, end: 1),
-      duration: const Duration(milliseconds: 200),
-      curve: Curves.easeOutCubic,
-      builder: (_, t, child) => Opacity(
-        opacity: t.clamp(0.0, 1.0),
-        child: Transform.translate(
-          offset: Offset((1 - t) * 16, 0),
-          child: child,
-        ),
-      ),
+    final entry = widget.entry;
+    final onDismiss = widget.onDismiss;
+    return AnimatedBuilder(
+      animation: _entry,
+      builder: (_, child) {
+        final t = Curves.easeOutCubic.transform(_entry.value);
+        return Opacity(
+          opacity: t.clamp(0.0, 1.0),
+          child: Transform.translate(
+            offset: Offset((1 - t) * 16, 0),
+            child: child,
+          ),
+        );
+      },
       child: GestureDetector(
         // Тап по телу тоста закрывает его. Кнопка действия — вложенный
         // Pressable, он выигрывает в gesture arena и не закрывает «случайно».
