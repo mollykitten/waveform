@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -209,17 +210,24 @@ def _provider_harness_id(
     value = row.get("harnessSessionId") if row else None
     if isinstance(value, str) and value:
         return value
-    try:
-        page = _validate_read_page(
-            transport.read_session(endpoint.workspace, endpoint.session, None), endpoint.session
-        )
-    except SessionNotFound as exc:
-        if is_source:
-            raise SourceUnavailable("direct session read reports the source missing") from exc
-        raise NotifierError("direct session read reports the target missing") from exc
-    _, value = _read_session_metadata(page)
-    if isinstance(value, str) and value:
-        return value
+    cursor = None
+    for _ in range(100):
+        try:
+            page = _validate_read_page(
+                transport.read_session(endpoint.workspace, endpoint.session, cursor), endpoint.session
+            )
+        except SessionNotFound as exc:
+            if is_source:
+                raise SourceUnavailable("direct session read reports the source missing") from exc
+            raise NotifierError("direct session read reports the target missing") from exc
+        _, value = _read_session_metadata(page)
+        if isinstance(value, str) and value:
+            return value
+        cursor = _next_before(page)
+        if cursor is None:
+            break
+    else:
+        raise NotifierError("provider metadata exceeded the 100-page scan bound")
     raise NotifierError("cannot verify provider harness session ID")
 
 
@@ -298,13 +306,19 @@ def _completed_messages(
 
 
 def _marker_line(text: str) -> Optional[str]:
-    fenced = False
+    fence: Optional[tuple[str, int]] = None
     for line in text.splitlines():
         stripped = line.strip()
-        if stripped.startswith(("```", "~~~")):
-            fenced = not fenced
+        match = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", line)
+        if fence is not None:
+            if (match and match[1][0] == fence[0] and len(match[1]) >= fence[1]
+                    and not match[2].strip()):
+                fence = None
             continue
-        if not fenced and stripped in MARKERS:
+        if match and (match[1][0] != "`" or "`" not in match[2]):
+            fence = (match[1][0], len(match[1]))
+            continue
+        if stripped in MARKERS:
             return stripped
     return None
 

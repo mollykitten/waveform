@@ -400,6 +400,109 @@ class WorkerNotifierTests(unittest.TestCase):
         self.assertFalse(notifier.run_once(CONFIG, transport, self.state))
         self.assertEqual(transport.sent, [])
 
+    def test_delayed_completion_remains_eligible_across_polls(self):
+        progress = turn_envelope("unrelated", "completed", CONFIG.since_ms + 20, 20)
+        transport = FakeTransport([{"envelopes": [progress]}])
+        self.assertFalse(notifier.run_once(CONFIG, transport, self.state))
+        scope = notifier._checkpoint_scope_key(SOURCE, "provider-session", TARGET)
+        self.assertEqual(notifier._load_state(self.state)["checkpoints"][scope]["completed_ms"],
+                         CONFIG.since_ms + 20)
+        delayed = envelope(item_id="delayed", turn_id="delayed-turn",
+                           completed_ms=CONFIG.since_ms + 15, seq=21)
+        delayed["ts"] = CONFIG.since_ms + 21
+        transport.pages = [{"envelopes": [progress, delayed]}]
+        self.assertTrue(notifier.run_once(CONFIG, transport, self.state))
+        self.assertIn("item=delayed", transport.sent[0])
+        self.assertFalse(notifier.run_once(CONFIG, transport, self.state))
+        self.assertEqual(len(transport.sent), 1)
+
+    def test_long_outer_fence_keeps_nested_marker_examples_quoted(self):
+        for outer, inner in (("````", "```"), ("~~~~", "~~~"),
+                             ("````", "~~~~"), ("~~~~", "````")):
+            with self.subTest(outer=outer, inner=inner):
+                text = f"{outer}text\n{inner}\nSUPERSET_WORKER_DONE\n{inner}\n{outer}"
+                self.assertIsNone(notifier._marker_line(text))
+                transport = FakeTransport([{"envelopes": [envelope(text=text)]}])
+                self.assertFalse(notifier.run_once(CONFIG, transport, self.state))
+                self.assertEqual(transport.sent, [])
+
+    def test_fence_closer_requires_matching_character_length_and_no_info(self):
+        for closer in ("```", "~~~~", "````text"):
+            with self.subTest(closer=closer):
+                self.assertIsNone(notifier._marker_line(
+                    f"````text\n{closer}\nSUPERSET_WORKER_DONE"
+                ))
+        for opening, closing in (("```", "````"), ("~~~", "~~~~")):
+            with self.subTest(opening=opening):
+                self.assertEqual(notifier._marker_line(
+                    f"{opening}text\nSUPERSET_WORKER_BLOCKED\n{closing}\nSUPERSET_WORKER_DONE"
+                ), "SUPERSET_WORKER_DONE")
+
+    def test_omitted_endpoint_harness_metadata_can_be_on_older_page(self):
+        for endpoint in (SOURCE, TARGET):
+            with self.subTest(endpoint=endpoint), tempfile.TemporaryDirectory() as directory:
+                transport = FakeTransport()
+                original_list = transport.list_sessions
+                original_read = transport.read_session
+                cursor = {"epoch": "metadata", "seq": 2}
+                calls = []
+
+                def list_without_endpoint(workspace):
+                    return [row for row in original_list(workspace)
+                            if row["sessionId"] != endpoint.session]
+
+                def read_with_older_metadata(workspace, session, before):
+                    if (workspace, session) != (endpoint.workspace, endpoint.session):
+                        return original_read(workspace, session, before)
+                    calls.append(before)
+                    if before is None:
+                        page = original_read(workspace, session, None)
+                        return {**page, "envelopes": [row for row in page["envelopes"]
+                                if row["event"]["type"] != "session"], "nextBefore": cursor}
+                    self.assertEqual(json.loads(before), cursor)
+                    harness_id = (transport.source_harness_id if endpoint == SOURCE
+                                  else transport.target_harness_id)
+                    return {"envelopes": [session_envelope(
+                        harness_session_id=harness_id, session_id=endpoint.session)]}
+
+                transport.list_sessions = list_without_endpoint
+                transport.read_session = read_with_older_metadata
+                self.assertTrue(notifier.run_once(
+                    CONFIG, transport, Path(directory) / "state.json"))
+                self.assertTrue(any(before is not None for before in calls))
+                self.assertEqual(len(transport.sent), 1)
+
+    def test_older_metadata_still_rejects_same_provider_session(self):
+        transport = FakeTransport()
+        transport.list_response = []
+        transport.pages = [
+            {"envelopes": [envelope()], "nextBefore": {"epoch": "e", "seq": 1}},
+            {"envelopes": [session_envelope(harness_session_id=transport.target_harness_id)],
+             "requestedBefore": {"epoch": "e", "seq": 1}},
+        ]
+        with self.assertRaisesRegex(notifier.NotifierError, "same provider harness session"):
+            notifier.run_once(CONFIG, transport, self.state)
+        self.assertEqual(transport.sent, [])
+        self.assertFalse(self.state.exists())
+
+    def test_metadata_lookup_fails_closed_when_unverified_or_out_of_bounds(self):
+        cursor = {"epoch": "e", "seq": 1}
+        for page, error, read_count in (
+            ({"envelopes": []}, "cannot verify provider", 1),
+            ({"envelopes": [], "nextBefore": cursor, "requestedBefore": cursor},
+             "metadata exceeded the 100-page scan bound", 100),
+            ({"envelopes": [session_envelope(session_id="wrong-session")]},
+             "different session", 1),
+        ):
+            with self.subTest(error=error):
+                transport = FakeTransport([page])
+                transport.list_response = []
+                with self.assertRaisesRegex(notifier.NotifierError, error):
+                    notifier.run_once(CONFIG, transport, self.state)
+                self.assertEqual(transport.read_calls, read_count)
+                self.assertEqual(transport.sent, [])
+                self.assertFalse(self.state.exists())
+
     def test_marker_waits_for_matching_completed_turn_event(self):
         marker = envelope(seq=1)
         running_turn = {"v": 1, "sessionId": SOURCE.session,
