@@ -4,10 +4,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:talker_flutter/talker_flutter.dart';
+import 'package:waveform_app/app/app.dart';
+import 'package:waveform_app/app/router.dart';
+import 'package:waveform_app/core/api/mock_soundcloud_api.dart';
+import 'package:waveform_app/core/api/providers.dart';
 import 'package:waveform_app/core/api/liked_tracks.dart';
 import 'package:waveform_app/core/audio/audio_engine.dart';
 import 'package:waveform_app/core/audio/playback_prefs.dart';
 import 'package:waveform_app/core/deeplinks/clipboard_watcher.dart';
+import 'package:waveform_app/core/log/talker.dart';
 import 'package:waveform_app/features/player/player_controller.dart';
 import 'package:waveform_app/features/player/player_ui_state.dart';
 import 'package:waveform_app/features/player/widgets/bottom_player.dart';
@@ -125,6 +131,67 @@ void main() {
     final container = await pumpPlayer(tester, initial: track('1', url: url));
     await copyAndCheck(tester, container, url);
   });
+
+  for (final collapsed in [false, true]) {
+    testWidgets('real app player button copies permalink without route or '
+        'playback changes: collapsed=$collapsed', (tester) async {
+      const url = 'https://soundcloud.com/artist/a%20b?token=copy-test#t=12';
+      tester.view.physicalSize = const Size(1280, 820);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+        if (call.method == 'Clipboard.setData') {
+          clipboard.add((call.arguments as Map)['text'] as String);
+        }
+        return null;
+      });
+      addTearDown(
+        () => messenger.setMockMethodCallHandler(SystemChannels.platform, null),
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            soundcloudApiProvider.overrideWithValue(const MockSoundcloudApi()),
+            audioEngineProvider.overrideWithValue(engine),
+            likedTracksProvider.overrideWith(StubLikedTracks.new),
+            clipboardWatcherProvider.overrideWith((ref) => watcher),
+            talkerProvider.overrideWithValue(Talker()),
+          ],
+          child: const WaveformApp(),
+        ),
+      );
+      appRouter.go('/');
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+      final container = ProviderScope.containerOf(
+        tester.element(find.byType(WaveformApp)),
+      );
+      if (collapsed) {
+        container.read(playerCollapsedProvider.notifier).collapse();
+      }
+      container
+          .read(playerControllerProvider.notifier)
+          .play(track('route-copy', url: url));
+      await tester.pump();
+
+      final before = container.read(playerControllerProvider);
+      final routeBefore = appRouter.routeInformationProvider.value.uri;
+      await tester.tap(find.byIcon(Icons.link));
+      await tester.pump();
+
+      expect(clipboard, [url]);
+      expect(watcher.seen, [url]);
+      expect(appRouter.routeInformationProvider.value.uri, routeBefore);
+      expect(container.read(playerControllerProvider), same(before));
+      expect(find.text('link copied'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pump(const Duration(seconds: 5));
+    });
+  }
 
   for (final collapsed in [false, true]) {
     for (final width in [920.0, 960.0, 1280.0, 1600.0]) {

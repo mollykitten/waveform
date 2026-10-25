@@ -7,6 +7,7 @@ import '../features/feed/feed_screen.dart';
 import '../features/home/home_screen.dart';
 import '../features/library/library_screen.dart';
 import '../features/playlist/playlist_screen.dart';
+import '../features/recommendations/recommendations_screen.dart';
 import '../features/search/search_screen.dart';
 import '../features/settings/settings_screen.dart';
 import '../features/stats/stats_screen.dart';
@@ -107,6 +108,10 @@ final appRouter = GoRouter(
           AppShell(location: state.uri.path, child: child),
       routes: [
         GoRoute(path: '/', pageBuilder: (c, s) => _page(c, const HomeScreen())),
+        GoRoute(
+          path: '/recommendations',
+          pageBuilder: (c, s) => _page(c, const RecommendationsScreen()),
+        ),
         GoRoute(
           path: '/feed',
           pageBuilder: (c, s) => _page(c, const FeedScreen()),
