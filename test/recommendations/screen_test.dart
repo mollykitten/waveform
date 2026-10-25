@@ -188,13 +188,13 @@ void main() {
         expect(client.payloads, isEmpty);
         await tester.pumpWidget(const SizedBox.shrink());
       },
-      skip: !visualTestFontsAvailable,
+      skip: !waveVisualCaptureEnabled,
     );
     for (final tune in [false, true]) {
       testWidgets('wave capture ${tune ? 'tune open' : 'idle'} '
           '${size.width.toInt()}x${size.height.toInt()}', (tester) async {
         await captureWave(tester, size, tune);
-      }, skip: !visualTestFontsAvailable);
+      }, skip: !waveVisualCaptureEnabled);
     }
   }
 

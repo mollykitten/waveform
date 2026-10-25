@@ -5,20 +5,26 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-const _fontFiles = [
-  'Inter-Regular',
-  'JetBrainsMono-Regular',
-  'JetBrainsMono-SemiBold',
-];
+const _fontFiles = {
+  'Inter-Regular': 'inter.ttf',
+  'JetBrainsMono-Regular': 'jetbrains-mono.ttf',
+};
 
-/// Capture fixtures are copied from GoogleFonts' local runtime cache into this
-/// ignored folder. Capture tests skip when the real fonts are unavailable.
-bool get visualTestFontsAvailable => _fontFiles.every(
-  (font) => File('build/visual-review/fonts/$font.ttf').existsSync(),
+/// Shared real-font fixtures; capture tests skip when these are unavailable.
+bool get visualTestFontsAvailable => _fontFiles.values.every(
+  (font) => File('build/visual-review/fonts/$font').existsSync(),
 );
 
+/// Explicit local opt-in; ordinary test runs never produce visual evidence.
+/// Create this ignored marker to regenerate the six wave/consent captures.
+bool get waveVisualCaptureEnabled =>
+    visualTestFontsAvailable &&
+    File('build/visual-review/.capture-wave').existsSync();
+
 /// Load actual capture fonts through AppTheme's normal GoogleFonts asset path.
-/// Ordinary behavioral tests use SDK Roboto if fixtures are absent; no network.
+/// GoogleFonts resolves these assets to Inter_regular / JetBrainsMono_regular
+/// and registers those exact families with FontLoader, just as in production.
+/// Ordinary behavioral tests always use SDK Roboto; no network is permitted.
 Future<void> installVisualTestFonts() async {
   GoogleFonts.config.allowRuntimeFetching = false;
   final config =
@@ -38,11 +44,13 @@ Future<void> installVisualTestFonts() async {
   await (FontLoader(
     'MaterialIcons',
   )..addFont(Future.value(ByteData.sublistView(icons)))).load();
-  final fontBytes = visualTestFontsAvailable
+  final fontBytes = waveVisualCaptureEnabled
       ? <String, ByteData>{
-          for (final font in _fontFiles)
-            'fonts/$font.ttf': ByteData.sublistView(
-              await File('build/visual-review/fonts/$font.ttf').readAsBytes(),
+          for (final font in _fontFiles.entries)
+            'fonts/${font.key}.ttf': ByteData.sublistView(
+              await File(
+                'build/visual-review/fonts/${font.value}',
+              ).readAsBytes(),
             ),
         }
       : <String, ByteData>{
