@@ -149,9 +149,17 @@ python3 .superset/worker_notifier.py --config ~/.config/superset/worker-notifier
 python3 .superset/worker_notifier.py --config ~/.config/superset/worker-notifier.json --watch --interval 10
 ```
 
-Delivery state is stored atomically under
-`~/.local/state/superset/worker-notifier-state.json`; only successful sends
-advance the checkpoint. Dedupe is target-scoped; checkpoints are scoped to the
+delivery state is stored atomically under
+`~/.local/state/superset/worker-notifier-state.json`; successful sends persist
+delivered identities before the next send. completion checkpoints record
+progress but never exclude undelivered identities. existing checkpoint files
+remain readable; rescanning from `since_ms` recovers older missed completions.
+each poll follows opaque `nextBefore` cursors through the available history,
+without treating item timestamps or lexical epoch order as journal boundaries.
+history beyond 100 pages fails before sending or changing state; long histories
+therefore require operator attention. this conservative scan also costs more
+reads per poll than stopping at a timestamp. dedupe is target-scoped;
+checkpoints are scoped to the
 source provider session and target, so a different coordinator can receive the
 same result. The notifier rejects identical source and target sessions and uses
 a process lock. It reads completed

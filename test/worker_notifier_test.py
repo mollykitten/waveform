@@ -244,6 +244,105 @@ class WorkerNotifierTests(unittest.TestCase):
         self.assertTrue(notifier.run_once(CONFIG, transport, self.state))
         self.assertEqual(len(transport.sent), 1)
 
+    def test_replayed_old_item_does_not_hide_older_page_completion(self):
+        config = notifier.Config(SOURCE, TARGET, "pagination", 100)
+        scope = notifier._checkpoint_scope_key(SOURCE, "provider-session", TARGET)
+        notifier._save_state(self.state, {
+            "delivered": set(),
+            "checkpoints": {scope: {
+                "completed_ms": 100, "epoch": "e", "sequence": 100,
+            }},
+        })
+        replay = envelope(item_id="old-replay", turn_id="old-turn",
+                          completed_ms=50, seq=300)
+        replay["ts"] = 300
+        transport = FakeTransport([
+            {"envelopes": [replay, turn_envelope("unrelated", "completed", 301, 301)],
+             "nextBefore": {"epoch": "e", "seq": 300}},
+            {"envelopes": [
+                envelope(item_id="missed-200", turn_id="turn-200",
+                         completed_ms=200, seq=200),
+                turn_envelope("turn-200", "completed", 201, 201),
+            ], "requestedBefore": {"epoch": "e", "seq": 300}},
+        ], auto_turn_events=False)
+        self.assertTrue(notifier.run_once(config, transport, self.state))
+        self.assertEqual(transport.read_calls, 2)
+        self.assertEqual(len(transport.sent), 1)
+        self.assertIn("missed-200", transport.sent[0])
+        self.assertFalse(notifier.run_once(config, transport, self.state))
+        self.assertEqual(len(transport.sent), 1)
+
+    def test_legacy_checkpoint_cannot_skip_undelivered_older_completion(self):
+        scope = notifier._checkpoint_scope_key(SOURCE, "provider-session", TARGET)
+        notifier._save_state(self.state, {
+            "delivered": set(),
+            "checkpoints": {scope: {
+                "completed_ms": CONFIG.since_ms + 301,
+                "epoch": "z-old", "sequence": 301,
+            }},
+        })
+        missed = envelope(item_id="missed-before-checkpoint", turn_id="missed-turn",
+                          completed_ms=CONFIG.since_ms + 200, seq=200)
+        missed["cursor"]["epoch"] = "a-new"
+        transport = FakeTransport([{"envelopes": [missed]}])
+        self.assertTrue(notifier.run_once(CONFIG, transport, self.state))
+        self.assertIn("missed-before-checkpoint", transport.sent[0])
+        self.assertFalse(notifier.run_once(CONFIG, transport, self.state))
+        self.assertEqual(len(transport.sent), 1)
+
+    def test_epoch_names_and_journal_timestamps_do_not_bound_pagination(self):
+        config = notifier.Config(SOURCE, TARGET, "epochs", 100)
+        later = envelope(item_id="later", turn_id="later-turn", completed_ms=300, seq=1)
+        later["cursor"]["epoch"] = "a-new"
+        later["ts"] = 1  # journal time is not the completion eligibility floor
+        earlier = envelope(item_id="earlier", turn_id="earlier-turn", completed_ms=200, seq=99)
+        earlier["cursor"]["epoch"] = "z-old"
+        transport = FakeTransport([
+            {"envelopes": [later, turn_envelope("later-turn", "completed", 301, 2)],
+             "nextBefore": {"epoch": "a-new", "seq": 1}},
+            {"envelopes": [earlier, turn_envelope("earlier-turn", "completed", 201, 100)],
+             "requestedBefore": {"epoch": "a-new", "seq": 1}},
+        ], auto_turn_events=False)
+        self.assertTrue(notifier.run_once(config, transport, self.state))
+        self.assertEqual(transport.read_calls, 2)
+        self.assertEqual(len(transport.sent), 2)
+        self.assertIn("item=earlier", transport.sent[0])
+        self.assertIn("item=later", transport.sent[1])
+
+    def test_incomplete_pagination_does_not_send_or_advance_state(self):
+        next_cursor = {"epoch": "e", "seq": 10}
+        transport = FakeTransport([{"envelopes": [envelope()],
+                                    "nextBefore": next_cursor}])
+        original_read = transport.read_session
+
+        def fail_older_page(workspace, session, before):
+            if before is not None:
+                raise notifier.NotifierError("older page unavailable")
+            return original_read(workspace, session, before)
+
+        transport.read_session = fail_older_page
+        with self.assertRaisesRegex(notifier.NotifierError, "older page unavailable"):
+            notifier.run_once(CONFIG, transport, self.state)
+        self.assertFalse(self.state.exists())
+        self.assertEqual(transport.sent, [])
+
+        transport.read_session = original_read
+        transport.pages.append({"envelopes": [], "requestedBefore": next_cursor})
+        self.assertTrue(notifier.run_once(CONFIG, transport, self.state))
+        self.assertEqual(len(transport.sent), 1)
+
+    def test_history_scan_bound_does_not_send_or_advance_state(self):
+        transport = FakeTransport([
+            {"envelopes": [envelope()], "nextBefore": {"epoch": "e", "seq": 1}},
+            {"envelopes": [], "requestedBefore": {"epoch": "e", "seq": 1},
+             "nextBefore": {"epoch": "e", "seq": 1}},
+        ])
+        with self.assertRaisesRegex(notifier.NotifierError, "100-page scan bound"):
+            notifier.run_once(CONFIG, transport, self.state)
+        self.assertEqual(transport.read_calls, 100)
+        self.assertFalse(self.state.exists())
+        self.assertEqual(transport.sent, [])
+
     def test_capped_list_state_is_only_metadata_not_absence_authority(self):
         response = [{"sessionId": SOURCE.session, "status": "stopped", "live": False}]
         self.assertEqual(notifier.session_observation(response, SOURCE.session), "terminal")
@@ -300,6 +399,109 @@ class WorkerNotifierTests(unittest.TestCase):
         transport = FakeTransport([{"ok": True, "envelopes": [quoted, blockquoted, fenced]}])
         self.assertFalse(notifier.run_once(CONFIG, transport, self.state))
         self.assertEqual(transport.sent, [])
+
+    def test_delayed_completion_remains_eligible_across_polls(self):
+        progress = turn_envelope("unrelated", "completed", CONFIG.since_ms + 20, 20)
+        transport = FakeTransport([{"envelopes": [progress]}])
+        self.assertFalse(notifier.run_once(CONFIG, transport, self.state))
+        scope = notifier._checkpoint_scope_key(SOURCE, "provider-session", TARGET)
+        self.assertEqual(notifier._load_state(self.state)["checkpoints"][scope]["completed_ms"],
+                         CONFIG.since_ms + 20)
+        delayed = envelope(item_id="delayed", turn_id="delayed-turn",
+                           completed_ms=CONFIG.since_ms + 15, seq=21)
+        delayed["ts"] = CONFIG.since_ms + 21
+        transport.pages = [{"envelopes": [progress, delayed]}]
+        self.assertTrue(notifier.run_once(CONFIG, transport, self.state))
+        self.assertIn("item=delayed", transport.sent[0])
+        self.assertFalse(notifier.run_once(CONFIG, transport, self.state))
+        self.assertEqual(len(transport.sent), 1)
+
+    def test_long_outer_fence_keeps_nested_marker_examples_quoted(self):
+        for outer, inner in (("````", "```"), ("~~~~", "~~~"),
+                             ("````", "~~~~"), ("~~~~", "````")):
+            with self.subTest(outer=outer, inner=inner):
+                text = f"{outer}text\n{inner}\nSUPERSET_WORKER_DONE\n{inner}\n{outer}"
+                self.assertIsNone(notifier._marker_line(text))
+                transport = FakeTransport([{"envelopes": [envelope(text=text)]}])
+                self.assertFalse(notifier.run_once(CONFIG, transport, self.state))
+                self.assertEqual(transport.sent, [])
+
+    def test_fence_closer_requires_matching_character_length_and_no_info(self):
+        for closer in ("```", "~~~~", "````text"):
+            with self.subTest(closer=closer):
+                self.assertIsNone(notifier._marker_line(
+                    f"````text\n{closer}\nSUPERSET_WORKER_DONE"
+                ))
+        for opening, closing in (("```", "````"), ("~~~", "~~~~")):
+            with self.subTest(opening=opening):
+                self.assertEqual(notifier._marker_line(
+                    f"{opening}text\nSUPERSET_WORKER_BLOCKED\n{closing}\nSUPERSET_WORKER_DONE"
+                ), "SUPERSET_WORKER_DONE")
+
+    def test_omitted_endpoint_harness_metadata_can_be_on_older_page(self):
+        for endpoint in (SOURCE, TARGET):
+            with self.subTest(endpoint=endpoint), tempfile.TemporaryDirectory() as directory:
+                transport = FakeTransport()
+                original_list = transport.list_sessions
+                original_read = transport.read_session
+                cursor = {"epoch": "metadata", "seq": 2}
+                calls = []
+
+                def list_without_endpoint(workspace):
+                    return [row for row in original_list(workspace)
+                            if row["sessionId"] != endpoint.session]
+
+                def read_with_older_metadata(workspace, session, before):
+                    if (workspace, session) != (endpoint.workspace, endpoint.session):
+                        return original_read(workspace, session, before)
+                    calls.append(before)
+                    if before is None:
+                        page = original_read(workspace, session, None)
+                        return {**page, "envelopes": [row for row in page["envelopes"]
+                                if row["event"]["type"] != "session"], "nextBefore": cursor}
+                    self.assertEqual(json.loads(before), cursor)
+                    harness_id = (transport.source_harness_id if endpoint == SOURCE
+                                  else transport.target_harness_id)
+                    return {"envelopes": [session_envelope(
+                        harness_session_id=harness_id, session_id=endpoint.session)]}
+
+                transport.list_sessions = list_without_endpoint
+                transport.read_session = read_with_older_metadata
+                self.assertTrue(notifier.run_once(
+                    CONFIG, transport, Path(directory) / "state.json"))
+                self.assertTrue(any(before is not None for before in calls))
+                self.assertEqual(len(transport.sent), 1)
+
+    def test_older_metadata_still_rejects_same_provider_session(self):
+        transport = FakeTransport()
+        transport.list_response = []
+        transport.pages = [
+            {"envelopes": [envelope()], "nextBefore": {"epoch": "e", "seq": 1}},
+            {"envelopes": [session_envelope(harness_session_id=transport.target_harness_id)],
+             "requestedBefore": {"epoch": "e", "seq": 1}},
+        ]
+        with self.assertRaisesRegex(notifier.NotifierError, "same provider harness session"):
+            notifier.run_once(CONFIG, transport, self.state)
+        self.assertEqual(transport.sent, [])
+        self.assertFalse(self.state.exists())
+
+    def test_metadata_lookup_fails_closed_when_unverified_or_out_of_bounds(self):
+        cursor = {"epoch": "e", "seq": 1}
+        for page, error, read_count in (
+            ({"envelopes": []}, "cannot verify provider", 1),
+            ({"envelopes": [], "nextBefore": cursor, "requestedBefore": cursor},
+             "metadata exceeded the 100-page scan bound", 100),
+            ({"envelopes": [session_envelope(session_id="wrong-session")]},
+             "different session", 1),
+        ):
+            with self.subTest(error=error):
+                transport = FakeTransport([page])
+                transport.list_response = []
+                with self.assertRaisesRegex(notifier.NotifierError, error):
+                    notifier.run_once(CONFIG, transport, self.state)
+                self.assertEqual(transport.read_calls, read_count)
+                self.assertEqual(transport.sent, [])
+                self.assertFalse(self.state.exists())
 
     def test_marker_waits_for_matching_completed_turn_event(self):
         marker = envelope(seq=1)

@@ -93,6 +93,30 @@ void main() {
       appRouter.go('/');
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 500));
+      // The shell's beep-suppressing Focus must let MaterialApp handle Tab.
+      final shellFocus = tester
+          .widgetList<Focus>(find.byType(Focus))
+          .map((focus) => focus.focusNode)
+          .whereType<FocusNode>()
+          .singleWhere((node) => node.debugLabel == 'app-shell');
+      shellFocus.requestFocus();
+      await tester.pump();
+      expect(FocusManager.instance.primaryFocus, same(shellFocus));
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pump();
+      final firstControl = FocusManager.instance.primaryFocus;
+      expect(firstControl, isNot(same(shellFocus)));
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pump();
+      expect(FocusManager.instance.primaryFocus, isNot(same(firstControl)));
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.pump();
+      expect(FocusManager.instance.primaryFocus, same(firstControl));
+      shellFocus.requestFocus();
+      await tester.pump();
+
       final container = ProviderScope.containerOf(
         tester.element(find.byType(WaveformApp)),
       );
