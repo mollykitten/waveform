@@ -55,3 +55,8 @@ docs/superpowers/
 
 # Hermes kanban worker worktrees (`hermes kanban create --workspace worktree`)
 .worktrees/
+
+# Local secrets / per-user Superset overrides
+.env
+.env.json
+.superset/config.local.json
