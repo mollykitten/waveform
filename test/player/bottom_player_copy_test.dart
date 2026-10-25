@@ -127,7 +127,7 @@ void main() {
   });
 
   for (final collapsed in [false, true]) {
-    for (final width in [960.0, 1280.0, 1600.0]) {
+    for (final width in [920.0, 960.0, 1280.0, 1600.0]) {
       testWidgets('copy survives resize: collapsed=$collapsed width=$width', (
         tester,
       ) async {

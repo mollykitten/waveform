@@ -253,6 +253,13 @@ class PlayerController extends Notifier<PlayerState> {
   /// Загрузить трек как текущий БЕЗ изменения очереди/истории (история и
   /// shuffle-порядок ведутся вызывающим). Общий путь для play/next/previous.
   void _activate(Track track) {
+    if (_swapping) {
+      // Invalidate the old engine transition before resolving the new URL.
+      // Its completion must not own this track's swap gate or preload.
+      _swapping = false;
+      ++_preloadToken;
+      unawaited(_engine.stop());
+    }
     _maxPosMs = 0;
     state = state.copyWith(
       track: track,
@@ -451,6 +458,9 @@ class PlayerController extends Notifier<PlayerState> {
   /// [_upNext], чтобы preload и фактический переход выбрали один и тот же трек.
   Future<void> _preloadAfter(Track current) async {
     final token = ++_preloadToken;
+    // The inactive player may still own the selected incoming source until
+    // output binding commits. Defer queue/shuffle preloads until swap settles.
+    if (_swapping) return;
     final n = _upNext;
     if (n == null ||
         n.blocked ||
@@ -485,10 +495,16 @@ class PlayerController extends Notifier<PlayerState> {
   Future<void> _advanceViaSwap() async {
     final n = _upNext;
     if (n == null) return;
+    final previous = state;
+    final history = List<Track>.of(_history);
+    final historyIndex = _histIdx;
+    final startedAt = _startedAt;
+    final maxPosMs = _maxPosMs;
     _swapping = true;
     final crossfade = _crossfade;
     // Бамп _loadToken — старые in-flight кандидаты-резолвы устаревают.
-    _loadToken++;
+    final token = ++_loadToken;
+    ++_preloadToken;
     _stepHistoryForward(n);
     _maxPosMs = 0;
     // ВАЖНО: state.track обновляем СРАЗУ, до await на swap. При crossfade
@@ -505,9 +521,53 @@ class PlayerController extends Notifier<PlayerState> {
     );
     _startedAt = DateTime.now();
     _deadStreak = 0;
-    await _engine.swapToNext(crossfade: crossfade);
-    unawaited(_preloadAfter(n));
-    _swapping = false;
+    try {
+      await _engine.swapToNext(crossfade: crossfade);
+      if (token == _loadToken) {
+        _swapping = false;
+        unawaited(_preloadAfter(n));
+      }
+    } catch (error, stack) {
+      ref.read(talkerProvider).warning('audio swap failed', error, stack);
+      if (token != _loadToken) return;
+      if (error is AudioSwapCommittedException) {
+        // The incoming source owns the active player already. Stop playback
+        // instead of rolling metadata back over a different audio source.
+        state = state.copyWith(
+          isPlaying: false,
+          unplayable: (seq: ++_unplayableSeq, title: n.title),
+        );
+        // Publish before cleanup so a failed pause still reports the source
+        // error, and delayed cleanup cannot overwrite a newer play/resume.
+        try {
+          await _engine.pause();
+        } catch (pauseError, pauseStack) {
+          ref
+              .read(talkerProvider)
+              .warning('audio swap pause failed', pauseError, pauseStack);
+        }
+        return;
+      }
+      // Binding failed before the engine committed the incoming player.
+      // Restore navigation and metadata, retaining the user's pause intent.
+      _history = history;
+      _histIdx = historyIndex;
+      _recomputeFrontierNext();
+      _startedAt = startedAt;
+      _maxPosMs = maxPosMs;
+      state = state.copyWith(
+        track: previous.track,
+        position: previous.position,
+        buffered: previous.buffered,
+        liked: previous.liked,
+        queueVersion: state.queueVersion + 1,
+      );
+      final track = state.track;
+      _swapping = false;
+      if (track != null) unawaited(_preloadAfter(track));
+    } finally {
+      if (token == _loadToken) _swapping = false;
+    }
   }
 
   /// Стартовать overlap-crossfade за [_crossfade] до конца текущего трека —
