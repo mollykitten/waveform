@@ -84,12 +84,11 @@ Inter для текста, JetBrains Mono для всех цифр, тайм-к�
 - **Windows code-signing** (EV-сертификат): zip без подписи, SmartScreen
   ругается.
 - **Проверка нотаризации** на чистой macOS после релиза.
-- **AirPlay / выбор аудиовыхода на macOS** — отложено. Готовых пакетов под
-  macOS нет (все iOS/Android на `AVAudioSession`), у macOS нет per-app
-  AirPlay-пикера, система и так роутит. Единственный честный путь —
-  нативный CoreAudio-канал и форк `just_audio` ради
-  `AVPlayer.audioOutputDeviceUniqueID`. Ценность над системным пикером не
-  окупает усилий.
+- **AirPlay / выбор аудиовыхода на macOS** — реализовано: per-app выбор
+  CoreAudio-устройства для AVPlayer и системный `AVRoutePickerView` для
+  AirPlay. Детали реализации и ограничения — в [docs/audio-output.md](docs/audio-output.md).
+  Непрерывность live-воспроизведения на физическом AirPlay-приёмнике ещё
+  ожидает проверки на оборудовании.
 
 Когда откроют API:
 
