@@ -41,7 +41,7 @@ dependencies:
   flutter_cache_manager: ^3.4.1
   dio: ^5.9.2
   path_provider: ^2.1.6
-  just_audio: ^0.10.5
+  just_audio: ^0.10.6
   audio_service: ^0.18.18
   # vendored copy (third_party/) with a macos patch for a `hidden` window, used
   # by the background sync webview (datadome write executor). upstream 0.3.0
