@@ -200,11 +200,13 @@ void main() {
       tester,
       child: const SingleChildScrollView(child: AiSettingsSection()),
     );
-    final endpoint = find.widgetWithText(TextField, 'endpoint base URL');
-    final model = find.widgetWithText(TextField, 'model name');
+    final endpoint = find.byKey(const ValueKey('ai-endpoint'));
+    final model = find.byKey(const ValueKey('ai-model'));
+    final sessionKey = find.byKey(const ValueKey('ai-session-key'));
     store.pending = Completer<void>();
     await tester.tap(find.text('clear AI settings and key'));
     await tester.pump();
+    expect(find.byType(TextField), findsNWidgets(3));
     final fieldsLocked = tester
         .widgetList<TextField>(find.byType(TextField))
         .every((field) => field.enabled == false);
@@ -214,13 +216,14 @@ void main() {
               'Ollama (native)',
               'save AI settings',
               'clear AI settings and key',
+              'open recommendations',
             ]
             .map(
               (label) => tester.widget<Pressable>(
                 find.widgetWithText(Pressable, label),
               ),
             )
-            .every((button) => !button.enabled || button.onTap == null);
+            .every((button) => !button.enabled && button.onTap == null);
     final save = tester.widget<Pressable>(
       find.widgetWithText(Pressable, 'save AI settings'),
     );
@@ -228,10 +231,7 @@ void main() {
     if (!fieldsLocked && save.enabled && save.onTap != null) {
       await tester.enterText(endpoint, 'https://replacement.example/v1');
       await tester.enterText(model, 'replacement');
-      await tester.enterText(
-        find.byType(TextField).last,
-        'REPLACEMENT_TEST_KEY',
-      );
+      await tester.enterText(sessionKey, 'REPLACEMENT_TEST_KEY');
       await tester.tap(find.text('save AI settings'));
       await tester.pump();
     }
@@ -246,6 +246,7 @@ void main() {
     expect(fieldsLocked, isTrue);
     expect(actionsLocked, isTrue);
     expect(save.enabled, isFalse);
+    expect(save.onTap, isNull);
     expect(tester.widget<TextField>(endpoint).controller!.text, isEmpty);
     store.pending = null;
     await tester.enterText(endpoint, 'https://replacement.example/v1');
@@ -599,14 +600,12 @@ void main() {
       child: const SingleChildScrollView(child: AiSettingsSection()),
     );
     await tester.enterText(
-      find.widgetWithText(TextField, 'endpoint base URL'),
+      find.byKey(const ValueKey('ai-endpoint')),
       testConfig.endpoint,
     );
-    await tester.enterText(
-      find.widgetWithText(TextField, 'model name'),
-      'model',
-    );
-    await tester.enterText(find.byType(TextField).last, 'SESSION_SECRET');
+    await tester.enterText(find.byKey(const ValueKey('ai-model')), 'model');
+    final sessionKey = find.byKey(const ValueKey('ai-session-key'));
+    await tester.enterText(sessionKey, 'SESSION_SECRET');
     await tester.tap(find.text('save AI settings'));
     await tester.pump();
     await tester.runAsync(() async {
@@ -614,10 +613,7 @@ void main() {
     });
     await tester.pump();
     expect(container.read(aiSettingsProvider).hasSessionKey, isTrue);
-    expect(
-      tester.widget<TextField>(find.byType(TextField).last).controller!.text,
-      isEmpty,
-    );
+    expect(tester.widget<TextField>(sessionKey).controller!.text, isEmpty);
     await tester.runAsync(
       () =>
           container.read(aiSettingsProvider.notifier).setListeningConsent(true),
