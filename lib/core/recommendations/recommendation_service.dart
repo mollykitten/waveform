@@ -7,12 +7,19 @@ import '../api/soundcloud_api.dart';
 import 'ai_client.dart';
 import 'ai_config.dart';
 import 'models.dart';
+import 'vector_engine.dart';
 
-/// One user-initiated generation, with no automatic or deterministic fallback.
+/// One bounded batch from genuine SoundCloud tracks, ranked locally for the
+/// personal wave or selected by the configured model for mood discovery.
 class RecommendationService {
-  const RecommendationService({required this.api, required this.client});
+  const RecommendationService({
+    required this.api,
+    required this.client,
+    this.vectorEngine,
+  });
   final SoundcloudApi api;
   final AiClient client;
+  final VectorEngine? vectorEngine;
 
   Future<List<Recommendation>> generate({
     required AiConfig config,
@@ -22,6 +29,9 @@ class RecommendationService {
     required bool useListening,
     required CancelToken cancelToken,
     Track? currentTrack,
+    Set<String> excludedTrackIds = const {},
+    String? listeningIdentity,
+    void Function()? checkCurrent,
   }) async {
     final requestMood = validatedMood(mood);
     if (!config.isValid ||
@@ -31,6 +41,7 @@ class RecommendationService {
     }
     void check() {
       if (cancelToken.isCancelled) throw AiFailure.cancelled;
+      checkCurrent?.call();
     }
 
     check();
@@ -63,9 +74,29 @@ class RecommendationService {
     if (requestMood.isEmpty && uniqueSeeds.isEmpty) {
       throw AiFailure.configuration;
     }
+    if (requestMood.isEmpty &&
+        useListening &&
+        vectorEngine != null &&
+        listeningIdentity != null) {
+      final local = await vectorEngine!.generate(
+        seeds: uniqueSeeds.values.toList(),
+        identity: listeningIdentity,
+        excludedTrackIds: excludedTrackIds,
+        check: check,
+      );
+      check();
+      if (local.isNotEmpty) return local;
+    }
     final context = {
       'mood': requestMood,
       'seeds': uniqueSeeds.values.map(trackMetadata).toList(),
+      if (excludedTrackIds.isNotEmpty)
+        'exclude_ids': excludedTrackIds
+            .toList()
+            .reversed
+            .take(100)
+            .map((id) => boundedText(id, 64))
+            .toList(),
     };
     final plan = await client.complete(
       config: config,
@@ -92,7 +123,9 @@ class RecommendationService {
             .timeout(const Duration(seconds: 25));
         check();
         for (final track in result.tracks.take(40)) {
-          if (_eligible(track) && candidates.length < 40) {
+          if (_eligible(track) &&
+              !excludedTrackIds.contains(track.id) &&
+              candidates.length < 40) {
             candidates.putIfAbsent(track.id, () => track);
           }
         }

@@ -61,6 +61,10 @@ abstract interface class SoundcloudApi {
   Future<LibraryData> library();
   Future<List<FeedPost>> feed();
   Future<TrackDetail> trackDetail(String id);
+
+  /// One bounded public related page (at most twelve mapped tracks).
+  Future<List<Track>> relatedTracks(String id);
+
   Future<ArtistProfile> artistProfile(String handle);
   Future<SearchResults> search(String query);
   Future<PlaylistDetail> playlist(String id);

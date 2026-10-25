@@ -6,21 +6,22 @@ import 'package:waveform_app/core/recommendations/ai_client.dart';
 import 'package:waveform_app/core/recommendations/ai_config.dart';
 import 'package:waveform_app/shared/models/track.dart';
 
-Track realTrack(String id, {bool blocked = false}) => Track(
-  id: id,
-  title: 'track $id',
-  artist: 'artist',
-  durationMs: 120000,
-  likes: 1,
-  reposts: 0,
-  plays: 10,
-  waveform: const [0.3, 0.5],
-  genre: 'ambient',
-  description: 'PRIVATE DESCRIPTION',
-  permalinkUrl: 'https://soundcloud.com/private?secret=PRIVATE_LINK',
-  streamCandidates: ['https://stream.invalid/$id?token=STREAM_SECRET'],
-  blocked: blocked,
-);
+Track realTrack(String id, {bool blocked = false, String artist = 'artist'}) =>
+    Track(
+      id: id,
+      title: 'track $id',
+      artist: artist,
+      durationMs: 120000,
+      likes: 1,
+      reposts: 0,
+      plays: 10,
+      waveform: const [0.3, 0.5],
+      genre: 'ambient',
+      description: 'PRIVATE DESCRIPTION',
+      permalinkUrl: 'https://soundcloud.com/private?secret=PRIVATE_LINK',
+      streamCandidates: ['https://stream.invalid/$id?token=STREAM_SECRET'],
+      blocked: blocked,
+    );
 
 class TestSoundcloud implements SoundcloudApi {
   List<Track> tracks = [realTrack('1'), realTrack('2')];

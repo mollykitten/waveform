@@ -229,17 +229,18 @@ jobs:
         uses: actions/cache@v6
         with:
           path: /var/cache/apt/archives
-          key: apt-linux-flutter-deps-v2
+          key: apt-linux-flutter-deps-v3
 
       - name: Install linux build deps
         # webkit2gtk + libsoup are REQUIRED by the vendored
-        # desktop_webview_window CMake; without them configure fails
+        # desktop_webview_window CMake; libsecret is required for protected
+        # ChatGPT credentials. Without these, configure fails
         # within seconds.
         run: |
           sudo apt-get update -y
           sudo apt-get install -y \
             clang cmake ninja-build pkg-config libgtk-3-dev \
-            liblzma-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev
+            liblzma-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev libsecret-1-dev
 
       - name: Install pub dependencies
         run: flutter pub get

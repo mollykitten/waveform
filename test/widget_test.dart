@@ -61,22 +61,29 @@ void main() {
     await tester.pump();
   }
 
-  Future<ProviderContainer> pumpApp(WidgetTester tester,
-      {bool loggedIn = false}) async {
+  Future<ProviderContainer> pumpApp(
+    WidgetTester tester, {
+    bool loggedIn = false,
+  }) async {
     useDesktopViewport(tester);
     // Приложение по умолчанию ходит в живой api-v2 — в тестах подменяем моком.
-    await tester.pumpWidget(ProviderScope(
-      overrides: [
-        soundcloudApiProvider.overrideWithValue(const MockSoundcloudApi()),
-        audioEngineProvider.overrideWithValue(_FakeAudioEngine()),
-        talkerProvider.overrideWithValue(Talker()),
-      ],
-      child: const WaveformApp(),
-    ));
-    appRouter.go('/'); // appRouter глобальный — сбрасываем навигацию между тестами
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          soundcloudApiProvider.overrideWithValue(const MockSoundcloudApi()),
+          audioEngineProvider.overrideWithValue(_FakeAudioEngine()),
+          talkerProvider.overrideWithValue(Talker()),
+        ],
+        child: const WaveformApp(),
+      ),
+    );
+    appRouter.go(
+      '/',
+    ); // appRouter глобальный — сбрасываем навигацию между тестами
     await tester.pump();
-    final container =
-        ProviderScope.containerOf(tester.element(find.byType(WaveformApp)));
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(WaveformApp)),
+    );
     if (loggedIn) {
       container.read(authControllerProvider.notifier).signIn('2-test-token');
     }
@@ -84,8 +91,9 @@ void main() {
     return container;
   }
 
-  testWidgets('Home shows curated shelves, hides personal stream when anon',
-      (tester) async {
+  testWidgets('Home shows curated shelves, hides personal stream when anon', (
+    tester,
+  ) async {
     await pumpApp(tester);
 
     expect(find.text('waveform'), findsOneWidget);
@@ -115,8 +123,9 @@ void main() {
     expect(find.byIcon(Icons.pause), findsWidgets);
   });
 
-  testWidgets('Home hides "from your stream" even when logged in',
-      (tester) async {
+  testWidgets('Home hides "from your stream" even when logged in', (
+    tester,
+  ) async {
     await pumpApp(tester, loggedIn: true);
     // Секция убрана из Home (дублировала Feed) — её больше нет на главной.
     expect(find.text('from your stream'), findsNothing);
@@ -188,7 +197,9 @@ void main() {
     expect(container.read(authControllerProvider).isAuthenticated, isTrue);
 
     container.read(authControllerProvider.notifier).signOut();
-    await tester.pump();
+    // Login started a profile lookup. Drain the mock's in-flight response after
+    // logout so its timer cannot outlive the widget test.
+    await load(tester);
     expect(container.read(authControllerProvider).isAuthenticated, isFalse);
     expect(find.text('log in'), findsWidgets); // account-кнопка вернулась
   });
