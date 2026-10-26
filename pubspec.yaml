@@ -55,7 +55,7 @@ dependencies:
   talker_dio_logger: ^5.1.16
   crypto: ^3.0.7
   ffi: ^2.1.0
-  window_manager: ^0.5.1
+  window_manager: ^0.5.2
   app_links: ^6.3.2
   jose: ^0.3.5+2
   flutter_secure_storage: ^11.2.0
