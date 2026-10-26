@@ -39,7 +39,7 @@ dependencies:
   google_fonts: ^8.1.0
   cached_network_image: ^3.4.1
   flutter_cache_manager: ^3.4.1
-  dio: ^5.10.0
+  dio: ^5.11.1
   path_provider: ^2.1.6
   # local macos output routing and player-bound airplay support
   just_audio:
