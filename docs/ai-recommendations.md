@@ -102,8 +102,9 @@ diversifies results, limits any artist to two tracks, and uses every fifth
 position to explore a less-observed interest. these six seed interests do not
 claim to be general genre clusters. a valid local pool needs no model call; if
 the graph produces no candidates, the existing model-assisted route remains the
-fallback. a nonempty mood always uses that existing route. local listening
-facts are not added to model requests.
+fallback (an offline pilot found it reaches no held-out likes; see "offline
+pilots on public likes" below). a nonempty mood always uses that existing
+route. local listening facts are not added to model requests.
 
 the player records explicit transition causes and sampled listening facts.
 advancing playback counts as heard time; pauses, seeks, buffering, and playback
@@ -129,7 +130,11 @@ without counting the same fact twice.
 
 this is sparse graph ranking, not neural audio embeddings. waveform does not
 download models, index the full SoundCloud catalog, or perform global
-collaborative learning. the one-button flow adds no new settings.
+collaborative learning. the one-button flow adds no new settings. offline
+pilots in 2026-10 found audio taste-profile embeddings no better than random
+and co-liker collaborative filtering a two-to-seven-times wider candidate
+source than this graph; see "offline pilots on public likes" below and the
+[roadmap](roadmap.md).
 
 the core supports continuation batches: previously recommended IDs are excluded
 before ranking, with a bounded recent exclusion list sent to the planner. a
@@ -343,7 +348,8 @@ alignment. the ChatGPT/continuous-wave integration retains that presentation:
 one play action, one remembered destination/account consent, an optional mood
 shelf and custom provider fields hidden in advanced settings. local structural
 vector ranking adds no new user choices. see [roadmap](roadmap.md) for the
-separate planned backend and neural audio embeddings.
+planned broader candidate sources; the audio-embedding backend plan was
+dropped after the 2026-10-27 pilots.
 
 the combined UI/settings/presentation run passed 20 tests, with two optional
 settings captures skipped; targeted analysis reported no errors. a separate
@@ -396,3 +402,43 @@ Swift search paths and an always-running script phase. it was not warning-free.
 these checks do not verify release signing/notarization, interactive ChatGPT
 OAuth, native Keychain persistence, subscription inference, musical quality or
 physical AirPlay playback. those remain explicit follow-up work in the roadmap.
+
+## offline pilots on public likes — 2026-10-27
+
+four offline pilots measured candidate sources against the public likes of
+four SoundCloud users (the owner and three sampled by a fixed procedure), using
+only public api-v2 endpoints with `client_id` and a local model. for each user
+the 100 newest likes were held out as truth and the 100 freshest earlier likes
+served as seeds. the bench and cached responses live outside the repository;
+the full outcome table is in the [roadmap](roadmap.md).
+
+- audio taste-profile embeddings (CLAP centroid or 5-nn of the seeds) ranked
+  held-out likes no better than random against hard negatives; AUC was below
+  0.5 on every slice and cosine between random tracks was 0.94–0.98. the
+  taste-profile use of audio embeddings is a no-go.
+- the related graph used by the local core is precise where it reaches
+  (recall@10 0.21 on reachable likes) but reaches 14 / 7 / 25 / 17 of 100
+  held-out likes.
+- co-liker collaborative filtering (likers of the seeds, neighbours with at
+  least two shared seeds, their recent likes) reaches 44 / 52 / 76 / 39 of 100
+  and is almost a superset of the graph for three of four users. on a balanced
+  negative pool it beats the graph on recall@10 for the owner; on the product
+  metric (held-out likes in the top 50 of each method's own list) the two are
+  indistinguishable for all but one user. CF is a candidate source, not a
+  proven ranker. 16–30% of its candidates were unplayable or DRM-only.
+- 48 of 100 owner likes were reachable by neither source; followed uploaders
+  cover 26 of them, which points at the authenticated home stream as the next
+  source the app can read and the pilots could not.
+- the model-assisted route above (plan searches, search, rank), reproduced
+  with its own prompts on a local Qwen3-1.7B for ten batches per user, reached
+  0 of 100 held-out likes for every user; no held-out like entered a
+  candidate pool. deterministic searches without a model (profile genres,
+  seed uploader names, tags) reached 3 / 9 / 13 / 3, below the graph for
+  three of four users and below CF for all, so the search channel, not the
+  model, is the ceiling. the route is not a recommendation source; its only
+  remaining use is translating a typed mood into search strings. the track
+  mapper's `electronic` default for an empty genre reaches the prompt as a
+  fake genre for up to half of a user's seeds.
+- offline evaluation on public likes is exhausted: four users, 100 positives
+  each, wide intervals and look-ahead bias. the next evidence is like/skip
+  outcomes per candidate source inside the app, after v0.4.0 ships.
