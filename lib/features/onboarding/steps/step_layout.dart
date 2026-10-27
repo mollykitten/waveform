@@ -50,55 +50,64 @@ class StepIntro extends StatelessWidget {
   final List<Widget> children;
 
   @override
-  Widget build(BuildContext context) => Align(
-    alignment: Alignment.centerLeft,
-    child: ConstrainedBox(
-      constraints: BoxConstraints(maxWidth: maxWidth),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        spacing: 20,
-        children: [
-          Stage(
-            clock: clock,
-            child: Text(
-              '◆ $eyebrow',
-              style: AppTheme.mono(
-                size: 12,
-                color: AppColors.lime,
-                letterSpacing: .96,
-              ),
-            ),
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, box) => SingleChildScrollView(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(minHeight: box.maxHeight),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: maxWidth),
+            child: _column(),
           ),
-          Stage(
-            clock: clock,
-            delay: 120,
-            child: Text(
-              title,
-              style: const TextStyle(
-                fontSize: 44,
-                fontWeight: FontWeight.w700,
-                letterSpacing: -1.32,
-                height: 1.08,
-              ),
-            ),
-          ),
-          Stage(
-            clock: clock,
-            delay: 240,
-            child: Text(
-              body,
-              style: const TextStyle(
-                fontSize: 16,
-                height: 1.6,
-                color: AppColors.textMid,
-              ),
-            ),
-          ),
-          ...children,
-        ],
+        ),
       ),
     ),
+  );
+
+  Widget _column() => Column(
+    mainAxisSize: MainAxisSize.min,
+    crossAxisAlignment: CrossAxisAlignment.start,
+    spacing: 20,
+    children: [
+      Stage(
+        clock: clock,
+        child: Text(
+          '◆ $eyebrow',
+          style: AppTheme.mono(
+            size: 12,
+            color: AppColors.lime,
+            letterSpacing: .96,
+          ),
+        ),
+      ),
+      Stage(
+        clock: clock,
+        delay: 120,
+        child: Text(
+          title,
+          style: const TextStyle(
+            fontSize: 44,
+            fontWeight: FontWeight.w700,
+            letterSpacing: -1.32,
+            height: 1.08,
+          ),
+        ),
+      ),
+      Stage(
+        clock: clock,
+        delay: 240,
+        child: Text(
+          body,
+          style: const TextStyle(
+            fontSize: 16,
+            height: 1.6,
+            color: AppColors.textMid,
+          ),
+        ),
+      ),
+      ...children,
+    ],
   );
 }
 
