@@ -123,6 +123,26 @@ class MockSoundcloudApi implements SoundcloudApi {
       LikeOutcome.ok;
 
   @override
+  Future<List<Track>> streamTracks({int limit = 40}) async =>
+      Mock.listeningHistory.take(limit).toList();
+
+  @override
+  Future<List<String>> trackLikers(String trackId, {int limit = 50}) async =>
+      const [];
+
+  @override
+  Future<List<({String trackId, DateTime? likedAt})>> userTrackLikes(
+    String userId, {
+    int limit = 200,
+  }) async => const [];
+
+  @override
+  Future<List<Track>> tracksByIds(List<String> ids) async => [
+    for (final track in Mock.listeningHistory)
+      if (ids.contains(track.id)) track,
+  ];
+
+  @override
   Future<List<Track>> historyPage({int limit = 50, int offset = 0}) async =>
       Mock.listeningHistory.skip(offset).take(limit).toList();
 

@@ -9,7 +9,7 @@ import 'package:talker_flutter/talker_flutter.dart';
 import 'package:waveform_app/core/api/providers.dart';
 import 'package:waveform_app/core/api/soundcloud_auth.dart';
 import 'package:waveform_app/core/log/talker.dart';
-import 'package:waveform_app/core/recommendations/ai_client.dart';
+import 'package:waveform_app/core/recommendations/co_likers_store.dart';
 import 'package:waveform_app/core/recommendations/listening_store.dart';
 import 'package:waveform_app/core/recommendations/listening_event.dart';
 import 'package:waveform_app/core/recommendations/listening_providers.dart';
@@ -22,12 +22,16 @@ import 'package:waveform_app/core/recommendations/vector_store.dart';
 import 'package:waveform_app/shared/models/track.dart';
 
 import 'support.dart';
-import 'ui_test_support.dart';
 
 class PagedLikesApi extends TestSoundcloud {
   final pages = <String?>[];
   Completer<void>? hold;
   VoidCallback? onSecondPage;
+
+  @override
+  Future<List<Track>> relatedTracks(String id) async => [
+    for (final track in tracks) track,
+  ];
 
   @override
   Future<({List<Track> tracks, String? nextHref})> likesPage({
@@ -55,7 +59,6 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   late Directory directory;
   late PagedLikesApi api;
-  late ScriptedAi client;
   setUp(() {
     directory = Directory.systemTemp.createTempSync('waveform-lifecycle-');
     api = PagedLikesApi()
@@ -63,31 +66,8 @@ void main() {
         for (final id in ['like-late', 'like-last', 'heard', 'fresh'])
           realTrack(id, artist: id),
       ];
-    client = ScriptedAi()..replies.clear();
   });
   tearDown(() => directory.deleteSync(recursive: true));
-
-  RecommendationService service({VectorEngine? engine}) =>
-      RecommendationService(api: api, client: client, vectorEngine: engine);
-
-  Future<List<Recommendation>> mood(
-    RecommendationService value, {
-    CancelToken? token,
-  }) {
-    client.replies.addAll([
-      '{"queries":["ambient"]}',
-      '{"recommendations":[{"id":"fresh","reason":"fit"}]}',
-    ]);
-    return value.generate(
-      config: testConfig.withConsent(true),
-      consent: AiConsent(destination: testConfig.destination, listening: true),
-      apiKey: '',
-      mood: 'quiet',
-      useListening: true,
-      cancelToken: token ?? CancelToken(),
-      listeningIdentity: '42',
-    );
-  }
 
   VectorEngine engineWithMemory(SeenStore seen) => VectorEngine(
     api: api,
@@ -96,31 +76,35 @@ void main() {
     seen: seen,
   );
 
-  test(
-    'mood mode filters liked and remembered ids and keeps them local',
-    () async {
-      final seen = SeenStore(directory: () async => directory);
-      await seen.record('42', SeenKind.played, ['heard'], DateTime.now());
-      final result = await mood(service(engine: engineWithMemory(seen)));
-      expect(result.single.track.id, 'fresh');
-      expect(api.pages, [null, 'p2', 'p3']);
-      // like-first is an ordinary seed the model has always seen; the
-      // drained and remembered ids must stay local. candidates sent to the model contain only the unfiltered track
-      final ranking = client.payloads.last;
-      expect(ranking, contains('"id":"fresh"'));
-      for (final hidden in ['like-late', 'like-last', 'heard']) {
-        expect(client.payloads.join(), isNot(contains(hidden)));
-      }
-      expect(client.payloads.join(), isNot(contains('remembered')));
-      expect(client.payloads.join(), isNot(contains('liked')));
-    },
+  RecommendationService service({SeenStore? seen, TestSoundcloud? source}) =>
+      RecommendationService(
+        api: source ?? api,
+        vectorEngine: engineWithMemory(
+          seen ?? SeenStore(directory: () async => directory),
+        ),
+      );
+
+  Future<List<Recommendation>> wave(
+    RecommendationService value, {
+    CancelToken? token,
+  }) => value.generate(
+    cancelToken: token ?? CancelToken(),
+    listeningIdentity: '42',
   );
+
+  test('the wave filters liked and remembered ids', () async {
+    final seen = SeenStore(directory: () async => directory);
+    await seen.record('42', SeenKind.played, ['heard'], DateTime.now());
+    final result = await wave(service(seen: seen));
+    expect(result.single.track.id, 'fresh');
+    expect(api.pages, [null, 'p2', 'p3']);
+  });
 
   test('the liked set is cached between generations', () async {
     final value = service();
-    await mood(value);
+    await wave(value);
     expect(api.likesCalls, 3);
-    await mood(value);
+    await wave(value).then((_) {}, onError: (_) {});
     // only the first page again, for seeds
     expect(api.likesCalls, 4);
   });
@@ -129,7 +113,10 @@ void main() {
     final token = CancelToken();
     api.onSecondPage = token.cancel;
     final value = service();
-    await expectLater(mood(value, token: token), throwsA(AiFailure.cancelled));
+    await expectLater(
+      wave(value, token: token),
+      throwsA(WaveFailure.cancelled),
+    );
     expect(api.pages, [null, 'p2']);
   });
 
@@ -139,10 +126,14 @@ void main() {
       ..tracks = [realTrack('fresh', artist: 'fresh')];
     final value = RecommendationService(
       api: failing,
-      client: client,
       onWarning: warnings.add,
+      vectorEngine: VectorEngine(
+        api: failing,
+        store: VectorStore(directory: () async => directory),
+        listening: ListeningStore(directory: () async => directory),
+      ),
     );
-    final result = await mood(value);
+    final result = await wave(value);
     expect(result.single.track.id, 'fresh');
     expect(warnings, hasLength(1));
   });
@@ -260,17 +251,16 @@ void main() {
 
   test('logging out through the auth controller deletes that memory', () async {
     final seen = SeenStore(directory: () async => directory);
+    final coLikers = CoLikersStore(directory: () async => directory);
     final container = ProviderContainer(
       overrides: [
-        aiSettingsProvider.overrideWith(
-          () => WaveTestSettings(initial: const AiSettingsState(ready: true)),
-        ),
-        aiListeningIdentityProvider.overrideWith((ref) async {
+        listeningIdentityProvider.overrideWith((ref) async {
           final auth = ref.watch(authControllerProvider);
           await Future<void>.delayed(Duration.zero);
           return auth.isAuthenticated ? '42' : 'anonymous';
         }),
         seenStoreProvider.overrideWithValue(seen),
+        coLikersStoreProvider.overrideWithValue(coLikers),
         listeningStoreProvider.overrideWithValue(
           ListeningStore(directory: () async => directory),
         ),
@@ -284,6 +274,11 @@ void main() {
     container.read(authControllerProvider.notifier).signIn('2-token');
     expect(await container.read(listeningPartitionProvider.future), '42');
     await seen.record('42', SeenKind.played, ['a'], DateTime.now());
+    await coLikers.write('42', DateTime.now(), [
+      const CoLikerCandidate('7', 1, 1),
+    ]);
+    final cache = File('${directory.path}/co-likers-v1-42.json');
+    expect(cache.existsSync(), isTrue);
     final base = '${directory.path}/seen-tracks-v1-42.json';
     File('$base.bak').writeAsStringSync('x');
     expect(File(base).existsSync(), isTrue);
@@ -297,10 +292,15 @@ void main() {
     await seen.read('42');
     expect(File(base).existsSync(), isFalse);
     expect(File('$base.bak').existsSync(), isFalse);
+    // the co-likers cache goes with the account
+    expect(cache.existsSync(), isFalse);
   });
 }
 
 class FailingLikes extends TestSoundcloud {
+  @override
+  Future<List<Track>> relatedTracks(String id) async => tracks;
+
   @override
   Future<({List<Track> tracks, String? nextHref})> likesPage({
     String? nextHref,

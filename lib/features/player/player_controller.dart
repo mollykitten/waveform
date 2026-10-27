@@ -14,6 +14,7 @@ import '../../core/log/talker.dart';
 import '../../core/recommendations/listening_event.dart';
 import '../../core/recommendations/listening_providers.dart';
 import '../../core/recommendations/listening_tracker.dart';
+import '../../core/recommendations/wave_sources.dart';
 import '../../shared/models/track.dart';
 
 /// Событие «трек не проигрался» — для всплывающего уведомления в UI.
@@ -282,6 +283,10 @@ class PlayerController extends Notifier<PlayerState> {
   /// shuffle-порядок и историю из одного трека. Навигация next/previous НЕ
   /// проходит сюда (иначе сбрасывала бы шафл на каждый шаг — старый баг).
   void play(Track track, {List<Track>? queue}) {
+    // Wave sources belong to the queue the wave started: a play from anywhere
+    // else must not inherit them through a shared track id.
+    final waveSources = ref.read(waveSourcesProvider.notifier);
+    if (!waveSources.consumeArm()) waveSources.clear();
     _queue = (queue != null && queue.isNotEmpty) ? List.of(queue) : [track];
     _orderSource = null; // новый контекст → _order пересоберётся в _ensureOrder
     _order = [];
@@ -305,7 +310,7 @@ class PlayerController extends Notifier<PlayerState> {
       unawaited(_engine.stop());
     }
     _listening.finish(reason);
-    _listening.start(trackId: track.id, durationMs: track.durationMs);
+    _startListening(track);
     _startedAt = null;
     _maxPosMs = 0;
     state = state.copyWith(
@@ -587,7 +592,7 @@ class PlayerController extends Notifier<PlayerState> {
     final startedAt = _startedAt;
     final maxPosMs = _maxPosMs;
     _listening.finish(reason);
-    _listening.start(trackId: n.id, durationMs: n.durationMs);
+    _startListening(n);
     _readySourceToken = null;
     _preloadedTrackId = null;
     _swapping = true;
@@ -631,7 +636,7 @@ class PlayerController extends Notifier<PlayerState> {
           unplayable: (seq: ++_unplayableSeq, title: n.title),
         );
         _listening.finish(ListeningTransitionCause.unplayable);
-        _listening.start(trackId: n.id, durationMs: n.durationMs);
+        _startListening(n);
         _markSourceReady(token);
         // Publish before cleanup so a failed pause still reports the source
         // error, and delayed cleanup cannot overwrite a newer play/resume.
@@ -662,11 +667,7 @@ class PlayerController extends Notifier<PlayerState> {
       _listening.finish(ListeningTransitionCause.unplayable);
       final track = state.track;
       if (track != null) {
-        _listening.start(
-          trackId: track.id,
-          durationMs: track.durationMs,
-          positionMs: previous.position.inMilliseconds,
-        );
+        _startListening(track, positionMs: previous.position.inMilliseconds);
         _markSourceReady(token, positionMs: previous.position.inMilliseconds);
         _maxPosMs = maxPosMs;
       }
@@ -894,11 +895,20 @@ class PlayerController extends Notifier<PlayerState> {
     }
   }
 
+  /// Begin a listening fact for [track], stamped with the wave source that
+  /// queued it (null for anything played outside my wave).
+  void _startListening(Track track, {int positionMs = 0}) => _listening.start(
+    trackId: track.id,
+    durationMs: track.durationMs,
+    positionMs: positionMs,
+    source: ref.read(waveSourcesProvider)[track.id],
+  );
+
   void _restartListening(ListeningTransitionCause reason) {
     final track = state.track;
     if (track == null) return;
     _listening.finish(reason);
-    _listening.start(trackId: track.id, durationMs: track.durationMs);
+    _startListening(track);
     _listening.setPlaying(_sourceReady && state.isPlaying);
     state = state.copyWith(
       transitionCause: reason,

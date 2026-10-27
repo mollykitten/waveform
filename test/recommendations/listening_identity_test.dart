@@ -56,7 +56,7 @@ void main() {
             (ref) => stored.future,
           ),
           listeningTrackerProvider.overrideWithValue(tracker),
-          aiListeningIdentityProvider.overrideWith((ref) async => '123'),
+          listeningIdentityProvider.overrideWith((ref) async => '123'),
         ],
       );
       addTearDown(container.dispose);
@@ -95,7 +95,7 @@ void main() {
             (ref) async => true,
           ),
           listeningTrackerProvider.overrideWithValue(tracker),
-          aiListeningIdentityProvider.overrideWith((ref) {
+          listeningIdentityProvider.overrideWith((ref) {
             final auth = ref.watch(authControllerProvider);
             return auth.userToken == 'a' ? first.future : second.future;
           }),
@@ -134,7 +134,7 @@ void main() {
       overrides: [
         authControllerProvider.overrideWith(TestAuth.new),
         listeningStoredAccountPresentProvider.overrideWith((ref) async => true),
-        aiListeningIdentityProvider.overrideWith(
+        listeningIdentityProvider.overrideWith(
           (ref) async => throw StateError('lookup'),
         ),
       ],
@@ -317,7 +317,7 @@ void main() {
               (ref) async => true,
             ),
             listeningTrackerProvider.overrideWithValue(tracker),
-            aiListeningIdentityProvider.overrideWith((ref) {
+            listeningIdentityProvider.overrideWith((ref) {
               ref.watch(authControllerProvider);
               lookups++;
               return lookup.future;

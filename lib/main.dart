@@ -11,6 +11,7 @@ import 'package:window_manager/window_manager.dart';
 import 'app/app.dart';
 import 'core/audio/waveform_audio_handler.dart';
 import 'core/log/talker.dart';
+import 'features/onboarding/onboarding_gate.dart';
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -71,6 +72,10 @@ Future<void> main(List<String> args) async {
     overrides: [talkerProvider.overrideWithValue(talker)],
   );
   handler.container = container;
+
+  // Флаг онбординга читаем до первого кадра, чтобы роутер сразу знал стартовый
+  // экран (первый запуск → /welcome).
+  await onboardingGate.restore();
 
   runApp(
     UncontrolledProviderScope(container: container, child: const WaveformApp()),

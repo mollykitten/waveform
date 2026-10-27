@@ -71,7 +71,7 @@ extension TrackDtoMapper on TrackDto {
     drmStreamCandidates: isBlocked
         ? const []
         : ctrTranscodingUrls(transcodings),
-    genre: (genre == null || genre!.isEmpty) ? 'electronic' : genre!,
+    genre: genre ?? '',
     postedAt: relativeTime(createdAt),
     description: description ?? '',
   );

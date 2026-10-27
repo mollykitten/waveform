@@ -5,228 +5,130 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:waveform_app/core/api/providers.dart';
 import 'package:waveform_app/core/api/soundcloud_auth.dart';
-import 'package:waveform_app/core/recommendations/ai_config.dart';
-import 'package:waveform_app/core/recommendations/providers.dart';
+import 'package:waveform_app/core/recommendations/listening_store.dart';
+import 'package:waveform_app/core/recommendations/listening_store_provider.dart';
 import 'package:waveform_app/core/recommendations/models.dart';
+import 'package:waveform_app/core/recommendations/providers.dart';
+import 'package:waveform_app/core/recommendations/seen_store.dart';
+import 'package:waveform_app/core/recommendations/vector_store.dart';
+import 'package:waveform_app/shared/models/track.dart';
 
 import 'support.dart';
 
-class DelayedConfigStore extends AiConfigStore {
-  final loaded = Completer<AiConfig>();
-  final saved = <AiConfig>[];
+class GraphApi extends TestSoundcloud {
+  Completer<List<Track>>? pending;
+  bool failHistory = false;
+
   @override
-  Future<AiConfig> load() => loaded.future;
+  Future<List<Track>> relatedTracks(String id) async =>
+      pending?.future ?? [realTrack('rel-$id')];
+
   @override
-  Future<void> save(AiConfig config) async {
-    saved.add(config);
+  Future<List<Track>> historyPage({int limit = 50, int offset = 0}) {
+    if (failHistory) throw StateError('PRIVATE TRANSPORT ERROR');
+    return super.historyPage(limit: limit, offset: offset);
   }
 }
 
 void main() {
   late Directory directory;
   late ProviderContainer container;
-  late ScriptedAi client;
-  var authenticated = false;
+  late GraphApi api;
+  var token = 'synthetic-account';
+  var identity = '1';
   setUp(() async {
-    authenticated = false;
-    directory = await Directory.systemTemp.createTemp('waveform-ai-providers');
-    client = ScriptedAi();
+    token = 'synthetic-account';
+    identity = '1';
+    directory = await Directory.systemTemp.createTemp('waveform-providers');
+    api = GraphApi();
     container = ProviderContainer(
       overrides: [
         authControllerProvider.overrideWithBuild(
-          (ref, notifier) => SoundcloudAuth(
-            clientId: 'test',
-            userToken: authenticated ? 'synthetic-account' : null,
-          ),
+          (ref, notifier) => SoundcloudAuth(clientId: 'test', userToken: token),
         ),
-        aiConfigStoreProvider.overrideWithValue(
-          AiConfigStore(directory: () async => directory),
+        listeningIdentityProvider.overrideWith((ref) async => identity),
+        soundcloudApiProvider.overrideWithValue(api),
+        listeningStoreProvider.overrideWithValue(
+          ListeningStore(directory: () async => directory),
         ),
-        aiClientProvider.overrideWithValue(client),
-        soundcloudApiProvider.overrideWithValue(TestSoundcloud()),
+        vectorStoreProvider.overrideWithValue(
+          VectorStore(directory: () async => directory),
+        ),
+        seenStoreProvider.overrideWithValue(
+          SeenStore(directory: () async => directory),
+        ),
       ],
     );
-    container.listen(aiSettingsProvider, (_, _) {});
-    await Future<void>.delayed(const Duration(milliseconds: 20));
-    await container
-        .read(aiSettingsProvider.notifier)
-        .save(testConfig, sessionKey: 'SESSION_SECRET');
+    container.listen(recommendationsProvider, (_, _) {});
   });
   tearDown(() async {
     container.dispose();
     await directory.delete(recursive: true);
   });
 
-  test(
-    'account change revokes consent/key and discards pending generation',
-    () async {
-      final settings = container.read(aiSettingsProvider.notifier);
-      await settings.setListeningConsent(true);
-      container.listen(recommendationsProvider, (_, _) {});
-      final pending = client.pending = Completer<String>();
-      final generation = container
-          .read(recommendationsProvider.notifier)
-          .generate(consent: testConsent, mood: 'night', useListening: false);
-      authenticated = true;
-      container.invalidate(authControllerProvider);
-      container.read(authControllerProvider);
-      await Future<void>.delayed(Duration.zero);
-      pending.complete('{"queries":["ambient"]}');
-      await generation;
-      expect(container.read(aiSettingsProvider).hasSessionKey, isFalse);
-      expect(
-        container.read(aiSettingsProvider).config.listeningConsent,
-        isFalse,
-      );
-      expect(container.read(recommendationsProvider).busy, isFalse);
-      expect(container.read(recommendationsProvider).items, isEmpty);
-    },
-  );
+  RecommendationsController controller() =>
+      container.read(recommendationsProvider.notifier);
+  RecommendationState state() => container.read(recommendationsProvider);
 
-  test(
-    'auth restore racing config load does not erase the saved endpoint',
-    () async {
-      final store = DelayedConfigStore();
-      var signedIn = false;
-      final local = ProviderContainer(
-        overrides: [
-          aiConfigStoreProvider.overrideWithValue(store),
-          authControllerProvider.overrideWithBuild(
-            (ref, notifier) => SoundcloudAuth(
-              clientId: 'test',
-              userToken: signedIn ? 'test' : null,
-            ),
-          ),
-        ],
-      );
-      addTearDown(local.dispose);
-      local.listen(aiSettingsProvider, (_, _) {});
-      signedIn = true;
-      local.invalidate(authControllerProvider);
-      local.read(authControllerProvider);
-      await Future<void>.delayed(Duration.zero);
-      store.loaded.complete(testConfig.withConsent(true));
-      await Future<void>.delayed(Duration.zero);
-      expect(
-        local.read(aiSettingsProvider).config.destination,
-        testConfig.destination,
-      );
-      expect(local.read(aiSettingsProvider).config.listeningConsent, isFalse);
-      expect(store.saved, isEmpty);
-    },
-  );
+  test('generate ranks real graph tracks from the current track', () async {
+    await controller().generate(currentTrack: realTrack('seed'));
+    expect(state().error, isNull);
+    expect(state().items, isNotEmpty);
+  });
 
-  test(
-    'key is session-only and endpoint changes revoke listening consent',
-    () async {
-      final controller = container.read(aiSettingsProvider.notifier);
-      await controller.setListeningConsent(true);
-      expect(container.read(aiSettingsProvider).hasSessionKey, isTrue);
-      final file = await File(
-        '${directory.path}/ai_config.json',
-      ).readAsString();
-      expect(file, isNot(contains('SESSION_SECRET')));
-      await controller.save(
-        const AiConfig(
-          endpoint: 'https://other.example/v1',
-          model: 'm',
-          listeningConsent: true,
-        ),
-      );
-      expect(
-        container.read(aiSettingsProvider).config.listeningConsent,
-        isFalse,
-      );
-      expect(container.read(aiSettingsProvider).hasSessionKey, isFalse);
-    },
-  );
+  test('an anonymous account never generates', () async {
+    identity = 'anonymous';
+    await controller().generate(currentTrack: realTrack('seed'));
+    expect(state().error, WaveFailure.signIn);
+    expect(state().items, isEmpty);
+  });
+
+  test('account change discards a pending generation', () async {
+    final pending = api.pending = Completer<List<Track>>();
+    final generation = controller().generate(currentTrack: realTrack('seed'));
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    token = 'another-account';
+    container.invalidate(authControllerProvider);
+    container.read(authControllerProvider);
+    await Future<void>.delayed(Duration.zero);
+    pending.complete([realTrack('late')]);
+    await generation;
+    expect(state().busy, isFalse);
+    expect(state().items, isEmpty);
+  });
 
   test(
     'refresh keeps success and cancellation discards late results',
     () async {
-      container.listen(recommendationsProvider, (_, _) {});
-      final controller = container.read(recommendationsProvider.notifier);
-      await controller.generate(
-        consent: testConsent,
-        mood: 'night',
-        useListening: false,
-      );
-      expect(
-        container.read(recommendationsProvider).items.single.track.id,
-        '2',
-      );
-      final pending = client.pending = Completer<String>();
-      final refresh = controller.generate(
-        consent: testConsent,
-        mood: 'new',
-        useListening: false,
-      );
-      expect(container.read(recommendationsProvider).busy, isTrue);
-      expect(
-        container.read(recommendationsProvider).items.single.track.id,
-        '2',
-      );
-      controller.cancel();
-      pending.complete('{"queries":["late"]}');
+      await controller().generate(currentTrack: realTrack('seed'));
+      final original = state().items.map((item) => item.track.id).toList();
+      expect(original, isNotEmpty);
+      final pending = api.pending = Completer<List<Track>>();
+      final refresh = controller().generate(currentTrack: realTrack('other'));
+      expect(state().busy, isTrue);
+      expect(state().items.map((item) => item.track.id), original);
+      controller().cancel();
+      pending.complete([realTrack('late')]);
       await refresh;
-      expect(container.read(recommendationsProvider).busy, isFalse);
-      expect(
-        container.read(recommendationsProvider).items.single.track.id,
-        '2',
-      );
-    },
-  );
-
-  test(
-    'configuration change cancels in-flight work and clears stale results',
-    () async {
-      container.listen(recommendationsProvider, (_, _) {});
-      final controller = container.read(recommendationsProvider.notifier);
-      final pending = client.pending = Completer<String>();
-      final future = controller.generate(
-        consent: testConsent,
-        mood: 'night',
-        useListening: false,
-      );
-      await container.read(aiSettingsProvider.notifier).clear();
-      pending.complete('{"queries":["ambient"]}');
-      await future;
-      expect(container.read(recommendationsProvider).items, isEmpty);
-      expect(container.read(recommendationsProvider).busy, isFalse);
-      expect(container.read(aiSettingsProvider).hasSessionKey, isFalse);
+      expect(state().busy, isFalse);
+      expect(state().items.map((item) => item.track.id), original);
     },
   );
 
   test('raw client errors are sanitized in observable state', () async {
-    container.listen(recommendationsProvider, (_, _) {});
-    client.failure = AiFailureForTest.transport;
-    await container
-        .read(recommendationsProvider.notifier)
-        .generate(consent: testConsent, mood: 'night', useListening: false);
-    expect(container.read(recommendationsProvider).error, AiFailure.network);
-    expect(
-      container.read(recommendationsProvider).error.toString(),
-      isNot(contains('SESSION_SECRET')),
-    );
+    api.failHistory = true;
+    await controller().generate(currentTrack: realTrack('seed'));
+    expect(state().error, WaveFailure.source);
+    expect(state().error.toString(), isNot(contains('PRIVATE')));
   });
 
   test('retry failure retains the last successful result', () async {
-    container.listen(recommendationsProvider, (_, _) {});
-    final controller = container.read(recommendationsProvider.notifier);
-    await controller.generate(
-      consent: testConsent,
-      mood: 'night',
-      useListening: false,
-    );
-    final original = container.read(recommendationsProvider).items;
-    client.failure = AiFailureForTest.transport;
-    await controller.generate(
-      consent: testConsent,
-      mood: 'again',
-      useListening: false,
-    );
-    expect(container.read(recommendationsProvider).items, same(original));
-    expect(container.read(recommendationsProvider).error, AiFailure.network);
-    expect(container.read(recommendationsProvider).busy, isFalse);
+    await controller().generate(currentTrack: realTrack('seed'));
+    final original = state().items;
+    api.failHistory = true;
+    await controller().generate(currentTrack: realTrack('seed'));
+    expect(state().items, same(original));
+    expect(state().error, WaveFailure.source);
+    expect(state().busy, isFalse);
   });
 }

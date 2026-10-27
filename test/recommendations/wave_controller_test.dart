@@ -1,8 +1,6 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 
-import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -12,13 +10,11 @@ import 'package:waveform_app/core/api/providers.dart';
 import 'package:waveform_app/core/api/soundcloud_auth.dart';
 import 'package:waveform_app/core/audio/audio_engine.dart';
 import 'package:waveform_app/core/log/talker.dart';
-import 'package:waveform_app/core/recommendations/ai_config.dart';
-import 'package:waveform_app/core/recommendations/ai_client.dart';
 import 'package:waveform_app/core/recommendations/listening_event.dart';
 import 'package:waveform_app/core/recommendations/models.dart';
+import 'package:waveform_app/core/recommendations/wave_sources.dart';
 import 'package:waveform_app/core/recommendations/recommendation_service.dart';
 import 'package:waveform_app/core/recommendations/seen_store.dart';
-import 'package:waveform_app/shared/models/track.dart';
 import 'package:waveform_app/core/recommendations/providers.dart';
 import 'package:waveform_app/features/player/player_controller.dart';
 import 'package:waveform_app/features/player/player_ui_state.dart';
@@ -27,13 +23,12 @@ import 'package:waveform_app/features/recommendations/wave_controller.dart';
 
 import '../support/fake_audio_engine.dart';
 import '../support/stub_liked_tracks.dart';
+import 'pool_service.dart';
 import 'support.dart';
-import 'ui_test_support.dart';
 
 void main() {
   late ProviderContainer container;
-  late WaveTestSettings settings;
-  late ScriptedAi client;
+  late PoolService pool;
   late TestSoundcloud api;
   late FakeAudioEngine engine;
   String? userToken;
@@ -44,30 +39,12 @@ void main() {
     }
   }
 
-  void batch(List<String> ids) {
-    client.replies.addAll([
-      '{"queries":["ambient"]}',
-      jsonEncode({
-        'recommendations': [
-          for (final id in ids) {'id': id, 'reason': 'a possible fit'},
-        ],
-      }),
-    ]);
-  }
-
   setUp(() {
     seenDirectory = Directory.systemTemp.createTempSync('waveform-seen-');
-    userToken = null;
-    settings = WaveTestSettings(
-      initial: const AiSettingsState(
-        ready: true,
-        chatGptConnected: true,
-        config: AiConfig(backend: AiBackend.chatGpt, listeningConsent: true),
-      ),
-    );
-    client = ScriptedAi()..replies.clear();
+    userToken = 'test-token';
     api = TestSoundcloud()
       ..tracks = List.generate(12, (i) => realTrack('${i + 1}'));
+    pool = PoolService(api);
     engine = FakeAudioEngine();
     container = ProviderContainer(
       overrides: [
@@ -76,9 +53,8 @@ void main() {
               SoundcloudAuth(clientId: 'test', userToken: userToken),
         ),
         waveRetryDelayProvider.overrideWithValue(Duration.zero),
-        aiSettingsProvider.overrideWith(() => settings),
-        aiListeningIdentityProvider.overrideWith((ref) async => '42'),
-        aiClientProvider.overrideWithValue(client),
+        listeningIdentityProvider.overrideWith((ref) async => '42'),
+        recommendationServiceProvider.overrideWithValue(pool),
         soundcloudApiProvider.overrideWithValue(api),
         audioEngineProvider.overrideWithValue(engine),
         likedTracksProvider.overrideWith(StubLikedTracks.new),
@@ -105,11 +81,9 @@ void main() {
           (ref, notifier) =>
               SoundcloudAuth(clientId: 'test', userToken: userToken),
         ),
-        aiSettingsProvider.overrideWith(() => settings),
-        aiListeningIdentityProvider.overrideWith(
+        listeningIdentityProvider.overrideWith(
           (ref) async => loader == null ? identity : await loader(),
         ),
-        aiClientProvider.overrideWithValue(client),
         recommendationServiceProvider.overrideWithValue(service),
         seenStoreProvider.overrideWithValue(
           seen ?? SeenStore(directory: () async => seenDirectory),
@@ -125,17 +99,12 @@ void main() {
   }
 
   test('a late initial result cannot replace a newly selected track', () async {
-    final pending = Completer<String>();
-    client.pending = pending;
-    final request = container
-        .read(waveControllerProvider.notifier)
-        .start('ambient');
+    pool.holdFirst = Completer<void>();
+    final request = container.read(waveControllerProvider.notifier).start();
     await flush();
     final other = realTrack('other');
     container.read(playerControllerProvider.notifier).play(other);
-    client.pending = null;
-    client.replies.add('{"recommendations":[{"id":"1","reason":"fit"}]}');
-    pending.complete('{"queries":["ambient"]}');
+    pool.holdFirst!.complete();
     await request;
     await flush();
     expect(container.read(playerControllerProvider).track, same(other));
@@ -149,39 +118,68 @@ void main() {
   test(
     'one initial result prefetches one unique batch without a refill loop',
     () async {
-      batch(['1']);
-      batch(['2', '3', '4']);
-      await container.read(waveControllerProvider.notifier).start('ambient');
+      pool.scripted = [1, 3];
+      await container.read(waveControllerProvider.notifier).start();
       await flush();
-      expect(client.payloads, hasLength(4));
-      expect(container.read(playerControllerProvider).track?.id, '1');
+      expect(pool.calls, 2);
+      expect(container.read(playerControllerProvider).track?.id, 't1');
       expect(
         container
             .read(playerControllerProvider.notifier)
             .upcomingTracks
             .map((t) => t.id),
-        ['2', '3', '4'],
+        ['t2', 't3', 't4'],
       );
       expect(container.read(waveControllerProvider).active, isTrue);
       await flush();
-      expect(client.payloads, hasLength(4));
+      expect(pool.calls, 2);
     },
   );
+
+  test('the wave records each queued track\'s source and clears it', () async {
+    pool.sources = const [
+      WaveSource.related,
+      WaveSource.stream,
+      WaveSource.coLikers,
+    ];
+    pool.scripted = [3];
+    await container.read(waveControllerProvider.notifier).start();
+    await flush();
+    final sources = container.read(waveSourcesProvider);
+    // t1, t2, t3 were issued as index 1, 2, 3 of the rotation
+    expect(sources, {
+      't1': WaveSource.stream,
+      't2': WaveSource.coLikers,
+      't3': WaveSource.related,
+    });
+    container.read(waveControllerProvider.notifier).cancel();
+    expect(container.read(waveSourcesProvider), isEmpty);
+  });
+
+  test('a new wave starts with a clean source map', () async {
+    pool.scripted = [2, 0, 2];
+    final wave = container.read(waveControllerProvider.notifier);
+    await wave.start();
+    await flush();
+    expect(container.read(waveSourcesProvider).keys, containsAll(['t1', 't2']));
+    container.read(playerControllerProvider.notifier).play(realTrack('other'));
+    await flush();
+    expect(container.read(waveSourcesProvider), isEmpty);
+  });
 
   test(
     'late refill cannot append to an unrelated queue with a wave track',
     () async {
-      batch(['1', '2', '3', '4']);
-      await container.read(waveControllerProvider.notifier).start('ambient');
-      final pending = Completer<String>();
-      client.pending = pending;
+      pool.scripted = [4, 4];
+      await container.read(waveControllerProvider.notifier).start();
+      pool.holdAfterFirst = Completer<void>();
       final player = container.read(playerControllerProvider.notifier);
       player.next();
       await flush();
       expect(container.read(waveControllerProvider).discovering, isTrue);
-      player.play(api.tracks[1], queue: [api.tracks[1], realTrack('outside')]);
-      client.pending = null;
-      pending.complete('{"queries":["ambient"]}');
+      final inside = realTrack('t2');
+      player.play(inside, queue: [inside, realTrack('outside')]);
+      pool.holdAfterFirst!.complete();
       await flush();
       expect(player.upcomingTracks.map((t) => t.id), ['outside']);
       expect(container.read(waveControllerProvider).active, isFalse);
@@ -191,14 +189,14 @@ void main() {
   test(
     'exhausted candidates retry, then stop with a visible message',
     () async {
-      final service = PoolService(api, client)..scripted = [4];
+      final service = PoolService(api)..scripted = [4];
       final other = containerWith(service);
-      await other.read(waveControllerProvider.notifier).start('');
+      await other.read(waveControllerProvider.notifier).start();
       final player = other.read(playerControllerProvider.notifier);
       player.next();
       await pumpEventQueue();
       expect(other.read(waveControllerProvider).active, isFalse);
-      expect(other.read(recommendationsProvider).error, AiFailure.noTracks);
+      expect(other.read(recommendationsProvider).error, WaveFailure.noTracks);
       final calls = service.calls;
       expect(calls, 1 + WaveController.maxRetries + 1);
       for (var i = 0; i < 3; i++) {
@@ -210,33 +208,33 @@ void main() {
   );
 
   test('a failing search is retried and its error stays visible', () async {
-    final service = PoolService(api, client)..scripted = [4];
+    final service = PoolService(api)..scripted = [4];
     final other = containerWith(service);
-    await other.read(waveControllerProvider.notifier).start('');
-    service.failure = AiFailure.network;
+    await other.read(waveControllerProvider.notifier).start();
+    service.failure = WaveFailure.network;
     other.read(playerControllerProvider.notifier).next();
     await pumpEventQueue();
     expect(other.read(waveControllerProvider).active, isFalse);
-    expect(other.read(recommendationsProvider).error, AiFailure.network);
+    expect(other.read(recommendationsProvider).error, WaveFailure.network);
     expect(service.calls, 1 + WaveController.maxRetries + 1);
   });
 
   test('a user-fixable error is shown at once without retries', () async {
-    final service = PoolService(api, client)..scripted = [4];
+    final service = PoolService(api)..scripted = [4];
     final other = containerWith(service);
-    await other.read(waveControllerProvider.notifier).start('');
-    service.failure = AiFailure.credentials;
+    await other.read(waveControllerProvider.notifier).start();
+    service.failure = WaveFailure.signIn;
     other.read(playerControllerProvider.notifier).next();
     await pumpEventQueue();
     expect(other.read(waveControllerProvider).active, isFalse);
-    expect(other.read(recommendationsProvider).error, AiFailure.credentials);
+    expect(other.read(recommendationsProvider).error, WaveFailure.signIn);
     expect(service.calls, 2);
   });
 
   test('an empty refill keeps the wave searching and recovers', () async {
-    final service = PoolService(api, client)..scripted = [4, 0, 2];
+    final service = PoolService(api)..scripted = [4, 0, 2];
     final other = containerWith(service);
-    await other.read(waveControllerProvider.notifier).start('');
+    await other.read(waveControllerProvider.notifier).start();
     final player = other.read(playerControllerProvider.notifier);
     player.next();
     await pumpEventQueue();
@@ -253,8 +251,8 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     final memory = MemorySeenStore();
-    final other = containerWith(PoolService(api, client), seen: memory);
-    await other.read(waveControllerProvider.notifier).start('');
+    final other = containerWith(PoolService(api), seen: memory);
+    await other.read(waveControllerProvider.notifier).start();
     await tester.pumpWidget(
       UncontrolledProviderScope(
         container: other,
@@ -296,14 +294,10 @@ void main() {
     late PlayerController player;
     Future<void> setUpWave({String identity = '42'}) async {
       memory = MemorySeenStore();
-      wave = containerWith(
-        PoolService(api, client),
-        seen: memory,
-        identity: identity,
-      );
+      wave = containerWith(PoolService(api), seen: memory, identity: identity);
       controller = wave.read(waveControllerProvider.notifier);
-      await controller.start('');
-      await wave.read(aiListeningIdentityProvider.future);
+      await controller.start();
+      await wave.read(listeningIdentityProvider.future);
       player = wave.read(playerControllerProvider.notifier);
     }
 
@@ -347,53 +341,58 @@ void main() {
       var account = '42';
       memory = MemorySeenStore();
       wave = containerWith(
-        PoolService(api, client),
+        PoolService(api),
         seen: memory,
         loader: () async => account,
       );
       controller = wave.read(waveControllerProvider.notifier);
-      await controller.start('');
-      await wave.read(aiListeningIdentityProvider.future);
+      await controller.start();
+      await wave.read(listeningIdentityProvider.future);
       final done = (await controller.dislikeCurrent())!;
       account = '43';
-      wave.invalidate(aiListeningIdentityProvider);
-      await wave.read(aiListeningIdentityProvider.future);
+      wave.invalidate(listeningIdentityProvider);
+      await wave.read(listeningIdentityProvider.future);
       await controller.undoDislike(done);
       expect(memory.undone, [('42', 't1')]);
     });
 
-    test('shown marks wait for a loading identity, then land', () async {
+    test('the wave waits for a loading identity, then marks land', () async {
       final identity = Completer<String>();
       memory = MemorySeenStore();
       wave = containerWith(
-        PoolService(api, client),
+        PoolService(api),
         seen: memory,
         loader: () => identity.future,
       );
-      await wave.read(waveControllerProvider.notifier).start('');
+      final start = wave.read(waveControllerProvider.notifier).start();
       await pumpEventQueue();
       expect(memory.kinds, isEmpty);
+      expect(wave.read(playerControllerProvider).track, isNull);
       identity.complete('42');
+      await start;
       await pumpEventQueue();
       expect(memory.kinds['t1'], SeenKind.shown);
     });
 
     test(
-      'an account change while the identity loads drops the marks',
+      'an account change while the identity loads discards the wave',
       () async {
         final identity = Completer<String>();
         memory = MemorySeenStore();
         wave = containerWith(
-          PoolService(api, client),
+          PoolService(api),
           seen: memory,
           loader: () => identity.future,
         );
-        await wave.read(waveControllerProvider.notifier).start('');
+        final start = wave.read(waveControllerProvider.notifier).start();
+        await pumpEventQueue();
         userToken = 'someone-else';
         wave.invalidate(authControllerProvider);
         identity.complete('42');
+        await start;
         await pumpEventQueue();
         expect(memory.kinds, isEmpty);
+        expect(wave.read(playerControllerProvider).track, isNull);
       },
     );
 
@@ -431,13 +430,13 @@ void main() {
     test('the last queued track keeps playing and asks for more', () async {
       memory = MemorySeenStore();
       final hold = Completer<void>();
-      final service = PoolService(api, client)
+      final service = PoolService(api)
         ..scripted = [1]
         ..holdAfterFirst = hold;
       wave = containerWith(service, seen: memory);
       controller = wave.read(waveControllerProvider.notifier);
-      await controller.start('');
-      await wave.read(aiListeningIdentityProvider.future);
+      await controller.start();
+      await wave.read(listeningIdentityProvider.future);
       final done = (await controller.dislikeCurrent())!;
       expect(done.saved, isTrue);
       expect(done.skipped, isFalse);
@@ -452,7 +451,7 @@ void main() {
       final pending = controller.dislikeCurrent();
       await pumpEventQueue();
       controller.cancel();
-      await controller.start('');
+      await controller.start();
       expect(current(), 't1');
       final before = player.upcomingTracks.length;
       gate.complete();
@@ -465,19 +464,19 @@ void main() {
 
     test('a failed new wave never replays the previous wave results', () async {
       memory = MemorySeenStore();
-      final service = PoolService(api, client)..scripted = [4];
+      final service = PoolService(api)..scripted = [4];
       wave = containerWith(service, seen: memory);
       controller = wave.read(waveControllerProvider.notifier);
       player = wave.read(playerControllerProvider.notifier);
-      await controller.start('');
+      await controller.start();
       player.next();
       expect(current(), 't2');
       // the next wave's searches fail, leaving earlier items behind
-      service.failure = AiFailure.network;
-      await controller.start('');
+      service.failure = WaveFailure.network;
+      await controller.start();
       expect(wave.read(waveControllerProvider).active, isFalse);
       expect(wave.read(recommendationsProvider).items, isEmpty);
-      expect(wave.read(recommendationsProvider).error, AiFailure.network);
+      expect(wave.read(recommendationsProvider).error, WaveFailure.network);
       expect(current(), 't2');
     });
 
@@ -494,7 +493,7 @@ void main() {
 
     test('anonymous accounts get no button and no dislike', () async {
       await setUpWave(identity: 'anonymous');
-      await wave.read(aiListeningIdentityProvider.future);
+      await wave.read(listeningIdentityProvider.future);
       expect(wave.read(currentTrackInWaveProvider), isFalse);
       expect(await controller.dislikeCurrent(), isNull);
       expect(memory.disliked, isEmpty);
@@ -510,22 +509,17 @@ void main() {
     });
   });
 
-  for (final change in ['disconnect', 'config', 'logout', 'cancel']) {
+  for (final change in ['logout', 'cancel']) {
     test(
       '$change aborts a pending refill and does not change the queue',
       () async {
-        batch(['1', '2', '3', '4']);
-        await container.read(waveControllerProvider.notifier).start('ambient');
-        final pending = Completer<String>();
-        client.pending = pending;
+        pool.scripted = [4, 4];
+        await container.read(waveControllerProvider.notifier).start();
+        pool.holdAfterFirst = Completer<void>();
         final player = container.read(playerControllerProvider.notifier);
         player.next();
         await flush();
         switch (change) {
-          case 'disconnect':
-            await settings.disconnectChatGpt();
-          case 'config':
-            await settings.save(testConfig);
           case 'logout':
             userToken = 'another-account';
             container.invalidate(authControllerProvider);
@@ -534,62 +528,13 @@ void main() {
             container.read(waveControllerProvider.notifier).cancel();
         }
         final queued = player.upcomingTracks.map((t) => t.id).toList();
-        client.pending = null;
-        pending.complete('{"queries":["ambient"]}');
+        pool.holdAfterFirst!.complete();
         await flush();
         expect(container.read(waveControllerProvider).active, isFalse);
         expect(container.read(waveControllerProvider).discovering, isFalse);
         expect(player.upcomingTracks.map((t) => t.id), queued);
       },
     );
-  }
-}
-
-/// Returns twenty fresh candidates on the first call and records limits.
-class PoolService extends RecommendationService {
-  PoolService(TestSoundcloud api, ScriptedAi client)
-    : super(api: api, client: client);
-  int calls = 0;
-  int issued = 0;
-
-  /// Sizes of successive answers; afterwards every answer is empty.
-  List<int>? scripted;
-  AiFailure? failure;
-
-  /// Makes every call after the first wait for this completer.
-  Completer<void>? holdAfterFirst;
-  final limits = <int>[];
-
-  @override
-  Future<List<Recommendation>> generate({
-    required AiConfig config,
-    required AiConsent consent,
-    required String apiKey,
-    required String mood,
-    required bool useListening,
-    required CancelToken cancelToken,
-    Track? currentTrack,
-    Set<String> excludedTrackIds = const {},
-    Set<String> localExcludedTrackIds = const {},
-    String? listeningIdentity,
-    void Function()? checkCurrent,
-    int limit = 10,
-  }) async {
-    calls++;
-    limits.add(limit);
-    if (failure != null) throw failure!;
-    if (calls > 1) await holdAfterFirst?.future;
-    if (scripted != null) {
-      final size = scripted!.isEmpty ? 0 : scripted!.removeAt(0);
-      return [
-        for (var i = 0; i < size; i++)
-          Recommendation(realTrack('t${++issued}'), 'a possible fit'),
-      ];
-    }
-    return [
-      for (var i = 0; i < 20; i++)
-        Recommendation(realTrack('t${i + 1}'), 'a possible fit'),
-    ];
   }
 }
 
