@@ -83,6 +83,13 @@ class CoLikersSource {
         _now().difference(current.builtAt) < CoLikersStore.ttl) {
       return false;
     }
+    // A stale cache means the neighbour data is a day old: fetch it afresh.
+    // Without a cache the memory only holds a cancelled run's progress, which
+    // the next run resumes.
+    if (current != null) {
+      _likers.clear();
+      _neighborLikes.clear();
+    }
     final run = _Run(this, identity, isCancelled);
     final built = await run.execute();
     lastRunRequests = run.requests;

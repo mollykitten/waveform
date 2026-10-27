@@ -237,6 +237,13 @@ void main() {
       expect(counts(result)[WaveSource.stream], greaterThan(0));
     });
 
+    test('a failing stream is not retried on every refill', () async {
+      api.failStream = true;
+      await batch();
+      await batch();
+      expect(api.streamCalls, 1);
+    });
+
     test('the stream is fetched once for repeated refills', () async {
       await batch();
       await batch();

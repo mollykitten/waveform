@@ -199,23 +199,34 @@ void main() {
     expect(api.userLikesCalls, 0);
   });
 
-  test(
-    'a fresh cache is reused; a stale one refreshes incrementally',
-    () async {
-      smallNeighbourhood();
-      final run = source();
-      await run.refresh('42', isCancelled: () => false);
-      final before = api.requests;
-      now = now.add(const Duration(hours: 1));
-      expect(await run.refresh('42', isCancelled: () => false), isFalse);
-      expect(api.requests, before);
-      now = now.add(const Duration(hours: 25));
-      expect(await run.refresh('42', isCancelled: () => false), isTrue);
-      // likers and neighbour likes are remembered for the session: only the
-      // likes page (the seeds) is requested again
-      expect(run.lastRunRequests, 1);
-    },
-  );
+  test('a fresh cache is reused; a stale one is refetched', () async {
+    smallNeighbourhood();
+    final run = source();
+    await run.refresh('42', isCancelled: () => false);
+    final before = api.requests;
+    now = now.add(const Duration(hours: 1));
+    expect(await run.refresh('42', isCancelled: () => false), isFalse);
+    expect(api.requests, before);
+    now = now.add(const Duration(hours: 25));
+    expect(await run.refresh('42', isCancelled: () => false), isTrue);
+    // a day later the neighbour data is fetched again, not rebuilt from memory
+    expect(run.lastRunRequests, before);
+    expect(api.likersCalls, 8);
+  });
+
+  test('a cancelled run resumes without refetching what it has', () async {
+    smallNeighbourhood();
+    final run = source();
+    var polls = 0;
+    await run.refresh('42', isCancelled: () => ++polls > 6);
+    final file = File('${directory.path}/co-likers-v1-42.json');
+    expect(file.existsSync(), isFalse);
+    expect(api.likersCalls, greaterThan(0));
+    await run.refresh('42', isCancelled: () => false);
+    // the likers already fetched are not requested again
+    expect(api.likersCalls, 4);
+    expect(file.existsSync(), isTrue);
+  });
 
   test('candidates hydrate once and skip excluded ids', () async {
     smallNeighbourhood();
