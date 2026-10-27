@@ -101,11 +101,27 @@ class RecommendationService {
     check();
     final blended = blendBySource({
       WaveSource.related: related,
-      WaveSource.stream: stream,
-      WaveSource.coLikers: coLiked,
+      WaveSource.stream: demoteObscure(stream),
+      WaveSource.coLikers: demoteObscure(coLiked),
     }, limit: limit);
     if (blended.isEmpty) throw WaveFailure.noTracks;
     return blended;
+  }
+
+  /// Sources without a score (stream by freshness, co-likers by neighbor
+  /// weight) push near-zero-audience tracks [obscureShift] places back; a
+  /// better track right behind them goes first, nothing is dropped.
+  static const obscureShift = 8;
+
+  static List<Recommendation> demoteObscure(List<Recommendation> items) {
+    int key(int i) =>
+        i + (VectorEngine.isObscure(items[i].track) ? obscureShift : 0);
+    final order = [for (var i = 0; i < items.length; i++) i]
+      ..sort((a, b) {
+        final byKey = key(a).compareTo(key(b));
+        return byKey != 0 ? byKey : a.compareTo(b);
+      });
+    return [for (final i in order) items[i]];
   }
 
   Future<List<Recommendation>> _streamCandidates(

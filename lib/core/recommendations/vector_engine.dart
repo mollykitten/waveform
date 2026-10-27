@@ -106,6 +106,34 @@ class VectorEngine {
   final int maxRequests;
   final DateTime Function() _now;
 
+  /// Almost no audience: such a track is ranked a little lower, more so the
+  /// more of them the user skips (see [obscurePenalty]). Never an exclusion.
+  static bool isObscure(Track track) =>
+      track.plays < obscurePlays && track.likes < obscureLikes;
+
+  static const obscurePlays = 200;
+  static const obscureLikes = 10;
+
+  /// Ranking factor for obscure candidates: a flat 0.85, falling toward 0.35
+  /// as skips outweigh full listens among obscure tracks played so far. The
+  /// skip rate is smoothed, so a lone skip barely moves it.
+  static double obscurePenalty(List<ListeningEvent> events) {
+    var skipped = 0;
+    var finished = 0;
+    for (final event in events) {
+      if (!event.obscure) continue;
+      switch (event.evidence) {
+        case ListeningEvidence.negative:
+          skipped++;
+        case ListeningEvidence.positive:
+          finished++;
+        case ListeningEvidence.neutral:
+          break;
+      }
+    }
+    return .85 - .5 * skipped / (skipped + finished + 2);
+  }
+
   static bool eligible(Track track) =>
       validVectorId(track.id) &&
       track.title.trim().isNotEmpty &&
@@ -274,6 +302,12 @@ class VectorEngine {
       dislikes: dislikes,
     );
     _penalizeDisliked(pool, vectors, provenance, dislikes, candidates);
+    final obscure = obscurePenalty(events);
+    for (final track in candidates.values) {
+      if (isObscure(track)) {
+        pool.discounts[track.id] = (pool.discounts[track.id] ?? 1) * obscure;
+      }
+    }
     // These edges became known only after retrieval finished. Request start
     // must never masquerade as observation time for an intervening session.
     final observedAt = _now();
