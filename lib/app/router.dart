@@ -6,6 +6,8 @@ import '../features/debug/logs_screen.dart';
 import '../features/feed/feed_screen.dart';
 import '../features/home/home_screen.dart';
 import '../features/library/library_screen.dart';
+import '../features/onboarding/onboarding_gate.dart';
+import '../features/onboarding/onboarding_screen.dart';
 import '../features/playlist/playlist_screen.dart';
 import '../features/recommendations/recommendations_screen.dart';
 import '../features/search/search_screen.dart';
@@ -102,6 +104,8 @@ class _AppTransitionRoute extends PageRouteBuilder<void> {
 final appRouter = GoRouter(
   // START позволяет открыть приложение сразу на нужном экране (deep-link / скриншоты).
   initialLocation: const String.fromEnvironment('START', defaultValue: '/'),
+  refreshListenable: onboardingGate,
+  redirect: onboardingRedirect(onboardingGate),
   routes: [
     ShellRoute(
       builder: (context, state, child) =>
@@ -154,6 +158,11 @@ final appRouter = GoRouter(
           pageBuilder: (c, s) => _page(c, const StatsScreen()),
         ),
       ],
+    ),
+    // Онбординг первого запуска — вне shell, на весь экран.
+    GoRoute(
+      path: '/welcome',
+      pageBuilder: (c, s) => _page(c, const OnboardingScreen()),
     ),
     // Экран логов — вне shell (на весь экран, без TopBar/плеера).
     GoRoute(path: '/logs', builder: (c, s) => const LogsScreen()),
