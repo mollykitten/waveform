@@ -19,7 +19,6 @@ import 'package:waveform_app/features/recommendations/ai_settings_section.dart';
 import 'package:waveform_app/features/recommendations/recommendations_screen.dart';
 import 'package:waveform_app/features/recommendations/wave_controller.dart';
 import 'package:waveform_app/shared/widgets/top_bar.dart';
-import 'package:waveform_app/shared/widgets/track_row.dart';
 import 'package:waveform_app/shared/widgets/pressable.dart';
 import 'package:waveform_app/features/recommendations/widgets/wave_hero.dart';
 
@@ -210,6 +209,23 @@ void main() {
       expect(find.byType(CheckboxListTile), findsNothing);
       expect(find.byType(TextField), findsNothing);
 
+      final originalQueue = player.upcomingTracks.toList();
+      await tester.tap(find.byKey(const ValueKey('wave-primary')));
+      await tester.pumpAndSettle();
+      expect(container.read(playerControllerProvider).isPlaying, isFalse);
+      expect(
+        container.read(playerControllerProvider).track,
+        same(api.tracks[0]),
+      );
+      expect(player.upcomingTracks, originalQueue);
+      expect(client.payloads, hasLength(2));
+      expect(settings.consentChanges, 1);
+      await tester.tap(find.byKey(const ValueKey('wave-primary')));
+      await tester.pumpAndSettle();
+      expect(container.read(playerControllerProvider).isPlaying, isTrue);
+      expect(player.upcomingTracks, originalQueue);
+      expect(client.payloads, hasLength(2));
+
       client.replies.addAll([
         '{"queries":["ambient"]}',
         jsonEncode({
@@ -219,7 +235,15 @@ void main() {
           ],
         }),
       ]);
-      await tester.tap(find.byKey(const ValueKey('wave-primary')));
+      await tester.tap(find.text('tune your wave'));
+      await tester.pump();
+      await tester.enterText(
+        find.byKey(const ValueKey('wave-mood')),
+        'quiet evening',
+      );
+      expect(client.payloads, hasLength(2));
+      await tester.ensureVisible(find.text('apply mood'));
+      await tester.tap(find.text('apply mood'));
       await tester.pumpAndSettle(
         const Duration(milliseconds: 100),
         EnginePhase.sendSemanticsUpdate,
@@ -228,6 +252,7 @@ void main() {
       expect(find.text('make my wave personal'), findsNothing);
       expect(settings.consentChanges, 1);
       expect(client.payloads, hasLength(4));
+      expect(jsonDecode(client.payloads[2])['mood'], 'quiet evening');
       expect(
         container.read(playerControllerProvider).track,
         same(api.tracks[1]),
@@ -247,6 +272,17 @@ void main() {
       await show(tester);
       expect(client.payloads, hasLength(4));
       await tester.tap(find.byKey(const ValueKey('wave-primary')));
+      await tester.pumpAndSettle();
+      expect(container.read(playerControllerProvider).isPlaying, isFalse);
+      expect(client.payloads, hasLength(4));
+      await tester.tap(find.text('tune your wave'));
+      await tester.pump();
+      await tester.enterText(
+        find.byKey(const ValueKey('wave-mood')),
+        'morning light',
+      );
+      await tester.ensureVisible(find.text('apply mood'));
+      await tester.tap(find.text('apply mood'));
       await tester.pumpAndSettle(
         const Duration(milliseconds: 100),
         EnginePhase.sendSemanticsUpdate,
@@ -255,6 +291,8 @@ void main() {
       expect(find.text('make my wave personal'), findsNothing);
       expect(settings.consentChanges, 1);
       expect(client.payloads, hasLength(6));
+      expect(jsonDecode(client.payloads[4])['mood'], 'morning light');
+      expect(container.read(playerControllerProvider).isPlaying, isTrue);
       await tester.pumpWidget(const SizedBox.shrink());
     },
   );
@@ -344,11 +382,22 @@ void main() {
       expect(tester.takeException(), isNull);
       await approve(tester);
       await tester.scrollUntilVisible(
-        find.byType(TrackRow).first,
+        find.byKey(const ValueKey('wave-row-4')),
         150,
         scrollable: find.byType(Scrollable).first,
       );
-      expect(find.byType(TrackRow), findsWidgets);
+      for (final track in api.tracks) {
+        expect(find.byKey(ValueKey('wave-row-${track.id}')), findsOneWidget);
+      }
+      expect(
+        container.read(playerControllerProvider).track,
+        same(api.tracks[1]),
+      );
+      expect(container.read(playerControllerProvider.notifier).upcomingTracks, [
+        api.tracks[0],
+        api.tracks[2],
+        api.tracks[3],
+      ]);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
     },
@@ -372,8 +421,24 @@ void main() {
       EnginePhase.sendSemanticsUpdate,
       const Duration(seconds: 2),
     );
-    expect(find.widgetWithText(TextField, 'endpoint base URL'), findsOneWidget);
-    expect(find.widgetWithText(TextField, 'model name'), findsOneWidget);
+    expect(find.byKey(const ValueKey('ai-endpoint')), findsOneWidget);
+    expect(find.byKey(const ValueKey('ai-model')), findsOneWidget);
+    final semantics = tester.ensureSemantics();
+    await tester.pump();
+    try {
+      for (final field in {
+        'ai-endpoint': 'endpoint base URL',
+        'ai-model': 'model name',
+        'ai-session-key': 'API key · session only',
+      }.entries) {
+        expect(
+          tester.getSemantics(find.byKey(ValueKey(field.key))).label,
+          contains(field.value),
+        );
+      }
+    } finally {
+      semantics.dispose();
+    }
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });
@@ -392,22 +457,27 @@ void main() {
         EnginePhase.sendSemanticsUpdate,
         const Duration(seconds: 2),
       );
-      final endpoint = find.widgetWithText(TextField, 'endpoint base URL');
-      final model = find.widgetWithText(TextField, 'model name');
+      final endpoint = find.byKey(const ValueKey('ai-endpoint'));
+      final model = find.byKey(const ValueKey('ai-model'));
       await tester.enterText(endpoint, 'https://custom.example/v1');
       await tester.enterText(model, 'custom-model');
       await tester.enterText(
-        find.byType(TextField).last,
+        find.byKey(const ValueKey('ai-session-key')),
         'UI_TEST_SESSION_KEY',
       );
+      await tester.ensureVisible(find.text('save custom provider'));
       await tester.tap(find.text('save custom provider'));
       await tester.pump();
       expect(container.read(aiSettingsProvider).hasSessionKey, isTrue);
       expect(
-        tester.widget<TextField>(find.byType(TextField).last).controller!.text,
+        tester
+            .widget<TextField>(find.byKey(const ValueKey('ai-session-key')))
+            .controller!
+            .text,
         isEmpty,
       );
       settings.pendingWrite = Completer<void>();
+      await tester.ensureVisible(find.text('clear custom settings'));
       await tester.tap(find.text('clear custom settings'));
       await tester.pump();
       expect(
