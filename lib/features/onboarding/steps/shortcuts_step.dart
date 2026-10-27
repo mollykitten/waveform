@@ -161,9 +161,10 @@ class _KeyRow extends StatelessWidget {
       return Row(
         spacing: 16,
         children: [
-          SizedBox(
-            width: 132,
+          ConstrainedBox(
+            constraints: const BoxConstraints(minWidth: 132),
             child: Row(
+              mainAxisSize: MainAxisSize.min,
               spacing: 6,
               children: [for (final cap in caps) _Keycap(cap, pressed: a)],
             ),
