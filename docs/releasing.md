@@ -28,11 +28,13 @@ keep the changelog's `unreleased` status until publication is ready.
 
 ## what the macos job does
 
-1. refuses to build if any `*.wvd` / `*.wvd.*` exists under `assets/`, and fails
-   if one appears under `build/` or inside the packaged dmg, zip or tar.gz
-   (`tool/check_no_wvd.sh`). the widevine device profile must never ship.
-   `pubspec.yaml` bundles the whole `assets/widevine/` directory because
-   flutter has neither globs nor optional assets.
+1. writes the widevine device profile from the `WIDEVINE_DEVICE_WVD_BASE64`
+   secret (base64 of `device.wvd`) into `assets/widevine/` for this build only,
+   then deletes it from the workspace. the profile is never committed
+   (`.gitignore`). without the secret the build only warns and go+ stays off.
+   the windows and linux jobs still fail on any `*.wvd` (`tool/check_no_wvd.sh`):
+   go+ is macos only. `pubspec.yaml` bundles the whole `assets/widevine/`
+   directory because flutter has neither globs nor optional assets.
 2. signs inside out, without `--deep`: every nested bundle (`.framework`, `.app`,
    `.xpc`, `.appex`) and every mach-o except the main executable, deepest path
    first (hardened runtime, timestamp), then the `.app` with
@@ -106,7 +108,7 @@ bundles the committed file as is.
    codesign -d --entitlements :- /Applications/Waveform.app
    xcrun stapler validate /Applications/Waveform.app
    spctl --assess --type execute -vv /Applications/Waveform.app
-   find /Applications/Waveform.app -name '*.wvd'   # must print nothing
+   find /Applications/Waveform.app -name '*.wvd'   # prints the profile only if the secret was set
    ```
 
    then open the app by double-click with the network offline: it must launch

@@ -71,10 +71,22 @@ jobs:
           echo "--- patched signing settings ---"
           grep -nE "CODE_SIGN_STYLE|CODE_SIGN_IDENTITY|DEVELOPMENT_TEAM" macos/Runner.xcodeproj/project.pbxproj | head
 
-      - name: Refuse to build with a widevine device profile
-        # device.wvd is a private device key: it must never ship in a
-        # release bundle. CI never has it; fail if one shows up.
-        run: tool/check_no_wvd.sh assets
+      - name: Bundle the widevine device profile (macOS only)
+        # the profile never lives in git: it comes from a secret and is
+        # written into assets/widevine/ just for this build. without the
+        # secret the build still works, go+ is just off.
+        env:
+          WIDEVINE_DEVICE_WVD_BASE64: ${{ secrets.WIDEVINE_DEVICE_WVD_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "$WIDEVINE_DEVICE_WVD_BASE64" ]; then
+            echo "::warning::WIDEVINE_DEVICE_WVD_BASE64 is not set: building without go+ support"
+            exit 0
+          fi
+          umask 077
+          printf '%s' "$WIDEVINE_DEVICE_WVD_BASE64" | base64 --decode > assets/widevine/device.wvd
+          test -s assets/widevine/device.wvd
+          echo "widevine profile written ($(wc -c < assets/widevine/device.wvd) bytes)"
 
       - name: Build macOS release
         env:
@@ -87,8 +99,9 @@ jobs:
             --dart-define=LASTFM_API_KEY="$LASTFM_API_KEY" \
             --dart-define=LASTFM_SHARED_SECRET="$LASTFM_SHARED_SECRET"
 
-      - name: Verify no widevine profile in build output
-        run: tool/check_no_wvd.sh build
+      - name: Remove the widevine profile from the workspace
+        if: always()
+        run: rm -f assets/widevine/device.wvd
 
       - name: Codesign .app (Developer ID Application)
         run: |
@@ -185,7 +198,6 @@ jobs:
           hdiutil attach -readonly -nobrowse -mountpoint "$MNT" "$DMG"
           xcrun stapler validate "$MNT/Waveform.app" \
             || { hdiutil detach "$MNT"; exit 1; }
-          tool/check_no_wvd.sh "$MNT" || { hdiutil detach "$MNT"; exit 1; }
           hdiutil detach "$MNT"
           codesign --force --timestamp \
             --sign "$SIGN_IDENTITY" --keychain "$SIGN_KEYCHAIN" "$DMG"
