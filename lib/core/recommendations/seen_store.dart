@@ -51,6 +51,10 @@ class SeenStore {
   final void Function(String message)? onFailure;
   Future<void> _pending = Future.value();
 
+  /// Accounts that logged out: later writes for them are ignored until
+  /// [reopen], so a late write can never recreate a forgotten file.
+  final _closed = <String>{};
+
   Future<T> _serial<T>(Future<T> Function() action) {
     final result = _pending.then((_) => action());
     _pending = result.then<void>((_) {}, onError: (Object _, StackTrace _) {});
@@ -137,9 +141,10 @@ class SeenStore {
     }
   }
 
-  /// Merge [ids] as [kind] at [at]. A longer cooldown is never shortened by a
-  /// shorter one; expired and overflowing entries are dropped.
-  Future<void> record(
+  /// Merge [ids] as [kind] at [at]; true when the file was written. A longer
+  /// cooldown is never shortened by a shorter one; entries whose cooldown
+  /// ended before the newest fact, and overflowing entries, are dropped.
+  Future<bool> record(
     String identity,
     SeenKind kind,
     Iterable<String> ids,
@@ -149,7 +154,8 @@ class SeenStore {
   });
 
   /// Remember a thumbs-down for [trackId] (and its artist) on this account.
-  Future<void> dislike(
+  /// True only when it was really stored.
+  Future<bool> dislike(
     String identity,
     String trackId,
     String artist,
@@ -165,35 +171,51 @@ class SeenStore {
     });
   }
 
-  /// Undo a dislike. Other kinds of memory for the track stay as they are.
-  Future<void> undislike(String identity, String trackId) => _serial(() async {
+  /// Undo a dislike by removing the track's entry. The previous entry (for
+  /// example a "shown" cooldown) is not restored: played and skipped come
+  /// back from the listening facts on the next sync, a shown cooldown does
+  /// not, so an undone track may be offered again sooner.
+  Future<bool> undislike(String identity, String trackId) => _serial(() async {
+    if (_closed.contains(identity)) return false;
     final loaded = await _read(identity);
     final entry = loaded.entries[trackId];
-    if (!loaded.writable || entry?.kind != SeenKind.disliked) return;
+    if (!loaded.writable || entry?.kind != SeenKind.disliked) return false;
     loaded.entries.remove(trackId);
-    await _write(identity, loaded.entries);
+    return _write(identity, loaded.entries, _newest(loaded.entries));
   });
 
+  DateTime _newest(Map<String, SeenEntry> entries) => entries.values.fold(
+    DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
+    (a, e) => e.at.isAfter(a) ? e.at : a,
+  );
+
   /// Newest dislikes first, at most [limit].
+  /// Dislikes older than their 365-day cooldown at [now] are not returned.
   Future<List<({String id, DateTime at, String? artist})>> dislikes(
     String identity,
-    int limit,
-  ) async {
+    int limit, {
+    DateTime? now,
+  }) async {
     final entries = await read(identity);
+    final clock = now ?? DateTime.now();
     final rows = [
       for (final e in entries.entries)
-        if (e.value.kind == SeenKind.disliked)
+        if (e.value.kind == SeenKind.disliked && _active(e.value, clock))
           (id: e.key, at: e.value.at, artist: e.value.artist),
     ]..sort((a, b) => b.at.compareTo(a.at));
     return rows.take(limit).toList();
   }
 
-  /// Merge many facts in one atomic write.
-  Future<void> recordAll(String identity, Map<String, SeenEntry> facts) =>
+  /// Merge many facts in one atomic write; true when it was written.
+  Future<bool> recordAll(String identity, Map<String, SeenEntry> facts) =>
       _serial(() async {
-        if (!validListeningIdentity(identity) || facts.isEmpty) return;
+        if (!validListeningIdentity(identity) ||
+            facts.isEmpty ||
+            _closed.contains(identity)) {
+          return false;
+        }
         final loaded = await _read(identity);
-        if (!loaded.writable) return;
+        if (!loaded.writable) return false;
         final entries = loaded.entries;
         for (final fact in facts.entries) {
           if (!validVectorId(fact.key)) continue;
@@ -204,14 +226,19 @@ class SeenStore {
             entries[fact.key] = fact.value;
           }
         }
-        await _write(identity, entries);
+        return _write(identity, entries, _newest(facts));
       });
 
   /// Dislikes first (newest, capped), then everything else by recency; size
   /// pressure trims from the tail, so ordinary entries go before dislikes.
-  Future<void> _write(String identity, Map<String, SeenEntry> entries) async {
+  Future<bool> _write(
+    String identity,
+    Map<String, SeenEntry> entries,
+    DateTime now,
+  ) async {
     File? temporary;
     try {
+      entries.removeWhere((_, e) => !_active(e, now));
       int newest(String a, String b) =>
           entries[b]!.at.compareTo(entries[a]!.at);
       final disliked =
@@ -250,8 +277,10 @@ class SeenStore {
       temporary = File('${file.path}.tmp');
       await temporary.writeAsString(encoded, flush: true);
       await temporary.rename(file.path);
+      return true;
     } catch (_) {
       onFailure?.call('seen tracks storage unavailable');
+      return false;
     } finally {
       if (temporary != null) {
         try {
@@ -264,19 +293,30 @@ class SeenStore {
   }
 
   /// Delete one account's memory (file, `.bak` and `.tmp`) when that account
-  /// logs out. Other accounts keep theirs, so switching A to B and back loses
+  /// logs out, and ignore its writes until [reopen]. Other accounts keep theirs, so switching A to B and back loses
   /// nothing. Disconnecting ChatGPT does not call this: the memory is local
   /// and unrelated to the model connection.
-  Future<void> forget(String identity) => _serial(() async {
-    if (!validListeningIdentity(identity)) return;
-    try {
-      final file = await _file(identity);
-      for (final path in [file.path, '${file.path}.bak', '${file.path}.tmp']) {
-        final candidate = File(path);
-        if (await candidate.exists()) await candidate.delete();
+  Future<void> forget(String identity) {
+    // Mark closed right away so a write queued after this call is ignored.
+    if (validListeningIdentity(identity)) _closed.add(identity);
+    return _serial(() async {
+      if (!validListeningIdentity(identity)) return;
+      try {
+        final file = await _file(identity);
+        for (final path in [
+          file.path,
+          '${file.path}.bak',
+          '${file.path}.tmp',
+        ]) {
+          final candidate = File(path);
+          if (await candidate.exists()) await candidate.delete();
+        }
+      } catch (_) {
+        onFailure?.call('seen tracks storage unavailable');
       }
-    } catch (_) {
-      onFailure?.call('seen tracks storage unavailable');
-    }
-  });
+    });
+  }
+
+  /// Accept writes for [identity] again, once that account signs in anew.
+  void reopen(String identity) => _closed.remove(identity);
 }

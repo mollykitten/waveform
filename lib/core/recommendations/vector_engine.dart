@@ -213,7 +213,11 @@ class VectorEngine {
     // shape the ranking, because edge provenance lives 90 days.
     final allDislikes = [
       if (seen != null)
-        for (final row in await seen!.dislikes(identity, 500))
+        for (final row in await seen!.dislikes(
+          identity,
+          SeenStore.maxDisliked,
+          now: now,
+        ))
           VectorDislike(row.id, row.at, row.artist),
     ];
     check();

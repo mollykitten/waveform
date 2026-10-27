@@ -88,6 +88,9 @@ final listeningFeedbackProvider = Provider<void>((ref) {
     if (identity != null) {
       final was = knownIdentity;
       knownIdentity = identity == 'anonymous' ? null : identity;
+      if (knownIdentity != null) {
+        ref.read(seenStoreProvider).reopen(identity);
+      }
       if (was != null && identity == 'anonymous') {
         unawaited(ref.read(seenStoreProvider).forget(was));
       }

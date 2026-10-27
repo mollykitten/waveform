@@ -12,8 +12,14 @@ import '../../core/recommendations/seen_store.dart';
 import '../../shared/models/track.dart';
 import '../player/player_controller.dart';
 
-/// A stored dislike: the account it belongs to and the track.
-typedef WaveDislike = ({String identity, Track track});
+/// A dislike attempt: the account and track, whether it was really stored,
+/// and whether the player moved on to another track.
+typedef WaveDislike = ({
+  String identity,
+  Track track,
+  bool saved,
+  bool skipped,
+});
 
 class WaveState {
   const WaveState({this.active = false, this.discovering = false});
@@ -44,6 +50,10 @@ class WaveController extends Notifier<WaveState> {
   Timer? _retryTimer;
   Completer<void>? _retryWait;
   int _epoch = 0;
+
+  /// Changes whenever a wave starts or is cancelled, unlike [_epoch], which
+  /// also moves on every refill.
+  int _waveId = 0;
   bool _disposed = false;
   bool _mutatingQueue = false;
   String _mood = '';
@@ -101,6 +111,7 @@ class WaveController extends Notifier<WaveState> {
   Future<void> start(String mood) async {
     if (state.discovering || ref.read(recommendationsProvider).busy) return;
     _mood = mood;
+    _waveId++;
     _ids.clear();
     _startingQueueVersion = ref.read(playerControllerProvider).queueVersion;
     await _generate(append: false);
@@ -315,26 +326,35 @@ class WaveController extends Notifier<WaveState> {
   /// Thumbs-down on the playing wave track: remember it for the active
   /// account (id and artist handle, locally only), then move on. A second tap
   /// while the first is being stored is ignored, and the player only skips if
-  /// the same track is still playing once the write is done. Returns what is
-  /// needed to undo, or null when nothing was disliked.
+  /// the same track of the same wave is still playing once the write is done.
+  /// The result says honestly whether it was saved and whether it skipped;
+  /// null means nothing happened.
   Future<WaveDislike?> dislikeCurrent() async {
     final track = ref.read(playerControllerProvider).track;
     if (_dislikeBusy || track == null || !ownsTrack(track.id)) return null;
     _dislikeBusy = true;
+    final wave = _waveId;
     try {
       final identity = await _stableIdentity();
       if (identity == null) return null;
-      await ref
+      final saved = await ref
           .read(seenStoreProvider)
           .dislike(identity, track.id, track.artistHandle, DateTime.now());
       if (_disposed) return null;
-      if (ref.read(playerControllerProvider).track?.id == track.id &&
+      final player = ref.read(playerControllerProvider.notifier);
+      var skipped = false;
+      if (wave == _waveId &&
+          ref.read(playerControllerProvider).track?.id == track.id &&
           ownsTrack(track.id)) {
-        ref
-            .read(playerControllerProvider.notifier)
-            .next(reason: ListeningTransitionCause.dislike);
+        if (player.upcomingTracks.isEmpty) {
+          // Nothing to skip to yet: ask for more and keep playing.
+          if (!state.discovering) unawaited(_generate(append: true));
+        } else {
+          player.next(reason: ListeningTransitionCause.dislike);
+          skipped = ref.read(playerControllerProvider).track?.id != track.id;
+        }
       }
-      return (identity: identity, track: track);
+      return (identity: identity, track: track, saved: saved, skipped: skipped);
     } catch (_) {
       return null;
     } finally {
@@ -355,6 +375,7 @@ class WaveController extends Notifier<WaveState> {
 
   void cancel() {
     _epoch++;
+    _waveId++;
     _wake();
     _lastRefillTrack = null;
     _startingQueueVersion = null;

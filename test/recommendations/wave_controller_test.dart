@@ -96,15 +96,19 @@ void main() {
     RecommendationService service, {
     SeenStore? seen,
     String identity = '42',
+    Future<String> Function()? loader,
   }) {
     final other = ProviderContainer(
       overrides: [
         waveRetryDelayProvider.overrideWithValue(Duration.zero),
         authControllerProvider.overrideWithBuild(
-          (ref, notifier) => const SoundcloudAuth(clientId: 'test'),
+          (ref, notifier) =>
+              SoundcloudAuth(clientId: 'test', userToken: userToken),
         ),
         aiSettingsProvider.overrideWith(() => settings),
-        aiListeningIdentityProvider.overrideWith((ref) async => identity),
+        aiListeningIdentityProvider.overrideWith(
+          (ref) async => loader == null ? identity : await loader(),
+        ),
         aiClientProvider.overrideWithValue(client),
         recommendationServiceProvider.overrideWithValue(service),
         seenStoreProvider.overrideWithValue(
@@ -339,6 +343,126 @@ void main() {
       );
     });
 
+    test('undo goes to the account the dislike was made under', () async {
+      var account = '42';
+      memory = MemorySeenStore();
+      wave = containerWith(
+        PoolService(api, client),
+        seen: memory,
+        loader: () async => account,
+      );
+      controller = wave.read(waveControllerProvider.notifier);
+      await controller.start('');
+      await wave.read(aiListeningIdentityProvider.future);
+      final done = (await controller.dislikeCurrent())!;
+      account = '43';
+      wave.invalidate(aiListeningIdentityProvider);
+      await wave.read(aiListeningIdentityProvider.future);
+      await controller.undoDislike(done);
+      expect(memory.undone, [('42', 't1')]);
+    });
+
+    test('shown marks wait for a loading identity, then land', () async {
+      final identity = Completer<String>();
+      memory = MemorySeenStore();
+      wave = containerWith(
+        PoolService(api, client),
+        seen: memory,
+        loader: () => identity.future,
+      );
+      await wave.read(waveControllerProvider.notifier).start('');
+      await pumpEventQueue();
+      expect(memory.kinds, isEmpty);
+      identity.complete('42');
+      await pumpEventQueue();
+      expect(memory.kinds['t1'], SeenKind.shown);
+    });
+
+    test(
+      'an account change while the identity loads drops the marks',
+      () async {
+        final identity = Completer<String>();
+        memory = MemorySeenStore();
+        wave = containerWith(
+          PoolService(api, client),
+          seen: memory,
+          loader: () => identity.future,
+        );
+        await wave.read(waveControllerProvider.notifier).start('');
+        userToken = 'someone-else';
+        wave.invalidate(authControllerProvider);
+        identity.complete('42');
+        await pumpEventQueue();
+        expect(memory.kinds, isEmpty);
+      },
+    );
+
+    test('a track that is not from the wave is not disliked', () async {
+      await setUpWave();
+      player.play(realTrack('foreign'));
+      await pumpEventQueue();
+      expect(await controller.dislikeCurrent(), isNull);
+      expect(memory.disliked, isEmpty);
+      expect(current(), 'foreign');
+    });
+
+    test('disposing during the write neither skips nor throws', () async {
+      await setUpWave();
+      memory.gate = Completer<void>();
+      final pending = controller.dislikeCurrent();
+      wave.dispose();
+      memory.gate!.complete();
+      expect(await pending, isNull);
+    });
+
+    test(
+      'a failed write is reported, and the track is still skipped',
+      () async {
+        await setUpWave();
+        memory.failWrites = true;
+        final done = (await controller.dislikeCurrent())!;
+        expect(done.saved, isFalse);
+        expect(done.skipped, isTrue);
+        expect(current(), 't2');
+        expect(memory.disliked, isEmpty);
+      },
+    );
+
+    test('the last queued track keeps playing and asks for more', () async {
+      memory = MemorySeenStore();
+      final hold = Completer<void>();
+      final service = PoolService(api, client)
+        ..scripted = [1]
+        ..holdAfterFirst = hold;
+      wave = containerWith(service, seen: memory);
+      controller = wave.read(waveControllerProvider.notifier);
+      await controller.start('');
+      await wave.read(aiListeningIdentityProvider.future);
+      final done = (await controller.dislikeCurrent())!;
+      expect(done.saved, isTrue);
+      expect(done.skipped, isFalse);
+      expect(current(), 't1');
+      hold.complete();
+      await pumpEventQueue();
+    });
+
+    test('a new wave with the same track id is not skipped', () async {
+      await setUpWave();
+      final gate = memory.gate = Completer<void>();
+      final pending = controller.dislikeCurrent();
+      await pumpEventQueue();
+      controller.cancel();
+      await controller.start('');
+      expect(current(), 't1');
+      final before = player.upcomingTracks.length;
+      gate.complete();
+      final done = await pending;
+      expect(done?.saved, isTrue);
+      expect(done?.skipped, isFalse);
+      expect(current(), 't1');
+      expect(player.upcomingTracks.length, before);
+    });
+
     test('anonymous accounts get no button and no dislike', () async {
       await setUpWave(identity: 'anonymous');
       await wave.read(aiListeningIdentityProvider.future);
@@ -402,6 +526,9 @@ class PoolService extends RecommendationService {
   /// Sizes of successive answers; afterwards every answer is empty.
   List<int>? scripted;
   AiFailure? failure;
+
+  /// Makes every call after the first wait for this completer.
+  Completer<void>? holdAfterFirst;
   final limits = <int>[];
 
   @override
@@ -422,6 +549,7 @@ class PoolService extends RecommendationService {
     calls++;
     limits.add(limit);
     if (failure != null) throw failure!;
+    if (calls > 1) await holdAfterFirst?.future;
     if (scripted != null) {
       final size = scripted!.isEmpty ? 0 : scripted!.removeAt(0);
       return [
@@ -448,26 +576,30 @@ class MemorySeenStore extends SeenStore {
 
   /// When set, dislike writes wait for it.
   Completer<void>? gate;
+  bool failWrites = false;
 
   @override
-  Future<void> dislike(
+  Future<bool> dislike(
     String identity,
     String trackId,
     String artist,
     DateTime at,
   ) async {
     await gate?.future;
+    if (failWrites) return false;
     kinds[trackId] = SeenKind.disliked;
+    return true;
   }
 
   @override
-  Future<void> undislike(String identity, String trackId) async {
+  Future<bool> undislike(String identity, String trackId) async {
     undone.add((identity, trackId));
     kinds.remove(trackId);
+    return true;
   }
 
   @override
-  Future<void> record(
+  Future<bool> record(
     String identity,
     SeenKind kind,
     Iterable<String> ids,
@@ -476,5 +608,6 @@ class MemorySeenStore extends SeenStore {
     for (final id in ids) {
       kinds.putIfAbsent(id, () => kind);
     }
+    return true;
   }
 }

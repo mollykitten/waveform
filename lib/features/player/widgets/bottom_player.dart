@@ -199,9 +199,20 @@ Future<void> _dislikeCurrent(BuildContext context, WidgetRef ref) async {
   final wave = ref.read(waveControllerProvider.notifier);
   final dislike = await wave.dislikeCurrent();
   if (dislike == null || !context.mounted) return;
+  if (!dislike.saved) {
+    showToast(
+      context,
+      dislike.skipped
+          ? "skipped, but couldn't save this dislike"
+          : "couldn't save this dislike",
+    );
+    return;
+  }
   showToast(
     context,
-    "won't suggest this again",
+    dislike.skipped
+        ? "won't suggest this again"
+        : "won't suggest this again, nothing queued to skip to yet",
     action: (label: 'undo', onTap: () => wave.undoDislike(dislike)),
   );
 }

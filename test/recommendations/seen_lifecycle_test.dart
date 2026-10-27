@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
@@ -10,6 +11,7 @@ import 'package:waveform_app/core/api/soundcloud_auth.dart';
 import 'package:waveform_app/core/log/talker.dart';
 import 'package:waveform_app/core/recommendations/ai_client.dart';
 import 'package:waveform_app/core/recommendations/listening_store.dart';
+import 'package:waveform_app/core/recommendations/listening_event.dart';
 import 'package:waveform_app/core/recommendations/listening_providers.dart';
 import 'package:waveform_app/core/recommendations/models.dart';
 import 'package:waveform_app/core/recommendations/providers.dart';
@@ -161,6 +163,53 @@ void main() {
       await seen.forget('42');
     });
 
+    test('a late write after forget does not recreate the file', () async {
+      final seen = SeenStore(directory: () async => directory);
+      final file = File('${directory.path}/seen-tracks-v1-42.json');
+      await seen.record('42', SeenKind.played, ['a'], DateTime.now());
+      final queued = seen.record('42', SeenKind.played, ['b'], DateTime.now());
+      final forgotten = seen.forget('42');
+      final late = seen.dislike('42', 'c', 'x', DateTime.now());
+      expect(await queued, isFalse);
+      await forgotten;
+      expect(await late, isFalse);
+      expect(file.existsSync(), isFalse);
+      seen.reopen('42');
+      expect(
+        await seen.record('42', SeenKind.played, ['d'], DateTime.now()),
+        isTrue,
+      );
+      expect(file.existsSync(), isTrue);
+    });
+
+    test('a failed dislike write is reported', () async {
+      final seen = SeenStore(directory: () async => throw StateError('no'));
+      expect(await seen.dislike('42', 'a', 'x', DateTime.now()), isFalse);
+    });
+
+    test('dislikes past 365 days stop counting and are pruned', () async {
+      final seen = SeenStore(directory: () async => directory);
+      final now = DateTime.utc(2026, 10, 25);
+      await seen.dislike(
+        '42',
+        'old',
+        'x',
+        now.subtract(const Duration(days: 400)),
+      );
+      await seen.dislike(
+        '42',
+        'new',
+        'y',
+        now.subtract(const Duration(days: 10)),
+      );
+      final rows = await seen.dislikes('42', 50, now: now);
+      expect(rows.map((r) => r.id), ['new']);
+      expect(await seen.excluded('42', now), {'new'});
+      // the next write drops the expired entry from the file itself
+      await seen.record('42', SeenKind.played, ['p'], now);
+      expect((await seen.read('42')).keys, isNot(contains('old')));
+    });
+
     test('forget removes the file, .bak and .tmp of one account', () async {
       final seen = SeenStore(directory: () async => directory);
       await seen.record('42', SeenKind.played, ['a'], DateTime.now());
@@ -177,6 +226,36 @@ void main() {
         isTrue,
       );
     });
+  });
+
+  test('a listening row with an unknown cause is skipped, not fatal', () async {
+    final good = ListeningEvent(
+      sessionId: 'good',
+      identity: '42',
+      trackId: 't',
+      durationMs: 100000,
+      heardMs: 90000,
+      finalPositionMs: 90000,
+      seekCount: 0,
+      startedAt: DateTime.utc(2026, 10, 25),
+      endedAt: DateTime.utc(2026, 10, 25, 0, 2),
+      cause: ListeningTransitionCause.dislike,
+    );
+    final future = {
+      ...good.toJson(),
+      'session_id': 'future',
+      'cause': 'beamUp',
+    };
+    File('${directory.path}/${ListeningStore.fileName}').writeAsStringSync(
+      jsonEncode({
+        'version': 1,
+        'events': [future, good.toJson()],
+      }),
+    );
+    final store = ListeningStore(directory: () async => directory);
+    final read = await store.read('42');
+    expect(read.map((e) => e.sessionId), ['good']);
+    expect(read.single.cause, ListeningTransitionCause.dislike);
   });
 
   test('logging out through the auth controller deletes that memory', () async {
