@@ -21,6 +21,12 @@ static void *WFOutputObservation = &WFOutputObservation;
     NSString *_requestedUid;
     NSArray<NSDictionary *> *_devices;
     NSMutableSet<NSNumber *> *_observedDevices;
+    // CoreAudio delivers listener callbacks with a dispatch_sync onto the
+    // listener's queue while holding its own lock, and removing a listener
+    // waits for that lock. Listeners on the main queue therefore deadlock the
+    // app whenever a device disappears (screen lock) and refresh removes
+    // listeners on the main thread. A private queue that never blocks avoids it.
+    dispatch_queue_t _listenerQueue;
     AudioObjectPropertyListenerBlock _hardwareListener;
     BOOL _refreshing;
     BOOL _preservePlayer;
@@ -47,17 +53,18 @@ static void *WFOutputObservation = &WFOutputObservation;
     [_methods setMethodCallHandler:^(FlutterMethodCall *call, FlutterResult result) {
         [weakSelf handleMethodCall:call result:result];
     }];
+    _listenerQueue = dispatch_queue_create("waveform.audio_output.listener", DISPATCH_QUEUE_SERIAL);
     _hardwareListener = ^(UInt32 count, const AudioObjectPropertyAddress *addresses) {
-        [weakSelf refresh];
+        dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf refresh]; });
     };
     AudioObjectPropertyAddress hardware = {kAudioHardwarePropertyDevices,
         kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain};
     AudioObjectAddPropertyListenerBlock(kAudioObjectSystemObject, &hardware,
-                                       dispatch_get_main_queue(), _hardwareListener);
+                                       _listenerQueue, _hardwareListener);
     AudioObjectPropertyAddress defaultOutput = {kAudioHardwarePropertyDefaultOutputDevice,
         kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain};
     AudioObjectAddPropertyListenerBlock(kAudioObjectSystemObject, &defaultOutput,
-                                       dispatch_get_main_queue(), _hardwareListener);
+                                       _listenerQueue, _hardwareListener);
     [self refresh];
     return self;
 }
@@ -121,8 +128,8 @@ static void *WFOutputObservation = &WFOutputObservation;
         {kAudioObjectPropertyName, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain}
     };
     for (NSUInteger i = 0; i < sizeof(addresses) / sizeof(addresses[0]); i++) {
-        if (add) AudioObjectAddPropertyListenerBlock(device, &addresses[i], dispatch_get_main_queue(), _hardwareListener);
-        else AudioObjectRemovePropertyListenerBlock(device, &addresses[i], dispatch_get_main_queue(), _hardwareListener);
+        if (add) AudioObjectAddPropertyListenerBlock(device, &addresses[i], _listenerQueue, _hardwareListener);
+        else AudioObjectRemovePropertyListenerBlock(device, &addresses[i], _listenerQueue, _hardwareListener);
     }
 }
 
@@ -390,7 +397,7 @@ static void *WFOutputObservation = &WFOutputObservation;
         {kAudioHardwarePropertyDefaultOutputDevice, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain}
     };
     for (NSUInteger i = 0; i < sizeof(addresses) / sizeof(addresses[0]); i++) {
-        AudioObjectRemovePropertyListenerBlock(kAudioObjectSystemObject, &addresses[i], dispatch_get_main_queue(), _hardwareListener);
+        AudioObjectRemovePropertyListenerBlock(kAudioObjectSystemObject, &addresses[i], _listenerQueue, _hardwareListener);
     }
     for (NSNumber *device in _observedDevices) [self observeDevice:device.unsignedIntValue add:NO];
     [_observedDevices removeAllObjects];

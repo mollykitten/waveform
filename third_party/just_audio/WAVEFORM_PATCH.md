@@ -39,5 +39,12 @@ compile the probe and `WaveformAudioOutput.m` with ARC, blocks and
 the FlutterMacOS, Cocoa, AVFoundation, AVKit and CoreAudio frameworks; use the
 installed FlutterMacOS xcframework path for `-F` and runtime rpath.
 
+coreaudio property listeners must not use the main queue. hal delivers device
+teardown notifications with a `dispatch_sync` onto the listener queue while
+holding its lock, and `AudioObjectRemovePropertyListenerBlock` waits for that
+lock, so a main-queue listener that removes listeners (refresh) deadlocks the
+app when a device disappears, for example on screen lock. listeners live on a
+private serial queue and only `dispatch_async` the refresh to main.
+
 physical hotplug, receiver connection and audible playback still require a
 manual hardware test in the owning app runtime.
