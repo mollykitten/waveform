@@ -401,6 +401,7 @@ class _OnbButtonState extends State<OnbButton> {
       child: Semantics(
         button: true,
         label: widget.label,
+        onTap: widget.onTap,
         excludeSemantics: true,
         child: Pressable(
           onTap: widget.onTap,
