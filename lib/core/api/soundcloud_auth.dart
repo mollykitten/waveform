@@ -111,13 +111,23 @@ class AuthController extends Notifier<SoundcloudAuth> {
     ref.read(talkerProvider).info('auth: signOut');
     state = state.signedOut();
     final clear = ref.read(webviewSessionClearerProvider);
+    final generation = _generation;
     return _enqueue(() async {
       try {
         await _store.delete();
-      } finally {
-        // Чистим сессию webview даже если файл токена удалить не вышло.
-        await clear();
+      } catch (e, st) {
+        // Не глотаем молча: токен мог остаться на диске (TokenStore ставит
+        // маркер выхода, чтобы следующий старт не залогинил обратно).
+        ref.read(talkerProvider).warning('auth: token delete failed', e, st);
       }
+      // Пользователь уже вошёл заново — сброс снёс бы свежую сессию.
+      if (generation != _generation) {
+        ref
+            .read(talkerProvider)
+            .info('auth: webview clear skipped (re-signed)');
+        return;
+      }
+      await clear();
     });
   }
 

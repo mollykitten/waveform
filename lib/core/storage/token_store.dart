@@ -16,11 +16,16 @@ import 'atomic_file.dart';
 /// 0600 на POSIX. OAuth-токен SoundCloud легко отзывается.
 class TokenStore {
   /// [directory] подменяет каталог в тестах (path_provider там не отвечает).
-  const TokenStore({this.directory});
+  const TokenStore({this.directory, this.chmod = chmodOwnerOnly});
 
   final Future<Directory> Function()? directory;
+  final Future<void> Function(String path) chmod;
 
   static const _fileName = 'sc_oauth_token';
+
+  /// Маркер «пользователь вышел», если файл токена удалить не удалось: пока он
+  /// есть, [read] не отдаёт токен и повторяет удаление.
+  static const _markerSuffix = '.signed_out';
 
   Future<File> _file() async {
     final dir = await (directory ?? getApplicationSupportDirectory)();
@@ -29,16 +34,58 @@ class TokenStore {
 
   Future<String?> read() async {
     final f = await _file();
+    final marker = File('${f.path}$_markerSuffix');
+    if (await marker.exists()) {
+      try {
+        await _removeFiles(f);
+        await marker.delete();
+      } catch (_) {
+        // всё ещё не удаляется — токен не отдаём
+      }
+      return null;
+    }
+    // Остаток прерванной записи не должен жить на диске.
+    await _deleteIfExists(File('${f.path}.tmp'));
     if (!await f.exists()) return null;
     final v = (await f.readAsString()).trim();
     return v.isEmpty ? null : v;
   }
 
-  Future<void> write(String token) async =>
-      writeFileAtomic(await _file(), token);
+  Future<void> write(String token) async {
+    final f = await _file();
+    final marker = File('${f.path}$_markerSuffix');
+    await _deleteIfExists(marker);
+    await writeFileAtomic(f, token, chmod: chmod);
+  }
 
+  /// Удаляет токен и остаток temp-файла (с одним повтором). Если не вышло —
+  /// ставит маркер выхода и бросает ошибку, чтобы вызвавший её залогировал.
   Future<void> delete() async {
     final f = await _file();
+    try {
+      await _removeFiles(f);
+    } catch (_) {
+      try {
+        await File('${f.path}$_markerSuffix').writeAsString('1', flush: true);
+      } catch (_) {}
+      rethrow;
+    }
+  }
+
+  Future<void> _removeFiles(File f) async {
+    for (var attempt = 0; ; attempt++) {
+      try {
+        await _deleteIfExists(f);
+        await _deleteIfExists(File('${f.path}.tmp'));
+        return;
+      } on FileSystemException {
+        if (attempt >= 1) rethrow;
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
+    }
+  }
+
+  Future<void> _deleteIfExists(File f) async {
     if (await f.exists()) await f.delete();
   }
 }

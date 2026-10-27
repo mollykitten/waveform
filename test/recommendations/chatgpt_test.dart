@@ -80,6 +80,7 @@ class AuthAdapter implements HttpClientAdapter {
   final refreshStarted = Completer<void>();
   final revokeStarted = Completer<void>();
   int revokeFailures = 0;
+  int revokeStatus = 200;
   String get idToken {
     final builder = JsonWebSignatureBuilder()
       ..jsonContent = {
@@ -140,7 +141,7 @@ class AuthAdapter implements HttpClientAdapter {
       if (revokeFailures-- > 0) {
         throw const SocketException('synthetic transport failure');
       }
-      return ResponseBody.fromString('', 200);
+      return ResponseBody.fromString('', revokeStatus);
     } else if (path.endsWith('/models')) {
       body = {
         'models': [
@@ -581,6 +582,24 @@ void main() {
       expect(jsonDecode(store.value!), isNot(contains('pending_revocations')));
     },
   );
+
+  test('a 4xx revocation answer is final and is not queued', () async {
+    await auth.signIn();
+    adapter.revokeStatus = 400;
+    expect(await auth.signOut(), isFalse);
+    expect(
+      adapter.requests.where((r) => r.uri.path.endsWith('/revoke')).length,
+      1,
+    );
+    expect(jsonDecode(store.value!), isNot(contains('pending_revocations')));
+  });
+
+  test('a 5xx revocation answer is queued for retry', () async {
+    await auth.signIn();
+    adapter.revokeStatus = 503;
+    expect(await auth.signOut(), isFalse);
+    expect(jsonDecode(store.value!)['pending_revocations'], hasLength(1));
+  });
 
   test(
     'latest rotated tokens are persisted on retry after transient storage failure',

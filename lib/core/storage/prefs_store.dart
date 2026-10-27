@@ -35,31 +35,52 @@ class PrefsStore {
     return File('${dir.path}/$_fileName');
   }
 
-  /// Битый JSON не затираем: сохраняем копию `.bak`, чтобы настройки можно
-  /// было восстановить, и стартуем с пустого набора.
+  /// Битый JSON (`FormatException`) не затираем: сохраняем копию `.bak`, если
+  /// там ещё нет валидной, и стартуем с пустого набора. Ошибки файловой
+  /// системы (например, блокировка на Windows) пробрасываем: продолжать запись
+  /// после них значит затереть prefs одним ключом.
   Future<Map<String, dynamic>> _load() async {
     final f = await _file();
     if (!await f.exists()) return <String, dynamic>{};
+    final raw = await f.readAsString();
     try {
-      final j = jsonDecode(await f.readAsString());
+      final j = jsonDecode(raw);
       if (j is Map) return Map<String, dynamic>.from(j);
-    } catch (_) {
-      // падаем в ветку с бэкапом ниже
+    } on FormatException {
+      // битый JSON — в ветку с бэкапом ниже
     }
-    try {
-      await f.copy('${f.path}.bak');
-    } catch (_) {}
+    await _backupCorrupt(f);
     return <String, dynamic>{};
   }
 
+  Future<void> _backupCorrupt(File f) async {
+    final bak = File('${f.path}.bak');
+    if (await bak.exists()) {
+      try {
+        if (jsonDecode(await bak.readAsString()) is Map) return;
+      } on FormatException {
+        // старый .bak тоже битый — перезапишем
+      }
+    }
+    await f.copy(bak.path);
+  }
+
   Future<String?> readString(String key) => _serialize(() async {
-    final v = (await _load())[key];
-    return v is String ? v : null;
+    try {
+      final v = (await _load())[key];
+      return v is String ? v : null;
+    } on FileSystemException {
+      return null;
+    }
   });
 
   Future<bool?> readBool(String key) => _serialize(() async {
-    final v = (await _load())[key];
-    return v is bool ? v : null;
+    try {
+      final v = (await _load())[key];
+      return v is bool ? v : null;
+    } on FileSystemException {
+      return null;
+    }
   });
 
   Future<void> writeString(String key, String value) => _write(key, value);

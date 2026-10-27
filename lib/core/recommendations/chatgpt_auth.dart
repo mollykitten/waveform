@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:developer' as developer;
 import 'dart:io';
 import 'dart:math';
 
@@ -100,6 +101,8 @@ class LoopbackChatGptCallback implements ChatGptCallback {
     await _server.close(force: true);
   }
 }
+
+enum _Revocation { revoked, rejected, retry }
 
 /// Official open-source Sign in with ChatGPT public-client flow.
 /// https://developers.openai.com/siwc/token-sharing-open-source/sign-in
@@ -536,23 +539,26 @@ class ChatGptAuth {
       } catch (_) {}
       ++_epoch;
       final current = account;
-      var revoked = current?.connected != true;
+      var outcome = current?.connected != true
+          ? _Revocation.revoked
+          : _Revocation.retry;
       final refreshToken = current?.record['refresh_token'];
       if (current?.connected == true) {
         try {
           final discovery = await _discovery();
-          revoked = await _revoke(
+          outcome = await _revoke(
             discovery,
             refreshToken as String,
             current!.clientId,
           );
         } catch (_) {
-          revoked = false;
+          outcome = _Revocation.retry;
         }
       }
-      // An unconfirmed revocation must survive the local sign-out, otherwise
-      // a still-valid refresh token would be orphaned for good.
-      if (!revoked && refreshToken is String) {
+      final revoked = outcome == _Revocation.revoked;
+      // A transient failure must survive the local sign-out, otherwise a
+      // still-valid refresh token would be orphaned for good. A 4xx is final.
+      if (outcome == _Revocation.retry && refreshToken is String) {
         _queueRevocation(refreshToken, current!.clientId);
       }
       if (current != null) {
@@ -574,7 +580,7 @@ class ChatGptAuth {
     }
   }
 
-  Future<bool> _revoke(
+  Future<_Revocation> _revoke(
     Map<String, dynamic> discovery,
     String refreshToken,
     String clientId,
@@ -596,12 +602,15 @@ class ChatGptAuth {
             responseType: ResponseType.plain,
           ),
         );
-        if (response.statusCode == 200) return true;
+        final code = response.statusCode ?? 0;
+        if (code == 200) return _Revocation.revoked;
+        // 4xx will not change on retry; 5xx and anything else might.
+        if (code >= 400 && code < 500) return _Revocation.rejected;
       } catch (_) {
         // Retry transient transport failures once.
       }
     }
-    return false;
+    return _Revocation.retry;
   }
 
   void _queueRevocation(String refreshToken, String clientId) {
@@ -609,6 +618,13 @@ class ChatGptAuth {
     final list = queue is List ? List<dynamic>.from(queue) : <dynamic>[];
     list.add({'refresh_token': refreshToken, 'client_id': clientId});
     // Bound the queue so a permanently failing endpoint cannot grow the vault.
+    if (list.length > 5) {
+      developer.log(
+        'chatgpt: pending revocation queue full, dropping oldest entry',
+        name: 'waveform.chatgpt',
+        level: 900,
+      );
+    }
     _vault['pending_revocations'] = list.length > 5
         ? list.sublist(list.length - 5)
         : list;
@@ -631,10 +647,11 @@ class ChatGptAuth {
             item['refresh_token'] is String &&
             item['client_id'] is String &&
             await _revoke(
-              discovery,
-              item['refresh_token'] as String,
-              item['client_id'] as String,
-            )) {
+                  discovery,
+                  item['refresh_token'] as String,
+                  item['client_id'] as String,
+                ) !=
+                _Revocation.retry) {
           done.add(item['refresh_token'] as String);
         }
       }
