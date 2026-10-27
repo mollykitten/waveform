@@ -130,7 +130,8 @@ class RecommendationService {
         in await coLikers?.candidates(
               identity,
               excluded: hidden,
-              want: limit * 2,
+              want: limit,
+              usable: VectorEngine.eligible,
             ) ??
             <Track>[])
       if (VectorEngine.eligible(track) && !hidden.contains(track.id))

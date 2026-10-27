@@ -228,7 +228,7 @@ class WaveController extends Notifier<WaveState> {
     // Sources must be known before the player starts the first track.
     ref.read(waveSourcesProvider.notifier).add({
       for (final item in batch) item.track.id: item.source,
-    });
+    }, startsQueue: !append);
     ref
         .read(talkerProvider)
         .info('my wave queued ${batch.length}: ${_sourceCounts(batch)}');

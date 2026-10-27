@@ -128,7 +128,7 @@ void main() {
       container.read(waveSourcesProvider.notifier).add({
         '1': WaveSource.related,
         '2': WaveSource.coLikers,
-      });
+      }, startsQueue: true);
       final player = container.read(playerControllerProvider.notifier);
       player.play(first, queue: [first, second, third]);
       player.next();
@@ -141,6 +141,36 @@ void main() {
       ]);
     },
   );
+
+  test('a track picked elsewhere does not inherit its old source', () async {
+    final events = <ListeningEvent>[];
+    final tracker = ListeningTracker(onEvent: events.add)..setIdentity('42');
+    final container = ProviderContainer(
+      overrides: [
+        audioEngineProvider.overrideWithValue(FakeAudioEngine()),
+        likedTracksProvider.overrideWith(StubLikedTracks.new),
+        soundcloudApiProvider.overrideWithValue(TestSoundcloud()),
+        listeningTrackerProvider.overrideWithValue(tracker),
+      ],
+    );
+    addTearDown(container.dispose);
+    final first = realTrack('1');
+    final second = realTrack('2');
+    container.read(waveSourcesProvider.notifier).add({
+      '1': WaveSource.stream,
+      '2': WaveSource.coLikers,
+    }, startsQueue: true);
+    final player = container.read(playerControllerProvider.notifier);
+    player.play(first, queue: [first, second]);
+    // the user now plays the same track from a search result
+    player.play(second);
+    tracker.finish(ListeningTransitionCause.stopped);
+    expect(events.map((e) => (e.trackId, e.source)), [
+      ('1', WaveSource.stream),
+      ('2', null),
+    ]);
+    expect(container.read(waveSourcesProvider), isEmpty);
+  });
 
   test('clearing the wave sources detaches later plays', () {
     final container = ProviderContainer();
@@ -193,10 +223,17 @@ void main() {
       ],
     );
     addTearDown(container.dispose);
+    final empty = await container.read(waveSourceSummaryProvider.future);
+    expect(empty, isNotEmpty);
+    await store.append(fact('e', WaveSource.stream));
+    // closing and reopening the stats screen rereads the facts
+    await Future<void>.delayed(Duration.zero);
     final tally = await container.read(waveSourceSummaryProvider.future);
+    expect(tally[WaveSource.stream], (listened: 1, skipped: 0));
     expect(tally, {
       WaveSource.related: (listened: 2, skipped: 0),
       WaveSource.coLikers: (listened: 0, skipped: 1),
+      WaveSource.stream: (listened: 1, skipped: 0),
     });
   });
 }

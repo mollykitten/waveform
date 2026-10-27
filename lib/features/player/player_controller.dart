@@ -283,6 +283,10 @@ class PlayerController extends Notifier<PlayerState> {
   /// shuffle-порядок и историю из одного трека. Навигация next/previous НЕ
   /// проходит сюда (иначе сбрасывала бы шафл на каждый шаг — старый баг).
   void play(Track track, {List<Track>? queue}) {
+    // Wave sources belong to the queue the wave started: a play from anywhere
+    // else must not inherit them through a shared track id.
+    final waveSources = ref.read(waveSourcesProvider.notifier);
+    if (!waveSources.consumeArm()) waveSources.clear();
     _queue = (queue != null && queue.isNotEmpty) ? List.of(queue) : [track];
     _orderSource = null; // новый контекст → _order пересоберётся в _ensureOrder
     _order = [];

@@ -19,6 +19,8 @@ class CfApi extends TestSoundcloud {
   int userLikesCalls = 0;
   int hydrateCalls = 0;
   int rateLimited = 0;
+  bool failUserLikes = false;
+  Set<String> omit = {};
   final hydrated = <String>[];
 
   @override
@@ -43,6 +45,7 @@ class CfApi extends TestSoundcloud {
   @override
   Future<List<Like>> userTrackLikes(String userId, {int limit = 200}) async {
     userLikesCalls++;
+    if (failUserLikes) throw StateError('network');
     return likes[userId] ?? const [];
   }
 
@@ -50,7 +53,10 @@ class CfApi extends TestSoundcloud {
   Future<List<Track>> tracksByIds(List<String> ids) async {
     hydrateCalls++;
     hydrated.addAll(ids);
-    return [for (final id in ids) realTrack(id)];
+    return [
+      for (final id in ids)
+        if (!omit.contains(id)) realTrack(id),
+    ];
   }
 
   int get requests => 1 + likersCalls + userLikesCalls;
@@ -254,5 +260,64 @@ void main() {
     expect(await source().refresh('../x', isCancelled: () => false), isFalse);
     expect(directory.listSync(), isEmpty);
     expect(api.likersCalls, 0);
+  });
+
+  test('a like without a timestamp still scores and loses ties', () async {
+    smallNeighbourhood();
+    api.likes['900001']!.add((track: realTrack('undated'), likedAt: null));
+    expect(await source().refresh('42', isCancelled: () => false), isTrue);
+    final ids = (await store.read(
+      '42',
+    ))!.candidates.map((c) => c.trackId).toList();
+    // scored like any other like, but it loses every tie on recency
+    expect(ids.indexOf('undated'), greaterThan(ids.indexOf('y')));
+  });
+
+  test('failed neighbour reads keep the previous cache', () async {
+    smallNeighbourhood();
+    final run = source();
+    await run.refresh('42', isCancelled: () => false);
+    final first = (await store.read('42'))!;
+    now = now.add(const Duration(hours: 25));
+    api.failUserLikes = true;
+    expect(await run.refresh('42', isCancelled: () => false), isFalse);
+    expect((await store.read('42'))!.builtAt, first.builtAt);
+    expect((await store.read('42'))!.candidates, isNotEmpty);
+    // not hammered again right away, retried once the pause has passed
+    final calls = api.likersCalls;
+    expect(await run.refresh('42', isCancelled: () => false), isFalse);
+    expect(api.likersCalls, calls);
+    api.failUserLikes = false;
+    now = now.add(const Duration(minutes: 11));
+    expect(await run.refresh('42', isCancelled: () => false), isTrue);
+  });
+
+  test('unplayable top candidates do not block the rest', () async {
+    await store.write('42', now, [
+      for (var i = 0; i < 8; i++) CoLikerCandidate('bad$i', 100.0 - i, 1),
+      for (var i = 0; i < 4; i++) CoLikerCandidate('good$i', 50.0 - i, 1),
+    ]);
+    final run = source();
+    bool usable(Track t) => !t.id.startsWith('bad');
+    final first = await run.candidates('42', want: 3, usable: usable);
+    expect(first.map((t) => t.id), ['good0', 'good1', 'good2']);
+    final hydratedBefore = api.hydrated.length;
+    final second = await run.candidates('42', want: 3, usable: usable);
+    expect(second.map((t) => t.id), ['good0', 'good1', 'good2']);
+    // the rejected ids are remembered, not hydrated again
+    expect(api.hydrated.length, hydratedBefore);
+    expect(api.hydrated.where((id) => id == 'bad0'), hasLength(1));
+  });
+
+  test('ids the api does not return are skipped from then on', () async {
+    await store.write('42', now, [
+      const CoLikerCandidate('hidden-1', 9, 1),
+      const CoLikerCandidate('ok', 8, 1),
+    ]);
+    api.omit = {'hidden-1'};
+    final run = source();
+    expect((await run.candidates('42', want: 5)).map((t) => t.id), ['ok']);
+    expect((await run.candidates('42', want: 5)).map((t) => t.id), ['ok']);
+    expect(api.hydrated.where((id) => id == 'hidden-1'), hasLength(1));
   });
 }

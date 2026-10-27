@@ -13,30 +13,30 @@ typedef SourceTally = ({int listened, int skipped});
 
 /// Local listening facts of my wave tracks, tallied per source: a listen is
 /// positive evidence, a skip negative; neutral transitions are not counted.
-final waveSourceSummaryProvider = FutureProvider<Map<WaveSource, SourceTally>>((
-  ref,
-) async {
-  final identity = await ref.watch(listeningIdentityProvider.future);
-  if (identity == 'anonymous') return const {};
-  final tally = <WaveSource, SourceTally>{};
-  for (final event in await ref.watch(listeningStoreProvider).read(identity)) {
-    final source = event.source;
-    if (source == null) continue;
-    final now = tally[source] ?? (listened: 0, skipped: 0);
-    tally[source] = switch (event.evidence) {
-      ListeningEvidence.positive => (
-        listened: now.listened + 1,
-        skipped: now.skipped,
-      ),
-      ListeningEvidence.negative => (
-        listened: now.listened,
-        skipped: now.skipped + 1,
-      ),
-      ListeningEvidence.neutral => now,
-    };
-  }
-  return tally;
-});
+final waveSourceSummaryProvider =
+    FutureProvider.autoDispose<Map<WaveSource, SourceTally>>((ref) async {
+      final identity = await ref.watch(listeningIdentityProvider.future);
+      if (identity == 'anonymous') return const {};
+      final tally = <WaveSource, SourceTally>{};
+      for (final event
+          in await ref.watch(listeningStoreProvider).read(identity)) {
+        final source = event.source;
+        if (source == null) continue;
+        final now = tally[source] ?? (listened: 0, skipped: 0);
+        tally[source] = switch (event.evidence) {
+          ListeningEvidence.positive => (
+            listened: now.listened + 1,
+            skipped: now.skipped,
+          ),
+          ListeningEvidence.negative => (
+            listened: now.listened,
+            skipped: now.skipped + 1,
+          ),
+          ListeningEvidence.neutral => now,
+        };
+      }
+      return tally;
+    });
 
 /// One mono line per source; hidden until my wave has produced any facts.
 class WaveSourceSummary extends ConsumerWidget {

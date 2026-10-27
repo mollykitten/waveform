@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:dio/dio.dart';
 
@@ -24,6 +25,7 @@ class CoLikersSource {
     this.maxRequests = 250,
     this.pause = const Duration(milliseconds: 150),
     this.backoff = const Duration(seconds: 1),
+    this.retryAfter = const Duration(minutes: 10),
     DateTime Function()? now,
     this.onLog,
   }) : _now = now ?? DateTime.now;
@@ -39,6 +41,10 @@ class CoLikersSource {
 
   /// First wait after HTTP 429; it doubles on each further attempt.
   final Duration backoff;
+
+  /// A run that could not fetch any neighbour data is not retried for this
+  /// long; the previous cache stays in place meanwhile.
+  final Duration retryAfter;
   final DateTime Function() _now;
   final void Function(String message)? onLog;
 
@@ -54,6 +60,11 @@ class CoLikersSource {
   final _neighborLikes = <String, List<({String id, int at})>>{};
   final _hydrated = <String, Track>{};
   CoLikersSnapshot? _snapshot;
+  DateTime? _failedAt;
+
+  /// Candidates found unplayable or missing on hydration; never looked up again
+  /// until the next run replaces the cache.
+  final _unusable = <String>{};
 
   /// Number of requests the last run made (for logs and tests).
   int lastRunRequests = 0;
@@ -64,7 +75,9 @@ class CoLikersSource {
     _likers.clear();
     _neighborLikes.clear();
     _hydrated.clear();
+    _unusable.clear();
     _snapshot = null;
+    _failedAt = null;
   }
 
   /// Run now unless a cached run is still fresh. Returns whether it wrote a
@@ -90,10 +103,18 @@ class CoLikersSource {
       _likers.clear();
       _neighborLikes.clear();
     }
+    final failed = _failedAt;
+    if (failed != null && _now().difference(failed) < retryAfter) return false;
     final run = _Run(this, identity, isCancelled);
     final built = await run.execute();
     lastRunRequests = run.requests;
-    if (built == null || isCancelled()) return false;
+    if (isCancelled()) return false;
+    if (built == null) {
+      _failedAt = _now();
+      return false;
+    }
+    _failedAt = null;
+    _unusable.clear();
     final at = _now();
     await store.write(identity, at, built);
     if (isCancelled()) {
@@ -108,11 +129,16 @@ class CoLikersSource {
   }
 
   /// Cached candidate tracks, best first, hydrated to full track objects.
-  /// [excluded] ids are skipped before hydration; [want] bounds the lookup.
+  /// [excluded] ids are skipped before hydration. Candidates that are missing
+  /// or rejected by [usable] are remembered and skipped from then on, and the
+  /// scan moves down the ranking in batches of [want] until it has [want]
+  /// tracks or has looked at [scan] candidates.
   Future<List<Track>> candidates(
     String identity, {
     Set<String> excluded = const {},
     int want = 15,
+    int scan = 100,
+    bool Function(Track track)? usable,
   }) async {
     if (!validListeningIdentity(identity) || identity == 'anonymous') {
       return const [];
@@ -120,28 +146,41 @@ class CoLikersSource {
     _bind(identity);
     final snapshot = _snapshot ??= await store.read(identity);
     if (snapshot == null) return const [];
-    final ids = [
+    final pool = [
       for (final c in snapshot.candidates)
-        if (!excluded.contains(c.trackId)) c.trackId,
-    ].take(want).toList();
+        if (!excluded.contains(c.trackId) && !_unusable.contains(c.trackId))
+          c.trackId,
+    ].take(scan).toList();
+    final found = <Track>[];
+    for (var i = 0; i < pool.length && found.length < want; i += want) {
+      final batch = pool.skip(i).take(want).toList();
+      await _hydrate(batch);
+      for (final id in batch) {
+        final track = _hydrated[id];
+        if (track == null || (usable != null && !usable(track))) {
+          _unusable.add(id);
+        } else {
+          found.add(track);
+        }
+      }
+    }
+    return found.take(want).toList();
+  }
+
+  Future<void> _hydrate(List<String> ids) async {
     final missing = [
       for (final id in ids)
         if (!_hydrated.containsKey(id)) id,
     ];
-    if (missing.isNotEmpty) {
-      try {
-        for (final track in await api.tracksByIds(missing)) {
-          _hydrated[track.id] = track;
-        }
-      } catch (_) {
-        onLog?.call('co-likers: hydration failed');
+    if (missing.isEmpty) return;
+    try {
+      for (final track in await api.tracksByIds(missing)) {
+        _hydrated[track.id] = track;
       }
-      if (_hydrated.length > 600) _hydrated.clear();
+    } catch (_) {
+      onLog?.call('co-likers: hydration failed');
     }
-    return [
-      for (final id in ids)
-        if (_hydrated[id] != null) _hydrated[id]!,
-    ];
+    if (_hydrated.length > 600) _hydrated.clear();
   }
 }
 
@@ -210,8 +249,12 @@ class _Run {
     ]..sort((a, b) => b.value.compareTo(a.value));
     final chosen = neighbors.take(CoLikersSource.maxNeighbors).toList();
     if (chosen.isEmpty && likersSeen == 0) return null;
+    var neighbourData = 0;
     for (final neighbor in chosen) {
-      if (source._neighborLikes.containsKey(neighbor.key)) continue;
+      if (source._neighborLikes.containsKey(neighbor.key)) {
+        neighbourData++;
+        continue;
+      }
       final rows = await _call(
         () => source.api.userTrackLikes(
           neighbor.key,
@@ -219,6 +262,7 @@ class _Run {
         ),
       );
       if (rows != null) {
+        neighbourData++;
         source._neighborLikes[neighbor.key] = [
           for (final row in rows)
             (
@@ -234,6 +278,9 @@ class _Run {
         (user, _) => !chosen.any((e) => e.key == user),
       );
     }
+    // Neighbours were found but none of their likes could be read: keep the
+    // previous cache rather than replace it with an empty one.
+    if (chosen.isNotEmpty && neighbourData == 0) return null;
     return _score(chosen, seedSet);
   }
 
@@ -250,7 +297,8 @@ class _Run {
       for (final like in likes) {
         if (seedSet.contains(like.id) || !counted.add(like.id)) continue;
         score[like.id] = (score[like.id] ?? 0) + neighbor.value;
-        if (like.at > (newest[like.id] ?? 0)) newest[like.id] = like.at;
+        // a like without a timestamp counts as the oldest
+        newest[like.id] = math.max(newest[like.id] ?? 0, like.at);
       }
     }
     final ranked = score.keys.toList()
