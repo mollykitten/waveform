@@ -22,18 +22,34 @@ web soundcloud is fine, tabs are not
 
 desktop clients for it either don't exist or they're electron wrapped around the website. so i made a real native one, closer to canonical soundcloud than other unofficial clients but darker and quieter, and you can run it for hours without touching the trackpad
 
-> **v0.4.0:** drm-protected tracks play on macos
+> **v0.4.0:** my wave
 >
-> tracks uploaded by distributors and labels that come with drm now play: a small go core decrypts widevine streams over `dart:ffi`. go+ tracks still need a go+ subscription, nothing changes there. the macos release bundles a device profile; from source you bring your own (see [limitations](docs/limitations.md)). also a new icon, reduced-motion fixes, and web3 bits are gone for good
+> one button, an endless queue of real soundcloud tracks. it's built on your machine from your likes, your home stream and people with similar taste, and refills while it plays. no settings, no model, nothing sent anywhere but soundcloud itself
+>
+> also: drm-protected tracks from distributors and labels play on macos through a small go core that decrypts widevine streams over `dart:ffi` (go+ tracks still need a go+ subscription; the macos release bundles a device profile, from source you bring your own, see [limitations](docs/limitations.md)). plus an audio output picker with airplay, keyboard focus everywhere, reduced motion, a new icon, and web3 bits are gone for good
 >
 > daily-driver loop works on macos, windows and linux build too but i test them less. the api is unofficial so rough edges stay. everything else in [`CHANGELOG.md`](CHANGELOG.md)
+
+<p align="center">
+  <img src="screenshots/my-wave.png" alt="my wave screen: a pause button over an orange ribbon ring, with the upcoming wave queue below" width="100%" />
+</p>
+
+### how my wave works
+
+open **discover** in the top bar and press **play my wave** (you need to be signed in). each batch mixes three sources:
+
+- **related** (half): tracks related to what you're playing, your newest likes and recent plays, ranked by a small local graph that learns from what you finish, skip and dislike
+- **your stream** (a quarter): fresh uploads and reposts from people you follow
+- **co-likers** (a quarter): people who liked the same tracks as you, and what else they liked. a background job, cached for a day, never stores their ids
+
+tracks you can't play are dropped before they reach the queue, and the wave keeps going after the batch ends. thumbs down skips and teaches it, stop my wave hands the player back. details and the pilots behind it in [docs/my-wave.md](docs/my-wave.md)
 
 ## what you get
 
 - **keyboard first.** space plays, ⌘K finds anything, arrows seek, ⇧ + arrows skip. enter on a track page plays it
 - **gapless + crossfade 0-6 s.** the next track preloads on a second engine and swaps in on the last sample
 - **media keys.** control center and media keys on macos. windows and linux aren't wired yet, see [limitations](docs/limitations.md)
-- **my wave.** recommendations built from real soundcloud tracks, with a model provider you configure yourself. off until you set it up, see [ai recommendations](docs/ai-recommendations.md)
+- **my wave.** a nonstop queue of real soundcloud tracks picked on your device, see [above](#how-my-wave-works)
 - **audio output.** pick a core audio device or airplay from the player, macos only. see [audio output](docs/audio-output.md)
 - **your account.** you sign in on soundcloud's own page in a webview, the app never sees your password
 - **last.fm.** off until you connect it
