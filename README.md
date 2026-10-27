@@ -24,7 +24,7 @@ desktop clients for it either don't exist or they're electron wrapped around the
 
 > **v0.4.0:** go+ tracks play on macos
 >
-> a small go core decrypts widevine streams over `dart:ffi`, if you bring your own device profile (it's never shipped, see [limitations](docs/limitations.md)). also a new icon, reduced-motion fixes, and web3 bits are gone for good
+> a small go core decrypts widevine streams over `dart:ffi`. the macos release bundles a device profile; from source you bring your own (see [limitations](docs/limitations.md)). also a new icon, reduced-motion fixes, and web3 bits are gone for good
 >
 > daily-driver loop works on macos, windows and linux build too but i test them less. the api is unofficial so rough edges stay. everything else in [`CHANGELOG.md`](CHANGELOG.md)
 
@@ -32,7 +32,9 @@ desktop clients for it either don't exist or they're electron wrapped around the
 
 - **keyboard first.** space plays, ⌘K finds anything, arrows seek, ⇧ + arrows skip. enter on a track page plays it
 - **gapless + crossfade 0-6 s.** the next track preloads on a second engine and swaps in on the last sample
-- **media keys.** control center on macos, SMTC on windows, MPRIS on linux
+- **media keys.** control center and media keys on macos. windows and linux aren't wired yet, see [limitations](docs/limitations.md)
+- **my wave.** recommendations built from real soundcloud tracks, with a model provider you configure yourself. off until you set it up, see [ai recommendations](docs/ai-recommendations.md)
+- **audio output.** pick a core audio device or airplay from the player, macos only. see [audio output](docs/audio-output.md)
 - **your account.** you sign in on soundcloud's own page in a webview, the app never sees your password
 - **last.fm.** off until you connect it
 - **local stats.** top artists, genres and hours from your last 400 plays, counted on your machine

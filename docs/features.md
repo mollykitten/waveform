@@ -4,7 +4,7 @@
 
 - **keyboard first.** space plays, ⌘K finds anything, arrows seek, ⇧ + arrows skip. enter on a track page plays it. see [keyboard](keyboard.md)
 - **gapless + crossfade 0-6 s.** two audio engines: the next track preloads on the idle `AudioPlayer` and swaps in on the last sample. crossfade is optional
-- **media keys.** control center on macos, SMTC on windows, MPRIS on linux, via `audio_service`. pause from your headphones, now-playing on the lock screen
+- **media keys.** control center on macos via `audio_service`. pause from your headphones, now-playing on the lock screen. windows (smtc) and linux (mpris) aren't wired yet
 - **your account.** you sign in on soundcloud's own page in a webview, the app never sees your password, only the session token, saved in the app's sandboxed support dir
 - **last.fm.** off until you connect it. now-playing after 3 s, scrobble at 50 % played or 4 min
 - **local stats.** top artists, genres and hours from your last 400 plays (`/me/play-history`), counted on your machine

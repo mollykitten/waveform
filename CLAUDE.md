@@ -170,9 +170,12 @@ PostgreSQL с векторным индексом, фоновые jobs с вер
   `third_party/scdrm` → `libscdrm.dylib` по `dart:ffi`
   (`lib/core/drm/`), фолбэк после обычных кандидатов: лицензия → расшифровка
   → mp3 в кэш. Только macOS. Профиль устройства `assets/widevine/device.wvd`
-  пользователь кладёт сам; **в git и в релизные сборки он не попадает
-  никогда** (в `.gitignore`, CI его не имеет). Без профиля DRM выключен и
-  трек — общий «unavailable — skipped».
+  при локальной сборке кладёт сам пользователь; **в git он не попадает
+  никогда** (`.gitignore`). Решение владельца 2026-10-28: macOS-релиз
+  бандлит профиль — release.yml пишет его из секрета
+  `WIDEVINE_DEVICE_WVD_BASE64` на время сборки. Windows/Linux-джобы по-
+  прежнему падают на любом `*.wvd`. Без профиля DRM выключен и трек —
+  общий «unavailable — skipped».
 - **Tiles ↔ list переключатель.** `viewModeProvider` + `ViewToggle` + новый
   `CollectionRow` — в library + search/playlists. Персистится в `prefs.json`.
 - **Экран /settings.** Account (avatar + sign in/out), view (тогл), cache
