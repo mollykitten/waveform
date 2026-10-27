@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'listening_event.dart';
+import 'models.dart' show WaveSource;
 
 /// Counts observed advancing audio against monotonic elapsed time, never seeks.
 /// Long sampling gaps are discarded rather than guessed as audible playback.
@@ -35,6 +36,7 @@ class ListeningTracker {
         trackId: previous.trackId,
         durationMs: previous.durationMs,
         positionMs: previous.positionMs,
+        source: previous.source,
       );
       setPlaying(previous.playing);
     }
@@ -44,6 +46,7 @@ class ListeningTracker {
     required String trackId,
     required int durationMs,
     int positionMs = 0,
+    WaveSource? source,
   }) {
     finish(ListeningTransitionCause.directSelection);
     _session = _Session(
@@ -53,6 +56,7 @@ class ListeningTracker {
       _now(),
       _timestamp().toUtc(),
       math.max(0, positionMs),
+      source,
     );
   }
 
@@ -107,6 +111,7 @@ class ListeningTracker {
       startedAt: session.startedAt,
       endedAt: _timestamp().toUtc(),
       cause: cause,
+      source: session.source,
     );
     if (event.isValid) onEvent(event);
   }
@@ -120,6 +125,7 @@ class _Session {
     this.sampledAt,
     this.startedAt,
     this.positionMs,
+    this.source,
   );
   static final _random = math.Random.secure();
   final String id = List.generate(
@@ -129,6 +135,7 @@ class _Session {
   final String trackId;
   final int durationMs;
   final String? identity;
+  final WaveSource? source;
   final DateTime startedAt;
   int sampledAt;
   int positionMs;

@@ -23,8 +23,34 @@ String boundedText(String value, int limit) {
   return String.fromCharCodes(clean.runes.take(limit));
 }
 
+/// Where a wave candidate came from. Stored with local listening facts so the
+/// sources can later be compared by completions and skips.
+enum WaveSource {
+  related('from related tracks, ranked using local listening interests'),
+  stream('from your stream'),
+  coLikers('liked by people with similar likes');
+
+  const WaveSource(this.reason);
+
+  /// The short explanation shown next to a track of this source.
+  final String reason;
+
+  /// Unknown names (a newer file read by an older build) read as null.
+  static WaveSource? tryParse(Object? name) {
+    for (final value in values) {
+      if (value.name == name) return value;
+    }
+    return null;
+  }
+}
+
 class Recommendation {
-  const Recommendation(this.track, this.reason);
+  const Recommendation(
+    this.track,
+    this.reason, {
+    this.source = WaveSource.related,
+  });
   final Track track;
   final String reason;
+  final WaveSource source;
 }

@@ -93,6 +93,7 @@ final listeningFeedbackProvider = Provider<void>((ref) {
       }
       if (was != null && identity == 'anonymous') {
         unawaited(ref.read(seenStoreProvider).forget(was));
+        unawaited(ref.read(coLikersStoreProvider).forget(was));
       }
     }
     tracker.setIdentity(

@@ -2,19 +2,28 @@ import 'package:dio/dio.dart';
 
 import '../../shared/models/track.dart';
 import '../api/soundcloud_api.dart';
+import 'co_likers_source.dart';
 import 'models.dart';
+import 'stream_source.dart';
 import 'vector_engine.dart';
+import 'wave_blend.dart';
 
-/// One bounded batch of genuine SoundCloud tracks, ranked on this device from
-/// the related-track graph and local listening facts.
+/// One bounded batch of genuine SoundCloud tracks. Candidates come from three
+/// sources — the related-track graph (ranked on this device from local
+/// listening facts), the home stream and co-likers — and are interleaved by
+/// source rather than scored on one scale.
 class RecommendationService {
   RecommendationService({
     required this.api,
     required this.vectorEngine,
+    this.streamSource,
+    this.coLikers,
     this.onWarning,
   });
   final SoundcloudApi api;
   final VectorEngine vectorEngine;
+  final StreamSource? streamSource;
+  final CoLikersSource? coLikers;
 
   /// Receives non-fatal notes, e.g. a partial likes load.
   final void Function(String message)? onWarning;
@@ -67,21 +76,70 @@ class RecommendationService {
     }
     check();
     if (seeds.isEmpty) throw WaveFailure.noTracks;
-    final picked = await vectorEngine.generate(
+    final excluded = {
+      ...excludedTrackIds,
+      ...localExcludedTrackIds,
+      ...likedIds,
+    };
+    final related = await vectorEngine.generate(
       seeds: seeds.values.toList(),
       identity: listeningIdentity,
-      excludedTrackIds: {
-        ...excludedTrackIds,
-        ...localExcludedTrackIds,
-        ...likedIds,
-      },
+      excludedTrackIds: excluded,
       check: check,
       limit: limit,
     );
     check();
-    if (picked.isEmpty) throw WaveFailure.noTracks;
-    return picked;
+    final hidden = {
+      ...excluded,
+      ...seeds.keys,
+      ...await vectorEngine.memoryExclusions(listeningIdentity),
+    };
+    check();
+    final stream = await _streamCandidates(listeningIdentity, hidden);
+    check();
+    final coLiked = await _coLikerCandidates(listeningIdentity, hidden, limit);
+    check();
+    final blended = blendBySource({
+      WaveSource.related: related,
+      WaveSource.stream: stream,
+      WaveSource.coLikers: coLiked,
+    }, limit: limit);
+    if (blended.isEmpty) throw WaveFailure.noTracks;
+    return blended;
   }
+
+  Future<List<Recommendation>> _streamCandidates(
+    String identity,
+    Set<String> hidden,
+  ) async => [
+    for (final track in await streamSource?.candidates(identity) ?? <Track>[])
+      if (VectorEngine.eligible(track) && !hidden.contains(track.id))
+        Recommendation(
+          track,
+          WaveSource.stream.reason,
+          source: WaveSource.stream,
+        ),
+  ];
+
+  Future<List<Recommendation>> _coLikerCandidates(
+    String identity,
+    Set<String> hidden,
+    int limit,
+  ) async => [
+    for (final track
+        in await coLikers?.candidates(
+              identity,
+              excluded: hidden,
+              want: limit * 2,
+            ) ??
+            <Track>[])
+      if (VectorEngine.eligible(track) && !hidden.contains(track.id))
+        Recommendation(
+          track,
+          WaveSource.coLikers.reason,
+          source: WaveSource.coLikers,
+        ),
+  ];
 
   final _likesCache = <String, ({Set<String> ids, DateTime expires})>{};
 

@@ -149,7 +149,8 @@ class HttpSoundcloudApi implements SoundcloudApi {
   ];
 
   /// Личный стрим подписок (только треки) — требует userToken.
-  Future<List<Track>> _streamTracks(int limit) async {
+  @override
+  Future<List<Track>> streamTracks({int limit = 40}) async {
     final data = await _get('/stream', {'limit': limit}, true);
     return _page(data, StreamItemDto.fromJson).collection
         .where((e) => e.isTrack && e.track != null)
@@ -395,7 +396,7 @@ class HttpSoundcloudApi implements SoundcloudApi {
   Future<HomeData> home() async {
     // Личный стрим — только залогиненным; анонимам секции не будет.
     final stream = _tryAuthed(
-      () => _streamTracks(12),
+      () => streamTracks(limit: 12),
       () => Future.value(<Track>[]),
     );
     List<Shelf> shelves;
@@ -541,6 +542,54 @@ class HttpSoundcloudApi implements SoundcloudApi {
       _log.warning('comments failed for $id', e, st);
       return const [];
     }
+  }
+
+  @override
+  Future<List<String>> trackLikers(String trackId, {int limit = 50}) async {
+    final data = await _get('/tracks/$trackId/likers', {'limit': limit});
+    return [
+      for (final user in asMapList(asMap(data)['collection']))
+        if (asInt(user['id']) > 0) '${asInt(user['id'])}',
+    ];
+  }
+
+  @override
+  Future<List<({Track track, DateTime? likedAt})>> userTrackLikes(
+    String userId, {
+    int limit = 200,
+  }) async {
+    final data = await _get('/users/$userId/track_likes', {'limit': limit});
+    return [
+      for (final item in asMapList(asMap(data)['collection']))
+        if (item['track'] is Map)
+          (
+            track: TrackDto.fromJson(asMap(item['track'])).toDomain(),
+            likedAt: DateTime.tryParse(asStr(item['created_at'])),
+          ),
+    ];
+  }
+
+  @override
+  Future<List<Track>> tracksByIds(List<String> ids) async {
+    const batch = 50;
+    final tracks = <Track>[];
+    for (var i = 0; i < ids.length; i += batch) {
+      final csv = ids.skip(i).take(batch).join(',');
+      try {
+        final data = await _get('/tracks', {'ids': csv});
+        if (data is List) {
+          for (final item in data) {
+            final json = asMap(item);
+            if (json.containsKey('title')) {
+              tracks.add(TrackDto.fromJson(json).toDomain());
+            }
+          }
+        }
+      } catch (e, st) {
+        _log.warning('hydrate batch ($i+) failed', e, st);
+      }
+    }
+    return tracks;
   }
 
   @override

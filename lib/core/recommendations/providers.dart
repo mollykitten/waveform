@@ -8,10 +8,13 @@ import '../api/liked_tracks.dart';
 import '../api/providers.dart';
 import '../api/soundcloud_auth.dart';
 import '../log/talker.dart';
+import 'co_likers_source.dart';
+import 'co_likers_store.dart';
 import 'listening_store_provider.dart';
 import 'models.dart';
 import 'recommendation_service.dart';
 import 'seen_store.dart';
+import 'stream_source.dart';
 import 'vector_engine.dart';
 import 'vector_store.dart';
 
@@ -24,10 +27,31 @@ final listeningIdentityProvider = FutureProvider<String>((ref) async {
   return rail.me!.id;
 }, retry: (_, _) => null);
 
+final coLikersStoreProvider = Provider<CoLikersStore>(
+  (ref) => CoLikersStore(onFailure: ref.read(talkerProvider).warning),
+);
+
+final coLikersSourceProvider = Provider<CoLikersSource>(
+  (ref) => CoLikersSource(
+    api: ref.watch(soundcloudApiProvider),
+    store: ref.watch(coLikersStoreProvider),
+    onLog: ref.read(talkerProvider).info,
+  ),
+);
+
+final streamSourceProvider = Provider<StreamSource>(
+  (ref) => StreamSource(
+    api: ref.watch(soundcloudApiProvider),
+    onWarning: ref.read(talkerProvider).warning,
+  ),
+);
+
 final recommendationServiceProvider = Provider<RecommendationService>(
   (ref) => RecommendationService(
     api: ref.watch(soundcloudApiProvider),
     onWarning: ref.read(talkerProvider).warning,
+    streamSource: ref.watch(streamSourceProvider),
+    coLikers: ref.watch(coLikersSourceProvider),
     vectorEngine: VectorEngine(
       api: ref.watch(soundcloudApiProvider),
       store: ref.watch(vectorStoreProvider),
