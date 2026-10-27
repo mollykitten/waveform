@@ -25,7 +25,7 @@ All notable changes to Waveform are documented here. Format follows
 - the `jose`, `flutter_secure_storage` and `url_launcher` dependencies, the
   loopback-server entitlement and the linux libsecret build requirement.
 
-## [0.4.0] — unreleased
+## [0.4.0] — 2026-10-28
 
 my wave recommendations, macos audio output controls, keyboard accessibility,
 and release preparation. includes the merged work in #50–#56.
