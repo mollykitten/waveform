@@ -28,12 +28,14 @@ keep the changelog's `unreleased` status until publication is ready.
 
 ## what the macos job does
 
-1. refuses to build if `assets/widevine/device.wvd` exists, and fails if any
-   `*.wvd` appears under `build/`. the widevine device profile must never ship.
+1. refuses to build if any `*.wvd` / `*.wvd.*` exists under `assets/`, and fails
+   if one appears under `build/` or inside the packaged dmg, zip or tar.gz
+   (`tool/check_no_wvd.sh`). the widevine device profile must never ship.
    `pubspec.yaml` bundles the whole `assets/widevine/` directory because
    flutter has neither globs nor optional assets.
-2. signs inside out, without `--deep`: every `*.dylib` and `*.framework` in
-   `Contents/Frameworks` (hardened runtime, timestamp), then the `.app` with
+2. signs inside out, without `--deep`: every nested bundle (`.framework`, `.app`,
+   `.xpc`, `.appex`) and every mach-o except the main executable, deepest path
+   first (hardened runtime, timestamp), then the `.app` with
    `macos/Runner/Release.entitlements`. prints the effective entitlements.
 3. notarizes the `.app` with the api key via `tool/notarize.sh` (bounded
    wait, apple log on failure), staples it and runs
@@ -100,7 +102,7 @@ bundles the committed file as is.
    codesign --verify --strict --deep --verbose=2 /Applications/Waveform.app
    codesign -d --entitlements :- /Applications/Waveform.app
    xcrun stapler validate /Applications/Waveform.app
-   spctl --assess --type execute -v=4 /Applications/Waveform.app
+   spctl --assess --type execute -vv /Applications/Waveform.app
    find /Applications/Waveform.app -name '*.wvd'   # must print nothing
    ```
 
@@ -126,7 +128,9 @@ and linux build/package/upload succeeded. no release was published.
 
 the apple team must resolve the required agreement before another notarization
 attempt. notarization now uses an app store connect api key instead of an apple
-id; the key does not change the agreement requirement. this observation does not establish missing secrets or a workflow
+id; the key does not change the agreement requirement.
+
+this observation does not establish missing secrets or a workflow
 defect. it also predates the current candidate: require a fresh successful macos
 run on the final SHA before tagging, and record the other platform outcomes.
 

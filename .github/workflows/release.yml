@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -74,7 +74,7 @@ jobs:
       - name: Refuse to build with a widevine device profile
         # device.wvd is a private device key: it must never ship in a
         # release bundle. CI never has it; fail if one shows up.
-        run: test ! -e assets/widevine/device.wvd
+        run: tool/check_no_wvd.sh assets
 
       - name: Build macOS release
         env:
@@ -88,12 +88,7 @@ jobs:
             --dart-define=LASTFM_SHARED_SECRET="$LASTFM_SHARED_SECRET"
 
       - name: Verify no widevine profile in build output
-        run: |
-          if find build -name '*.wvd' | grep -q .; then
-            echo "::error::a .wvd file leaked into the build output"
-            find build -name '*.wvd'
-            exit 1
-          fi
+        run: tool/check_no_wvd.sh build
 
       - name: Codesign .app (Developer ID Application)
         run: |
@@ -122,16 +117,25 @@ jobs:
               --sign "$IDENTITY" --keychain "$KEYCHAIN" "$@"
           }
 
-          # inside out, no --deep: nested code first (hardened runtime +
-          # timestamp, no entitlements), the app last with its entitlements.
-          # libscdrm.dylib ships ad-hoc signed from git and is re-signed here.
-          FW="$APP/Contents/Frameworks"
-          if [ -d "$FW" ]; then
-            find "$FW" -type f -name '*.dylib' -print0 |
-              while IFS= read -r -d '' f; do sign "$f"; done
-            find "$FW" -type d -name '*.framework' -print0 |
-              while IFS= read -r -d '' f; do sign "$f"; done
-          fi
+          # inside out, no --deep: every nested bundle and every Mach-O
+          # except the main executable, deepest path first (hardened
+          # runtime + timestamp, no entitlements); the app goes last with
+          # its entitlements. libscdrm.dylib ships ad-hoc signed from git
+          # and is re-signed here.
+          MAIN="$APP/Contents/MacOS/$(/usr/libexec/PlistBuddy \
+            -c 'Print :CFBundleExecutable' "$APP/Contents/Info.plist")"
+          {
+            find "$APP/Contents" -type d \( -name '*.framework' \
+              -o -name '*.app' -o -name '*.xpc' -o -name '*.appex' \) -print
+            find "$APP/Contents" -type f ! -path "$MAIN" -print0 |
+              while IFS= read -r -d '' f; do
+                if file -b "$f" | grep -q 'Mach-O'; then echo "$f"; fi
+              done
+          } | awk '{ print gsub("/", "/") "\t" $0 }' | sort -rn | cut -f2- |
+            while IFS= read -r target; do
+              echo "signing: $target"
+              sign "$target"
+            done
           sign --entitlements macos/Runner/Release.entitlements "$APP"
 
           codesign --verify --strict --deep --verbose=2 "$APP"
@@ -144,6 +148,7 @@ jobs:
           umask 077
           KEY="$RUNNER_TEMP/AuthKey.p8"
           printf '%s' "$APPLE_API_KEY_P8_BASE64" | base64 --decode > "$KEY"
+          test -s "$KEY"
           echo "NOTARY_KEY_PATH=$KEY" >> "$GITHUB_ENV"
 
       - name: Notarize .app
@@ -157,7 +162,7 @@ jobs:
           APP="build/macos/Build/Products/Release/Waveform.app"
           xcrun stapler staple "$APP"
           xcrun stapler validate "$APP"
-          spctl --assess --type execute -v=4 "$APP"
+          spctl --assess --type execute -vv "$APP"
 
       - name: Build, sign, notarize and staple DMG
         env:
@@ -177,6 +182,11 @@ jobs:
           hdiutil create -format UDZO -fs HFS+ \
             -volname "Waveform $REF_NAME" \
             -srcfolder "$STAGE" "$DMG"
+          MNT="$RUNNER_TEMP/dmg-check"
+          mkdir -p "$MNT"
+          hdiutil attach -readonly -nobrowse -mountpoint "$MNT" "$DMG"
+          tool/check_no_wvd.sh "$MNT" || { hdiutil detach "$MNT"; exit 1; }
+          hdiutil detach "$MNT"
           codesign --force --timestamp \
             --sign "$SIGN_IDENTITY" --keychain "$SIGN_KEYCHAIN" "$DMG"
           codesign --verify --verbose=2 "$DMG"
@@ -223,7 +233,7 @@ jobs:
 
       - name: Refuse to build with a widevine device profile
         shell: bash
-        run: test ! -e assets/widevine/device.wvd
+        run: tool/check_no_wvd.sh assets
 
       - name: Build Windows release
         # Default shell on windows-latest is PowerShell, which uses
@@ -237,11 +247,7 @@ jobs:
 
       - name: Verify no widevine profile in build output
         shell: bash
-        run: |
-          if find build -name '*.wvd' | grep -q .; then
-            echo "::error::a .wvd file leaked into the build output"
-            exit 1
-          fi
+        run: tool/check_no_wvd.sh build
 
       - name: Package Windows zip
         shell: pwsh
@@ -251,6 +257,11 @@ jobs:
           $zip = "waveform-windows-$env:REF_NAME.zip"
           Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath $zip
           Get-Item $zip | Select-Object Name, Length
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $z = [IO.Compression.ZipFile]::OpenRead((Resolve-Path $zip))
+          $bad = $z.Entries | Where-Object { $_.FullName -match '\.wvd(\.|$)' }
+          $z.Dispose()
+          if ($bad) { throw "widevine profile in zip: $($bad.FullName)" }
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -301,7 +312,7 @@ jobs:
         run: flutter pub get
 
       - name: Refuse to build with a widevine device profile
-        run: test ! -e assets/widevine/device.wvd
+        run: tool/check_no_wvd.sh assets
 
       - name: Build Linux release
         env:
@@ -309,17 +320,13 @@ jobs:
           LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
           LASTFM_SHARED_SECRET: ${{ secrets.LASTFM_SHARED_SECRET }}
         run: |
-          flutter build linux --release --verbose \
+          flutter build linux --release \
             --dart-define=APP_VERSION="$REF_NAME" \
             --dart-define=LASTFM_API_KEY="$LASTFM_API_KEY" \
             --dart-define=LASTFM_SHARED_SECRET="$LASTFM_SHARED_SECRET"
 
       - name: Verify no widevine profile in build output
-        run: |
-          if find build -name '*.wvd' | grep -q .; then
-            echo "::error::a .wvd file leaked into the build output"
-            exit 1
-          fi
+        run: tool/check_no_wvd.sh build
 
       - name: Package Linux tar.gz
         env:
@@ -327,6 +334,10 @@ jobs:
         run: |
           TAR="waveform-linux-$REF_NAME.tar.gz"
           tar czf "$TAR" -C build/linux/x64/release/bundle .
+          if tar tzf "$TAR" | grep -E '\.wvd(\.|$)'; then
+            echo "::error::widevine profile in tar.gz"
+            exit 1
+          fi
           ls -lh "$TAR"
 
       - name: Upload Linux artifact
@@ -348,6 +359,8 @@ jobs:
       always() && needs.macos.result == 'success'
       && startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
