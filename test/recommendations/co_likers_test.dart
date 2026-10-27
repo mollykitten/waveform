@@ -92,13 +92,17 @@ void main() {
   late CfApi api;
   late CoLikersStore store;
   var now = DateTime.utc(2026, 10, 27, 12);
-  CoLikersSource source({int maxRequests = 250}) => CoLikersSource(
+  CoLikersSource source({
+    int maxRequests = 250,
+    void Function(String)? onLog,
+  }) => CoLikersSource(
     api: api,
     store: store,
     maxRequests: maxRequests,
     pause: Duration.zero,
     backoff: Duration.zero,
     now: () => now,
+    onLog: onLog,
   );
 
   setUp(() async {
@@ -351,6 +355,28 @@ void main() {
     expect(api.userLikesCalls, 0);
     expect(run.lastRunRequests, 1 + CoLikersSource.maxRetries + 1);
     expect(await store.read('42'), isNull);
+  });
+
+  test('a skipped or aborted run leaves a log line', () async {
+    smallNeighbourhood();
+    final logs = <String>[];
+    api.rateLimited = 1000;
+    await source(onLog: logs.add).refresh('42', isCancelled: () => false);
+    expect(logs.single, contains('run skipped (rate limited)'));
+
+    logs.clear();
+    api.rateLimited = 0;
+    api.failLikersFor = {'s2', 's3'};
+    await source(onLog: logs.add).refresh('42', isCancelled: () => false);
+    expect(logs.single, contains('calls failed'));
+    expect(logs.single, contains('previous cache kept'));
+
+    logs.clear();
+    api.failLikersFor = {};
+    await source(
+      onLog: logs.add,
+    ).refresh('42', isCancelled: () => api.likersCalls > 0);
+    expect(logs.single, contains('run cancelled'));
   });
 
   test('a Retry-After hint replaces the exponential wait', () async {
