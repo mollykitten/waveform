@@ -1,7 +1,8 @@
 # roadmap
 
 status as of 2026-10-27. implemented means present in source;
-it does not mean released or verified on a clean machine.
+it does not mean released or verified on a clean machine or with a live
+subscribed account.
 
 ## implemented
 
@@ -18,13 +19,27 @@ it does not mean released or verified on a clean machine.
 - independent review of the combined auth, UI, player and audio-engine changes;
   three reproduced playback issues were fixed: source/heard-time attribution,
   stale preload after queue append, and pause/load cancellation.
-- final verification: Dart MCP analysis reports no errors; all 356 default
-  Flutter tests pass with 10 optional captures skipped; all 36 notifier Python
-  tests pass; the macOS debug app builds successfully without launching it.
+- final verification on main (2026-10-27): `flutter analyze` reports no issues;
+  499 default Flutter tests pass with 8 optional captures skipped. the macOS
+  debug app builds in CI; nothing here was run against a live account.
 - local structural vectors from a bounded related-track graph: up to six seed
   interests and twelve related tracks per seed. sampled listening feedback,
   timestamped provenance and stores are bounded and isolated by verified
   SoundCloud identity. ranking includes diversity and exploration.
+
+- persistent per-account memory of shown, played, skipped and disliked tracks
+  (`SeenStore`) so a restart no longer replays what was just heard; the wave
+  keeps a staged candidate pool with seed rotation, a second related level and
+  genre search under a request budget, and retries instead of going quiet.
+- a dislike button for wave tracks: the track is skipped and removed from the
+  queue, not recommended again for a year, and lowers the matching seed
+  interests; undo restores the previous state.
+- sign-out clears the webview session and token file, token access is
+  serialized, and pending chatgpt revocations are kept on 408/429.
+- macOS release pipeline signs inside out and notarizes with an app store
+  connect api key (`tool/notarize.sh`); a `*.wvd` device profile fails the build.
+  no real run yet: it needs the accepted apple agreement, an api key and a
+  developer id certificate.
 
 these vectors describe graph relationships. neural audio embeddings, a server
 catalog index and cross-device profile sync are **not implemented**. my wave
