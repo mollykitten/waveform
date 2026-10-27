@@ -163,6 +163,9 @@ what it changes, all on the device:
 - candidates whose structural vector is close (cosine) to the centroid of the
   20 latest disliked tracks are ranked lower, and tracks by the same artist get
   a mild multiplier (0.7 per dislike, at most three). nothing else is excluded.
+- the seen memory (dislikes included) is local and unrelated to the model
+  connection: it is deleted for an account when that account logs out, and
+  disconnecting chatgpt does not erase it.
 - dislikes are kept ahead of ordinary seen entries (up to 500) when the store
   is trimmed.
 

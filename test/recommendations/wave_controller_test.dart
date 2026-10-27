@@ -76,7 +76,7 @@ void main() {
         ),
         waveRetryDelayProvider.overrideWithValue(Duration.zero),
         aiSettingsProvider.overrideWith(() => settings),
-        aiListeningIdentityProvider.overrideWith((ref) async => 'test-profile'),
+        aiListeningIdentityProvider.overrideWith((ref) async => '42'),
         aiClientProvider.overrideWithValue(client),
         soundcloudApiProvider.overrideWithValue(api),
         audioEngineProvider.overrideWithValue(engine),
@@ -102,7 +102,7 @@ void main() {
           (ref, notifier) => const SoundcloudAuth(clientId: 'test'),
         ),
         aiSettingsProvider.overrideWith(() => settings),
-        aiListeningIdentityProvider.overrideWith((ref) async => 'test-profile'),
+        aiListeningIdentityProvider.overrideWith((ref) async => '42'),
         aiClientProvider.overrideWithValue(client),
         recommendationServiceProvider.overrideWithValue(service),
         seenStoreProvider.overrideWithValue(

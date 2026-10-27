@@ -258,14 +258,17 @@ class WaveController extends Notifier<WaveState> {
     } finally {
       _mutatingQueue = false;
     }
-    unawaited(_markShown(ids.where(_ids.contains).toList()));
+    final identity = ref.read(aiListeningIdentityProvider).asData?.value;
+    if (identity != null) {
+      unawaited(_markShown(identity, ids.where(_ids.contains).toList()));
+    }
   }
 
   /// Only tracks really put in the queue get the "shown" cooldown; spare
   /// candidates stay in the pool untouched.
-  Future<void> _markShown(List<String> ids) async {
+  Future<void> _markShown(String identity, List<String> ids) async {
+    if (identity == 'anonymous' || ids.isEmpty) return;
     try {
-      final identity = await ref.read(aiListeningIdentityProvider.future);
       await ref
           .read(seenStoreProvider)
           .record(identity, SeenKind.shown, ids, DateTime.now());
@@ -295,6 +298,7 @@ class WaveController extends Notifier<WaveState> {
     if (track == null || !ownsTrack(track.id)) return null;
     try {
       final identity = await ref.read(aiListeningIdentityProvider.future);
+      if (identity == 'anonymous') return null;
       await ref
           .read(seenStoreProvider)
           .dislike(identity, track.id, track.artistHandle, DateTime.now());

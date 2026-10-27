@@ -12,7 +12,7 @@ import 'vector_engine.dart';
 /// One bounded batch from genuine SoundCloud tracks, ranked locally for the
 /// personal wave or selected by the configured model for mood discovery.
 class RecommendationService {
-  const RecommendationService({
+  RecommendationService({
     required this.api,
     required this.client,
     this.vectorEngine,
@@ -87,7 +87,12 @@ class RecommendationService {
         check();
         addSeeds(history.take(10), localSeeds, 30);
         addSeeds(history.take(10), modelSeeds, 20);
-        await _drainLikes(likes.nextHref, likedIds, check);
+        await _drainLikes(
+          listeningIdentity ?? 'anonymous',
+          likes.nextHref,
+          likedIds,
+          check,
+        );
       } on AiFailure {
         rethrow;
       } catch (_) {
@@ -206,30 +211,57 @@ class RecommendationService {
     return result;
   }
 
+  final _likesCache = <String, ({Set<String> ids, DateTime expires})>{};
+
   /// Collect the remaining liked ids for exclusion: at most [maxLikePages]
-  /// pages and ten seconds overall. Failure or timeout keeps what was read.
+  /// pages and ten seconds overall. A full set is reused for 15 minutes and a
+  /// partial one for 2, so refills do not repeat the walk. A timeout stops
+  /// the loop; late pages are never added afterwards.
   Future<void> _drainLikes(
+    String key,
     String? cursor,
     Set<String> into,
     void Function() check,
   ) async {
+    final cached = _likesCache[key];
+    if (cached != null && cached.expires.isAfter(DateTime.now())) {
+      into.addAll(cached.ids);
+      return;
+    }
+    final drained = <String>{};
+    var stopped = false;
+    var complete = true;
     Future<void> pages() async {
       var next = cursor;
       for (var page = 1; next != null && page < maxLikePages; page++) {
+        if (stopped) return;
         final result = await api.likesPage(nextHref: next, limit: 50);
+        if (stopped) return;
         check();
-        into.addAll(result.tracks.map((t) => t.id));
+        drained.addAll(result.tracks.map((t) => t.id));
         next = result.tracks.isEmpty ? null : result.nextHref;
       }
+      // Running out of pages at the cap leaves older likes unknown.
+      if (next != null) complete = false;
     }
 
     try {
       await pages().timeout(const Duration(seconds: 10));
     } on AiFailure {
+      stopped = true;
       rethrow;
     } catch (error) {
+      stopped = true;
+      complete = false;
       onWarning?.call('liked tracks only partly loaded: ${error.runtimeType}');
     }
+    into.addAll(drained);
+    _likesCache[key] = (
+      ids: Set.of(drained),
+      expires: DateTime.now().add(
+        complete ? const Duration(minutes: 15) : const Duration(minutes: 2),
+      ),
+    );
   }
 
   bool _eligible(Track track) =>

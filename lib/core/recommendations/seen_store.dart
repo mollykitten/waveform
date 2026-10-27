@@ -90,17 +90,18 @@ class SeenStore {
       return (entries: entries, writable: false);
     }
     final File file;
-    final String text;
+    final List<int> bytes;
     try {
       file = await _file(identity);
       if (!await file.exists()) return (entries: entries, writable: true);
       if (await file.length() > maxBytes) return await _broken(file);
-      text = await file.readAsString();
-    } on FileSystemException {
+      bytes = await file.readAsBytes();
+    } catch (_) {
       onFailure?.call('seen tracks storage unavailable');
       return (entries: entries, writable: false);
     }
     try {
+      final text = utf8.decode(bytes);
       final root = jsonDecode(text) as Map;
       if (root['version'] != 1 || root['identity'] != identity) {
         return await _broken(file);
@@ -131,7 +132,7 @@ class SeenStore {
     try {
       await file.rename('${file.path}.bak');
       return (entries: <String, SeenEntry>{}, writable: true);
-    } on FileSystemException {
+    } catch (_) {
       return (entries: <String, SeenEntry>{}, writable: false);
     }
   }
@@ -262,13 +263,18 @@ class SeenStore {
     }
   }
 
-  /// Delete one account's memory, e.g. on its logout or consent revocation.
-  /// Other accounts keep theirs, so switching A to B and back loses nothing.
+  /// Delete one account's memory (file, `.bak` and `.tmp`) when that account
+  /// logs out. Other accounts keep theirs, so switching A to B and back loses
+  /// nothing. Disconnecting ChatGPT does not call this: the memory is local
+  /// and unrelated to the model connection.
   Future<void> forget(String identity) => _serial(() async {
     if (!validListeningIdentity(identity)) return;
     try {
       final file = await _file(identity);
-      if (await file.exists()) await file.delete();
+      for (final path in [file.path, '${file.path}.bak', '${file.path}.tmp']) {
+        final candidate = File(path);
+        if (await candidate.exists()) await candidate.delete();
+      }
     } catch (_) {
       onFailure?.call('seen tracks storage unavailable');
     }

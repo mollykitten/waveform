@@ -325,11 +325,6 @@ class AiSettingsController extends Notifier<AiSettingsState> {
   }
 
   Future<void> disconnectChatGpt() async {
-    // Revoking access also drops the local seen memory of this account.
-    final identity = ref.read(aiListeningIdentityProvider).asData?.value;
-    if (identity != null) {
-      unawaited(ref.read(seenStoreProvider).forget(identity));
-    }
     ++_restoreVersion;
     ++_connectionVersion;
     _connected = false;
@@ -478,6 +473,7 @@ class RecommendationState {
 }
 
 class RecommendationsController extends Notifier<RecommendationState> {
+  String? _knownIdentity;
   CancelToken? _cancel;
   int _generation = 0;
 
@@ -489,14 +485,16 @@ class RecommendationsController extends Notifier<RecommendationState> {
     });
     // Logging out drops that account's seen memory; switching accounts keeps
     // each one's file so A -> B -> A loses nothing.
-    ref.listen(aiListeningIdentityProvider, (previous, next) {
-      final was = previous?.asData?.value;
-      if (was != null &&
-          was != 'anonymous' &&
-          next.asData?.value == 'anonymous') {
+    ref.listen(aiListeningIdentityProvider, (_, next) {
+      // `previous` can be a loading state, so remember the last real value.
+      final identity = next.asData?.value;
+      if (identity == null) return;
+      final was = _knownIdentity;
+      _knownIdentity = identity;
+      if (was != null && was != 'anonymous' && identity == 'anonymous') {
         unawaited(ref.read(seenStoreProvider).forget(was));
       }
-    });
+    }, fireImmediately: true);
     ref.onDispose(() {
       _generation++;
       _cancel?.cancel();
