@@ -6,20 +6,53 @@ keep the changelog's `unreleased` status until publication is ready.
 
 ## one-time setup
 
-1. an active apple developer membership, all required agreements accepted, and
-   a `Developer ID Application` certificate exported as a password-protected
-   `.p12`.
-2. github actions secrets in settings → secrets and variables → actions:
-   - `APPLE_TEAM_ID`: the apple team id.
+1. an active apple developer membership (the company team), all required
+   agreements accepted by the account holder, and a `Developer ID Application`
+   certificate for that team exported as a password-protected `.p12`.
+2. an app store connect api key (team key, `Developer` access is enough for
+   notarization) downloaded once as `AuthKey_<id>.p8`.
+3. github actions secrets in settings → secrets and variables → actions:
    - `APPLE_CERT_P12_BASE64`: base64-encoded `.p12`.
    - `APPLE_CERT_PASSWORD`: the `.p12` password.
-   - `APPLE_ID`: apple id email.
-   - `APPLE_APP_PASSWORD`: app-specific password for notarization.
    - `KEYCHAIN_PASSWORD`: password for the temporary CI keychain.
-3. optional last.fm credentials: `LASTFM_API_KEY` and `LASTFM_SHARED_SECRET`.
+   - `APPLE_API_KEY_P8_BASE64`: base64-encoded `.p8` api key.
+   - `APPLE_API_KEY_ID`: the api key id.
+   - `APPLE_API_ISSUER_ID`: the issuer id from app store connect.
+
+   `APPLE_ID` and `APPLE_APP_PASSWORD` are no longer used, and neither is
+   `APPLE_TEAM_ID`; delete them once the first run is green.
+4. optional last.fm credentials: `LASTFM_API_KEY` and `LASTFM_SHARED_SECRET`.
    the workflow passes them through `--dart-define`. they are compiled into
    the binary; keeping them out of git does not make a client binary a secret
    store. never commit credential values.
+
+## what the macos job does
+
+1. refuses to build if `assets/widevine/device.wvd` exists, and fails if any
+   `*.wvd` appears under `build/`. the widevine device profile must never ship.
+   `pubspec.yaml` bundles the whole `assets/widevine/` directory because
+   flutter has neither globs nor optional assets.
+2. signs inside out, without `--deep`: every `*.dylib` and `*.framework` in
+   `Contents/Frameworks` (hardened runtime, timestamp), then the `.app` with
+   `macos/Runner/Release.entitlements`. prints the effective entitlements.
+3. notarizes the `.app` with the api key via `tool/notarize.sh` (bounded
+   wait, apple log on failure), staples it and runs
+   `spctl --assess --type execute`.
+4. builds the dmg from the stapled app with `ditto`, signs it, notarizes it,
+   staples it and runs `spctl --assess --type open --context
+   context:primary-signature`.
+5. the api key lives in `$RUNNER_TEMP` (written with `umask 077`) and is
+   removed in an `if: always()` step.
+
+all third-party actions are pinned to full commit shas (tag in the comment).
+bump them deliberately; dependabot proposes the new sha.
+
+## libscdrm.dylib
+
+`macos/Runner/Frameworks/libscdrm.dylib` is a committed binary built from
+`third_party/scdrm` by `tool/build_scdrm.sh`. ci runs `go test ./...` and
+rebuilds it on a mac runner to prove the sources still build, but the release
+bundles the committed file as is.
 
 ## candidate checks
 
@@ -51,14 +84,28 @@ keep the changelog's `unreleased` status until publication is ready.
 
 4. confirm the run's `headSha` equals the intended main SHA. macos must
    complete signing verification, accepted notarization, staple validation,
-   DMG creation and upload. record windows and linux results separately:
+   DMG signing, notarization and staple, gatekeeper assessment and upload.
+   record windows and linux results separately:
    they are best effort, and notes must only claim assets that actually exist.
    confirm the publish job is **skipped**: `workflow_dispatch` on a branch
    builds artifacts but its non-tag ref cannot publish a release.
-5. download and inspect the packaged artifacts. check macos installation and
-   launch on a clean system, including `codesign --verify --strict --deep`,
-   `xcrun stapler validate` and gatekeeper assessment
-   (`spctl --assess --type execute --verbose`), each against the downloaded app.
+5. download and inspect the packaged artifacts. on a clean macos machine
+   (no developer tools, never used for builds), with the dmg downloaded through
+   a browser so it carries the quarantine flag:
+
+   ```bash
+   xcrun stapler validate waveform-macos-<ref>.dmg
+   spctl --assess --type open --context context:primary-signature -v waveform-macos-<ref>.dmg
+   # mount, drag Waveform.app to /Applications, then:
+   codesign --verify --strict --deep --verbose=2 /Applications/Waveform.app
+   codesign -d --entitlements :- /Applications/Waveform.app
+   xcrun stapler validate /Applications/Waveform.app
+   spctl --assess --type execute -v=4 /Applications/Waveform.app
+   find /Applications/Waveform.app -name '*.wvd'   # must print nothing
+   ```
+
+   then open the app by double-click with the network offline: it must launch
+   without a gatekeeper prompt (the stapled ticket works offline).
    check extraction and launch for any windows/linux assets being published.
    record any runtime checks that remain unverified; builds and tests do not
    prove live OAuth, physical airplay or recommendation quality.
@@ -78,7 +125,8 @@ submission id; staple, DMG creation and macos upload were skipped. windows
 and linux build/package/upload succeeded. no release was published.
 
 the apple team must resolve the required agreement before another notarization
-attempt. this observation does not establish missing secrets or a workflow
+attempt. notarization now uses an app store connect api key instead of an apple
+id; the key does not change the agreement requirement. this observation does not establish missing secrets or a workflow
 defect. it also predates the current candidate: require a fresh successful macos
 run on the final SHA before tagging, and record the other platform outcomes.
 
