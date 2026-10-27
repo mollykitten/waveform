@@ -73,6 +73,13 @@ class RecommendationsController extends Notifier<RecommendationState> {
     return const RecommendationState();
   }
 
+  /// Forget every earlier result, e.g. when a brand-new wave begins, so a
+  /// failed search can never fall back on a previous wave's tracks.
+  void clear() {
+    cancel();
+    state = const RecommendationState();
+  }
+
   /// Surface a visible failure after an automatic search gave up quietly.
   void reportFailure(WaveFailure failure) {
     state = RecommendationState(items: state.items, error: failure);

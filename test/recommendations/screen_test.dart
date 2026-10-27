@@ -132,6 +132,12 @@ void main() {
     expect(find.byType(AlertDialog), findsNothing);
     expect(find.text('stop my wave'), findsOneWidget);
     expect(find.text('a possible fit'), findsWidgets);
+    expect(find.byKey(const ValueKey('wave-row-t2')), findsOneWidget);
+    // an owned wave pauses and resumes instead of regenerating
+    await tester.tap(find.byKey(const ValueKey('wave-primary')));
+    await tester.pump();
+    expect(container.read(playerControllerProvider).isPlaying, isFalse);
+    expect(service.calls, 1);
     container.read(waveControllerProvider.notifier).cancel();
     await tester.pumpWidget(const SizedBox.shrink());
   });

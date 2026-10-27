@@ -379,7 +379,7 @@ void main() {
     await tester.pump();
     await container.read(audioOutputProvider.notifier).selectDevice('usb');
     await tester.pump();
-    expect(find.text('USB speakers'), findsOneWidget);
+    expect(find.text('USB speakers'), findsNothing);
     expect(find.byTooltip('Audio output: USB speakers'), findsOneWidget);
     expect(find.bySemanticsLabel('Audio output: USB speakers'), findsWidgets);
     await tester.sendKeyEvent(LogicalKeyboardKey.tab);

@@ -19,7 +19,6 @@ class AudioOutputPicker extends ConsumerWidget {
     final label = output.supported
         ? 'Audio output: ${output.selectedName}'
         : 'Audio output: unavailable on this platform';
-    final showName = !compact && MediaQuery.sizeOf(context).width >= 1100;
     return Shortcuts(
       shortcuts: const {
         SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
@@ -32,7 +31,7 @@ class AudioOutputPicker extends ConsumerWidget {
         shadowColor: Colors.transparent,
         elevation: 0,
         menuPadding: const EdgeInsets.symmetric(vertical: 6),
-        constraints: const BoxConstraints(minWidth: 260, maxWidth: 300),
+        constraints: const BoxConstraints(minWidth: 280, maxWidth: 320),
         shape: const RoundedRectangleBorder(
           borderRadius: AppTheme.borderRadius,
           side: AppTheme.borderSideStatic,
@@ -128,35 +127,16 @@ class AudioOutputPicker extends ConsumerWidget {
           button: true,
           child: ExcludeSemantics(
             child: SizedBox(
-              width: showName ? 120 : 32,
+              width: 32,
               height: 32,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    output.airPlayActive
-                        ? Icons.airplay
-                        : Icons.speaker_group_outlined,
-                    size: 18,
-                    color: output.airPlayActive
-                        ? AppColors.acid
-                        : AppColors.textMid,
-                  ),
-                  if (showName) ...[
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        output.supported ? output.selectedName : 'unavailable',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 11,
-                          color: AppColors.textMid,
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
+              child: Icon(
+                output.airPlayActive
+                    ? Icons.airplay
+                    : Icons.speaker_group_outlined,
+                size: 18,
+                color: output.airPlayActive
+                    ? AppColors.acid
+                    : AppColors.textMid,
               ),
             ),
           ),
@@ -174,7 +154,7 @@ PopupMenuItem<String> _outputItem({
 }) => PopupMenuItem<String>(
   value: value,
   height: 36,
-  padding: const EdgeInsets.symmetric(horizontal: 12),
+  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
   child: Semantics(
     selected: selected,
     child: Row(
@@ -186,14 +166,28 @@ PopupMenuItem<String> _outputItem({
         ),
         const SizedBox(width: 10),
         Expanded(
-          child: Text(
-            name,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 12,
-              color: selected ? AppColors.acid : AppColors.textHi,
-            ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                name,
+                softWrap: true,
+                style: TextStyle(
+                  fontSize: 12,
+                  height: 1.4,
+                  color: selected ? AppColors.acid : AppColors.textHi,
+                ),
+              ),
+              if (selected)
+                const Padding(
+                  padding: EdgeInsets.only(top: 3),
+                  child: Text(
+                    'current output',
+                    style: TextStyle(fontSize: 10, color: AppColors.textMid),
+                  ),
+                ),
+            ],
           ),
         ),
         const SizedBox(width: 10),

@@ -102,13 +102,14 @@ jobs:
           KEYCHAIN="$HOME/Library/Keychains/signing_temp.keychain-db"
           security list-keychains
           security find-identity -v -p codesigning "$KEYCHAIN"
+          # sign by sha-1 hash: a name with duplicates is ambiguous
           IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN" | \
-            grep "Developer ID Application" | head -1 | awk -F'"' '{print $2}')
+            awk '/Developer ID Application/ {print $2; exit}')
           if [ -z "$IDENTITY" ]; then
             echo "::error::No Developer ID Application identity found in $KEYCHAIN"
             exit 1
           fi
-          echo "Signing with: $IDENTITY"
+          echo "Signing with identity: $IDENTITY"
           # later steps (dmg) sign with the same identity
           echo "SIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
           echo "SIGN_KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
@@ -130,7 +131,7 @@ jobs:
               -o -name '*.app' -o -name '*.xpc' -o -name '*.appex' \) -print
             find "$APP/Contents" -type f ! -path "$MAIN" -print0 |
               while IFS= read -r -d '' f; do
-                if file -b "$f" | grep -q 'Mach-O'; then echo "$f"; fi
+                case "$(file -b "$f")" in *Mach-O*) echo "$f" ;; esac
               done
           } | awk '{ print gsub("/", "/") "\t" $0 }' | sort -rn | cut -f2- |
             while IFS= read -r target; do

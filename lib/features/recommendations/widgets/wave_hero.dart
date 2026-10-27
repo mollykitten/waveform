@@ -1,9 +1,11 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 
 import '../../../app/theme/colors.dart';
 import '../../../shared/widgets/pressable.dart';
+import 'wave_energy.dart';
 
 /// A quiet, open centre surrounded by slowly folding amber ribbons.
 class WaveHero extends StatefulWidget {
@@ -15,6 +17,8 @@ class WaveHero extends StatefulWidget {
     this.busy = false,
     this.enabled = true,
     this.active = true,
+    this.playing = false,
+    this.energyEnabled = false,
   });
 
   final String description;
@@ -23,6 +27,8 @@ class WaveHero extends StatefulWidget {
   final bool busy;
   final bool enabled;
   final bool active;
+  final bool playing;
+  final bool energyEnabled;
 
   @override
   State<WaveHero> createState() => _WaveHeroState();
@@ -82,8 +88,10 @@ class _WaveHeroState extends State<WaveHero>
   }
 
   @override
-  Widget build(BuildContext context) => SizedBox(
-    height: 400,
+  Widget build(BuildContext context) => ConstrainedBox(
+    constraints: BoxConstraints(
+      minHeight: (MediaQuery.sizeOf(context).height - 360).clamp(280.0, 400.0),
+    ),
     child: Stack(
       alignment: Alignment.center,
       children: [
@@ -91,60 +99,73 @@ class _WaveHeroState extends State<WaveHero>
           child: ExcludeSemantics(
             child: RepaintBoundary(
               child: ClipRect(
-                child: CustomPaint(painter: WaveRibbonPainter(_motion)),
-              ),
-            ),
-          ),
-        ),
-        Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Semantics(
-              label: widget.actionLabel,
-              child: Pressable(
-                key: const ValueKey('wave-primary'),
-                enabled: widget.enabled && !widget.busy,
-                onTap: widget.onPlay,
-                child: const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.play_arrow_rounded,
-                        size: 48,
-                        color: AppColors.textHi,
-                      ),
-                      SizedBox(width: 8),
-                      Text(
-                        'my wave',
-                        style: TextStyle(
-                          fontSize: 44,
-                          height: 1.1,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: -1.8,
-                          color: AppColors.textHi,
-                        ),
-                      ),
-                    ],
+                child: WaveEnergy(
+                  enabled: widget.active && widget.energyEnabled,
+                  builder: (context, energy) => CustomPaint(
+                    painter: WaveRibbonPainter(_motion, energy: energy),
                   ),
                 ),
               ),
             ),
-            const SizedBox(height: 4),
-            SizedBox(
-              width: 290,
-              child: Text(
-                widget.description,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: AppColors.textMid,
-                  fontSize: 12,
-                  height: 1.6,
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Semantics(
+                label: widget.actionLabel,
+                child: Pressable(
+                  key: const ValueKey('wave-primary'),
+                  enabled: widget.enabled && !widget.busy,
+                  onTap: widget.onPlay,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 12,
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          widget.playing
+                              ? Icons.pause_rounded
+                              : Icons.play_arrow_rounded,
+                          size: 48,
+                          color: AppColors.textHi,
+                        ),
+                        const SizedBox(width: 8),
+                        const Text(
+                          'my wave',
+                          style: TextStyle(
+                            fontSize: 44,
+                            height: 1.1,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: -1.8,
+                            color: AppColors.textHi,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
-            ),
-          ],
+              const SizedBox(height: 8),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 290),
+                child: Text(
+                  widget.description,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: AppColors.textMid,
+                    fontSize: 12,
+                    height: 1.6,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ],
     ),
@@ -153,14 +174,36 @@ class _WaveHeroState extends State<WaveHero>
 
 /// Paint-only animation: the controls and page never rebuild on a tick.
 class WaveRibbonPainter extends CustomPainter {
-  WaveRibbonPainter(this.phase) : super(repaint: phase);
+  WaveRibbonPainter(this.phase, {this.energy})
+    : super(repaint: Listenable.merge([phase, ?energy]));
   final Animation<double> phase;
+  final ValueListenable<double>? energy;
 
   @override
   void paint(Canvas canvas, Size size) {
     final centre = size.center(Offset.zero);
-    final radiusX = math.min(size.width * .24, 166.0);
-    final radiusY = size.height * .45;
+    // Reserve the worst-case displacement and three blur sigmas before
+    // applying energy. The same radii bound every ribbon, edge and highlight.
+    const maximumResponse = 1.12;
+    const outerEdge = 8.0;
+    const blurSigma = 8.0;
+    const drift = 5.0;
+    const crossing = 13.0;
+    const halfRibbon = 11.5;
+    const halfStroke = .85;
+    const inset =
+        outerEdge + 3 * blurSigma + drift + crossing + halfRibbon + halfStroke;
+    final response = 1 + (energy?.value ?? 0).clamp(0.0, 1.0) * .12;
+    final availableX = math.max(0.0, size.width / 2 - inset);
+    final availableY = math.max(0.0, size.height / 2 - inset);
+    final radiusX =
+        math.min(
+          math.min(size.width * .24, 166.0),
+          availableX / maximumResponse,
+        ) *
+        response;
+    final radiusY =
+        math.min(size.height * .45, availableY / maximumResponse) * response;
     final time = phase.value * math.pi * 2;
     final bounds = Rect.fromCenter(
       center: centre,
@@ -253,10 +296,21 @@ class WaveRibbonPainter extends CustomPainter {
       _smoothLine(edge),
       Paint()
         ..style = PaintingStyle.stroke
-        ..strokeWidth = layer == 0 ? 1.1 : .7
+        ..strokeWidth =
+            (layer == 0 ? 1.1 : .7) * (1 + (energy?.value ?? 0) * .16)
         ..shader = edgeShader,
     );
     if (lower && layer == 0) {
+      // Four edge paths plus the highlight become six threads (+20%).
+      // This tracer follows the existing inner contour, inside the same
+      // halfRibbon/halfStroke bounds, without adding another blurred body.
+      canvas.drawPath(
+        _smoothLine(inner),
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = .7 * (1 + (energy?.value ?? 0) * .16)
+          ..shader = edgeShader,
+      );
       final highlight = edge.sublist(31, 46);
       canvas.drawPath(
         _smoothLine(highlight),
@@ -297,5 +351,5 @@ class WaveRibbonPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant WaveRibbonPainter oldDelegate) =>
-      oldDelegate.phase != phase;
+      oldDelegate.phase != phase || oldDelegate.energy != energy;
 }
