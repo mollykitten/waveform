@@ -21,6 +21,7 @@ import '../../shared/widgets/section_header.dart';
 import '../../shared/widgets/toast.dart';
 import '../../shared/widgets/view_toggle.dart';
 import '../auth/login_dialog.dart';
+import '../onboarding/onboarding_gate.dart';
 import '../recommendations/ai_settings_section.dart';
 
 /// Версия отображается в секции About; обновлять руками синхронно с pubspec.yaml.
@@ -68,6 +69,8 @@ class SettingsScreen extends ConsumerWidget {
             _CacheSection(),
             SizedBox(height: 28),
             _LogsSection(),
+            SizedBox(height: 28),
+            _OnboardingSection(),
             SizedBox(height: 28),
             _AboutSection(),
           ],
@@ -654,6 +657,33 @@ class _LogsSection extends StatelessWidget {
             ),
           ),
           _Button(label: 'open', onTap: () => context.push('/logs')),
+        ],
+      ),
+    );
+  }
+}
+
+class _OnboardingSection extends ConsumerWidget {
+  const _OnboardingSection();
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return _Section(
+      title: 'onboarding',
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              'replay the first-run tour',
+              style: AppTheme.mono(size: 12, color: AppColors.textMid),
+            ),
+          ),
+          _Button(
+            label: 'show onboarding again',
+            onTap: () {
+              ref.read(onboardingGateProvider).reset();
+              context.go('/welcome');
+            },
+          ),
         ],
       ),
     );
