@@ -12,14 +12,21 @@ import 'vector_engine.dart';
 /// One bounded batch from genuine SoundCloud tracks, ranked locally for the
 /// personal wave or selected by the configured model for mood discovery.
 class RecommendationService {
-  const RecommendationService({
+  RecommendationService({
     required this.api,
     required this.client,
     this.vectorEngine,
+    this.onWarning,
   });
   final SoundcloudApi api;
   final AiClient client;
   final VectorEngine? vectorEngine;
+
+  /// Receives non-fatal notes, e.g. a partial likes load.
+  final void Function(String message)? onWarning;
+
+  /// Likes beyond 50 x this many pages are not excluded (known limit: 2000).
+  static const maxLikePages = 40;
 
   Future<List<Recommendation>> generate({
     required AiConfig config,
@@ -30,8 +37,12 @@ class RecommendationService {
     required CancelToken cancelToken,
     Track? currentTrack,
     Set<String> excludedTrackIds = const {},
+
+    /// Used by the local engine only; never sent to a model.
+    Set<String> localExcludedTrackIds = const {},
     String? listeningIdentity,
     void Function()? checkCurrent,
+    int limit = 10,
   }) async {
     final requestMood = validatedMood(mood);
     if (!config.isValid ||
@@ -45,20 +56,43 @@ class RecommendationService {
     }
 
     check();
-    final seeds = <Track>[];
-    if (currentTrack != null) seeds.add(currentTrack);
+    final likedIds = <String>{};
+    final localSeeds = <String, Track>{};
+    final modelSeeds = <String, Track>{};
+    void addSeeds(Iterable<Track> tracks, Map<String, Track> into, int cap) {
+      for (final track in tracks) {
+        if (into.length >= cap) break;
+        into.putIfAbsent(track.id, () => track);
+      }
+    }
+
+    if (currentTrack != null) {
+      addSeeds([currentTrack], localSeeds, 30);
+      addSeeds([currentTrack], modelSeeds, 20);
+    }
     if (useListening) {
       try {
         final likes = await api
-            .likesPage(limit: 10)
+            .likesPage(limit: 50)
             .timeout(const Duration(seconds: 25));
         check();
-        seeds.addAll(likes.tracks.take(10));
+        likedIds.addAll(likes.tracks.map((t) => t.id));
+        // The model sees 10 likes and 10 plays, as before; the local engine
+        // rotates among a wider list that never leaves the device.
+        addSeeds(likes.tracks.take(20), localSeeds, 30);
+        addSeeds(likes.tracks.take(10), modelSeeds, 20);
         final history = await api
             .historyPage(limit: 10)
             .timeout(const Duration(seconds: 25));
         check();
-        seeds.addAll(history.take(10));
+        addSeeds(history.take(10), localSeeds, 30);
+        addSeeds(history.take(10), modelSeeds, 20);
+        await _drainLikes(
+          listeningIdentity ?? 'anonymous',
+          likes.nextHref,
+          likedIds,
+          check,
+        );
       } on AiFailure {
         rethrow;
       } catch (_) {
@@ -66,11 +100,7 @@ class RecommendationService {
       }
     }
     check();
-    final uniqueSeeds = <String, Track>{};
-    for (final track in seeds) {
-      uniqueSeeds.putIfAbsent(track.id, () => track);
-      if (uniqueSeeds.length == 20) break;
-    }
+    final uniqueSeeds = modelSeeds;
     if (requestMood.isEmpty && uniqueSeeds.isEmpty) {
       throw AiFailure.configuration;
     }
@@ -79,13 +109,21 @@ class RecommendationService {
         vectorEngine != null &&
         listeningIdentity != null) {
       final local = await vectorEngine!.generate(
-        seeds: uniqueSeeds.values.toList(),
+        seeds: localSeeds.values.toList(),
         identity: listeningIdentity,
-        excludedTrackIds: excludedTrackIds,
+        excludedTrackIds: {
+          ...excludedTrackIds,
+          ...localExcludedTrackIds,
+          ...likedIds,
+        },
         check: check,
+        limit: limit,
       );
       check();
       if (local.isNotEmpty) return local;
+      // The local mode promises no model call: never fall back to the cloud
+      // with listening metadata when the user gave no mood.
+      throw AiFailure.noTracks;
     }
     final context = {
       'mood': requestMood,
@@ -115,6 +153,14 @@ class RecommendationService {
     );
     check();
     final queries = parseSearchPlan(plan);
+    // Local-only filters: never sent to the model, applied to its candidates.
+    final remembered = {
+      ...localExcludedTrackIds,
+      ...likedIds,
+      if (useListening && vectorEngine != null && listeningIdentity != null)
+        ...await vectorEngine!.memoryExclusions(listeningIdentity),
+    };
+    check();
     final candidates = <String, Track>{};
     for (final query in queries) {
       try {
@@ -125,6 +171,7 @@ class RecommendationService {
         for (final track in result.tracks.take(40)) {
           if (_eligible(track) &&
               !excludedTrackIds.contains(track.id) &&
+              !remembered.contains(track.id) &&
               candidates.length < 40) {
             candidates.putIfAbsent(track.id, () => track);
           }
@@ -162,6 +209,59 @@ class RecommendationService {
     final result = parseRanking(rank, candidates.values.toList());
     if (result.isEmpty) throw AiFailure.noTracks;
     return result;
+  }
+
+  final _likesCache = <String, ({Set<String> ids, DateTime expires})>{};
+
+  /// Collect the remaining liked ids for exclusion: at most [maxLikePages]
+  /// pages and ten seconds overall. A full set is reused for 15 minutes and a
+  /// partial one for 2, so refills do not repeat the walk. A timeout stops
+  /// the loop; late pages are never added afterwards.
+  Future<void> _drainLikes(
+    String key,
+    String? cursor,
+    Set<String> into,
+    void Function() check,
+  ) async {
+    final cached = _likesCache[key];
+    if (cached != null && cached.expires.isAfter(DateTime.now())) {
+      into.addAll(cached.ids);
+      return;
+    }
+    final drained = <String>{};
+    var stopped = false;
+    var complete = true;
+    Future<void> pages() async {
+      var next = cursor;
+      for (var page = 1; next != null && page < maxLikePages; page++) {
+        if (stopped) return;
+        final result = await api.likesPage(nextHref: next, limit: 50);
+        if (stopped) return;
+        check();
+        drained.addAll(result.tracks.map((t) => t.id));
+        next = result.tracks.isEmpty ? null : result.nextHref;
+      }
+      // Running out of pages at the cap leaves older likes unknown.
+      if (next != null) complete = false;
+    }
+
+    try {
+      await pages().timeout(const Duration(seconds: 10));
+    } on AiFailure {
+      stopped = true;
+      rethrow;
+    } catch (error) {
+      stopped = true;
+      complete = false;
+      onWarning?.call('liked tracks only partly loaded: ${error.runtimeType}');
+    }
+    into.addAll(drained);
+    _likesCache[key] = (
+      ids: Set.of(drained),
+      expires: DateTime.now().add(
+        complete ? const Duration(minutes: 15) : const Duration(minutes: 2),
+      ),
+    );
   }
 
   bool _eligible(Track track) =>
