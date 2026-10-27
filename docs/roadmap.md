@@ -1,7 +1,7 @@
 # roadmap
 
 status as of 2026-10-27. implemented means present in source;
-it does not mean released or verified with a live subscribed account.
+it does not mean released or verified on a clean machine.
 
 ## implemented
 
@@ -10,11 +10,9 @@ it does not mean released or verified with a live subscribed account.
   VoiceOver audit is still pending.
 - macOS output selection and the system AirPlay picker. physical receiver
   playback still needs validation.
-- model-assisted recommendations grounded in real SoundCloud search results,
-  with bounded requests, candidate allowlists and explicit metadata consent.
-- the my wave presentation, compact mood controls and separate model settings.
-- ChatGPT browser connection with PKCE, signed identity checks and OS secure
-  storage; custom OpenAI-compatible and Ollama providers remain available.
+- the my wave presentation: one play action, no model settings. the model
+  route (ChatGPT connection, custom providers, mood field, metadata consent)
+  was removed after the pilots below; see [my-wave.md](my-wave.md).
 - a continuous wave controller that refills the queue outside the screen and
   guards against stale results replacing music chosen by the user.
 - independent review of the combined auth, UI, player and audio-engine changes;
@@ -29,16 +27,14 @@ it does not mean released or verified with a live subscribed account.
   SoundCloud identity. ranking includes diversity and exploration.
 
 these vectors describe graph relationships. neural audio embeddings, a server
-catalog index and cross-device profile sync are **not implemented**. a valid
-local pool needs no model call; cold start, an empty graph and an explicit mood
-use the model-assisted path. this is not an index of the whole SoundCloud catalog.
+catalog index and cross-device profile sync are **not implemented**. my wave
+runs entirely on this device and makes no model call. this is not an index of
+the whole SoundCloud catalog.
 
 ## before shipping this work
 
-- verify interactive ChatGPT OAuth with an eligible account, subscription access
-  to inference, native Keychain persistence, restart, refresh and logout.
-- exercise generation, one-time bound consent, account/destination changes,
-  cancellation and uninterrupted playback/refill on the owned native runtime.
+- exercise generation, account changes, cancellation and uninterrupted
+  playback/refill on the owned native runtime.
 - compare recommendation quality with the graph baseline, including cold start,
   repeated tracks, skipped tracks and a limited candidate pool. passing unit
   tests does not establish musical quality.
@@ -117,7 +113,7 @@ this replaces the earlier plan for audio embeddings and a vector backend. it
 starts after v0.4.0 ships (horizon 0). each stage needs evidence before the
 next starts.
 
-1. **candidate sources.** add co-liker CF (bounded: 50 likers per seed, at
+1. **candidate sources.** (in progress) add co-liker CF (bounded: 50 likers per seed, at
    least two shared seeds, 200 recent likes per neighbour, a neighbour cap) and
    the authenticated home stream next to the related graph. run them as a
    background job with an on-disk cache and incremental refresh, never on the
@@ -138,13 +134,8 @@ next starts.
    local fallback, quality, latency and cost gates, redacted metrics and
    rollout/rollback controls.
 
-ChatGPT subscription access in the desktop app does not fund or authorize any
-backend inference. backend compute, storage, model licensing and any paid
-inference API need their own budget and access arrangements.
-
-authentication follow-ups: distinguish policy-related HTTP 403 responses from
-credential expiry, and review secure-storage cleanup after a terminal refresh
-rejection. these do not replace the pending live OAuth checks.
+backend compute, storage, model licensing and any paid inference API would
+need their own budget and access arrangements.
 
 ## platform parity and later features
 
@@ -156,4 +147,4 @@ rejection. these do not replace the pending live OAuth checks.
 - lyrics with a permitted external source, drag between playlists, and an
   always-on-top mini player.
 - official SoundCloud OAuth 2.1 + PKCE if application registration becomes
-  available. this is separate from the implemented ChatGPT connection.
+  available.
