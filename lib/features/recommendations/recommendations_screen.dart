@@ -86,8 +86,15 @@ class _RecommendationsScreenState extends ConsumerState<RecommendationsScreen> {
         wave.active &&
         playback.track != null &&
         result.items.any((item) => item.track.id == playback.track!.id);
-    final queue = ownsPlayback
-        ? [playback.track!, ...player.upcomingTracks]
+    final picked = {for (final item in result.items) item.track.id};
+    // Played tracks drop off even when the wave gave up refilling and is no
+    // longer active: as long as the player is inside this result, show only
+    // what is playing and what is still ahead.
+    final queue = picked.contains(playback.track?.id)
+        ? [
+            playback.track!,
+            ...player.upcomingTracks.where((t) => picked.contains(t.id)),
+          ]
         : result.items.map((item) => item.track).toList();
     final reasons = {
       for (final item in result.items) item.track.id: item.reason,
