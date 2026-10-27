@@ -62,6 +62,22 @@ void main() {
       },
     );
 
+    test('a read during an in-flight write cannot break it', () async {
+      final gate = Completer<void>();
+      final store = TokenStore(
+        directory: () async => dir,
+        chmod: (_) => gate.future,
+      );
+      final write = store.write('secret');
+      final read = store.read();
+      await pumpEventQueue();
+      gate.complete();
+
+      await write;
+      expect(await read, 'secret');
+      expect(await store.read(), 'secret');
+    });
+
     test('a failed rename leaves no temp file behind', () async {
       // Target is a directory: rename over it fails.
       Directory('${dir.path}/blocked').createSync();

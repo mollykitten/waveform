@@ -604,8 +604,11 @@ class ChatGptAuth {
         );
         final code = response.statusCode ?? 0;
         if (code == 200) return _Revocation.revoked;
-        // 4xx will not change on retry; 5xx and anything else might.
-        if (code >= 400 && code < 500) return _Revocation.rejected;
+        // Most 4xx will not change on retry; 408/429 are transient, and 5xx
+        // and anything else might recover too.
+        if (code >= 400 && code < 500 && code != 408 && code != 429) {
+          return _Revocation.rejected;
+        }
       } catch (_) {
         // Retry transient transport failures once.
       }
