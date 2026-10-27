@@ -11,10 +11,10 @@ import '../../../shared/format.dart';
 import '../../../shared/models/track.dart';
 import '../../../shared/url_share.dart';
 import '../../../shared/widgets/cover_art.dart';
+import '../../../shared/widgets/live_waveform.dart';
 import '../../../shared/widgets/pressable.dart';
 import '../../../shared/widgets/toast.dart';
 import '../../recommendations/wave_controller.dart';
-import '../../../shared/widgets/live_waveform.dart';
 import '../player_controller.dart';
 import '../player_ui_state.dart';
 import 'audio_output_picker.dart';
@@ -194,19 +194,19 @@ class BottomPlayer extends ConsumerWidget {
   }
 }
 
-/// Copies the playing track, independently of the current page's context link.
 /// Dislike the wave track, skip it, and offer a short window to take it back.
 Future<void> _dislikeCurrent(BuildContext context, WidgetRef ref) async {
   final wave = ref.read(waveControllerProvider.notifier);
-  final track = await wave.dislikeCurrent();
-  if (track == null || !context.mounted) return;
+  final dislike = await wave.dislikeCurrent();
+  if (dislike == null || !context.mounted) return;
   showToast(
     context,
     "won't suggest this again",
-    action: (label: 'undo', onTap: () => wave.undoDislike(track)),
+    action: (label: 'undo', onTap: () => wave.undoDislike(dislike)),
   );
 }
 
+/// Copies the playing track, independently of the current page's context link.
 class _CopyLinkButton extends ConsumerWidget {
   const _CopyLinkButton();
 

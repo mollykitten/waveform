@@ -10,6 +10,7 @@ import 'package:waveform_app/core/api/soundcloud_auth.dart';
 import 'package:waveform_app/core/log/talker.dart';
 import 'package:waveform_app/core/recommendations/ai_client.dart';
 import 'package:waveform_app/core/recommendations/listening_store.dart';
+import 'package:waveform_app/core/recommendations/listening_providers.dart';
 import 'package:waveform_app/core/recommendations/models.dart';
 import 'package:waveform_app/core/recommendations/providers.dart';
 import 'package:waveform_app/core/recommendations/recommendation_service.dart';
@@ -49,6 +50,7 @@ class PagedLikesApi extends TestSoundcloud {
 typedef VoidCallback = void Function();
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   late Directory directory;
   late PagedLikesApi api;
   late ScriptedAi client;
@@ -190,21 +192,28 @@ void main() {
           return auth.isAuthenticated ? '42' : 'anonymous';
         }),
         seenStoreProvider.overrideWithValue(seen),
+        listeningStoreProvider.overrideWithValue(
+          ListeningStore(directory: () async => directory),
+        ),
         soundcloudApiProvider.overrideWithValue(api),
         talkerProvider.overrideWithValue(Talker()),
       ],
     );
     addTearDown(container.dispose);
-    container.read(recommendationsProvider);
+    // AppShell reads this provider; the recommendations screen is never opened.
+    container.read(listeningFeedbackProvider);
     container.read(authControllerProvider.notifier).signIn('2-token');
-    await container.read(aiListeningIdentityProvider.future);
+    expect(await container.read(listeningPartitionProvider.future), '42');
     await seen.record('42', SeenKind.played, ['a'], DateTime.now());
     final base = '${directory.path}/seen-tracks-v1-42.json';
     File('$base.bak').writeAsStringSync('x');
     expect(File(base).existsSync(), isTrue);
 
     container.read(authControllerProvider.notifier).signOut();
-    await container.read(aiListeningIdentityProvider.future);
+    expect(
+      await container.read(listeningPartitionProvider.future),
+      'anonymous',
+    );
     await pumpEventQueue();
     await seen.read('42');
     expect(File(base).existsSync(), isFalse);

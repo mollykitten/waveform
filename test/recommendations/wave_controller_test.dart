@@ -14,6 +14,7 @@ import 'package:waveform_app/core/audio/audio_engine.dart';
 import 'package:waveform_app/core/log/talker.dart';
 import 'package:waveform_app/core/recommendations/ai_config.dart';
 import 'package:waveform_app/core/recommendations/ai_client.dart';
+import 'package:waveform_app/core/recommendations/listening_event.dart';
 import 'package:waveform_app/core/recommendations/models.dart';
 import 'package:waveform_app/core/recommendations/recommendation_service.dart';
 import 'package:waveform_app/core/recommendations/seen_store.dart';
@@ -94,6 +95,7 @@ void main() {
   ProviderContainer containerWith(
     RecommendationService service, {
     SeenStore? seen,
+    String identity = '42',
   }) {
     final other = ProviderContainer(
       overrides: [
@@ -102,7 +104,7 @@ void main() {
           (ref, notifier) => const SoundcloudAuth(clientId: 'test'),
         ),
         aiSettingsProvider.overrideWith(() => settings),
-        aiListeningIdentityProvider.overrideWith((ref) async => '42'),
+        aiListeningIdentityProvider.overrideWith((ref) async => identity),
         aiClientProvider.overrideWithValue(client),
         recommendationServiceProvider.overrideWithValue(service),
         seenStoreProvider.overrideWithValue(
@@ -283,6 +285,78 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  group('dislike races', () {
+    late MemorySeenStore memory;
+    late ProviderContainer wave;
+    late WaveController controller;
+    late PlayerController player;
+    Future<void> setUpWave({String identity = '42'}) async {
+      memory = MemorySeenStore();
+      wave = containerWith(
+        PoolService(api, client),
+        seen: memory,
+        identity: identity,
+      );
+      controller = wave.read(waveControllerProvider.notifier);
+      await controller.start('');
+      await wave.read(aiListeningIdentityProvider.future);
+      player = wave.read(playerControllerProvider.notifier);
+    }
+
+    String? current() => wave.read(playerControllerProvider).track?.id;
+
+    test('a double tap dislikes once and skips once', () async {
+      await setUpWave();
+      memory.gate = Completer<void>();
+      final first = controller.dislikeCurrent();
+      final second = controller.dislikeCurrent();
+      expect(await second, isNull);
+      memory.gate!.complete();
+      expect((await first)?.track.id, 't1');
+      expect(current(), 't2');
+      expect(memory.disliked, ['t1']);
+    });
+
+    test('a track change during the write is not skipped', () async {
+      await setUpWave();
+      memory.gate = Completer<void>();
+      final pending = controller.dislikeCurrent();
+      player.next();
+      expect(current(), 't2');
+      memory.gate!.complete();
+      final done = await pending;
+      expect(done?.track.id, 't1');
+      expect(memory.kinds['t1'], SeenKind.disliked);
+      expect(current(), 't2');
+    });
+
+    test('the skip carries the neutral dislike cause', () async {
+      await setUpWave();
+      await controller.dislikeCurrent();
+      expect(
+        wave.read(playerControllerProvider).transitionCause,
+        ListeningTransitionCause.dislike,
+      );
+    });
+
+    test('anonymous accounts get no button and no dislike', () async {
+      await setUpWave(identity: 'anonymous');
+      await wave.read(aiListeningIdentityProvider.future);
+      expect(wave.read(currentTrackInWaveProvider), isFalse);
+      expect(await controller.dislikeCurrent(), isNull);
+      expect(memory.disliked, isEmpty);
+    });
+
+    test('undo uses the identity captured at dislike time', () async {
+      await setUpWave();
+      final done = (await controller.dislikeCurrent())!;
+      expect(done.identity, '42');
+      await controller.undoDislike(done);
+      expect(memory.undone, [('42', 't1')]);
+      expect(memory.disliked, isEmpty);
+    });
+  });
+
   for (final change in ['disconnect', 'config', 'logout', 'cancel']) {
     test(
       '$change aborts a pending refill and does not change the queue',
@@ -365,6 +439,15 @@ class PoolService extends RecommendationService {
 /// In-memory stand-in so widget tests need no file IO.
 class MemorySeenStore extends SeenStore {
   final kinds = <String, SeenKind>{};
+  final undone = <(String, String)>[];
+
+  List<String> get disliked => [
+    for (final e in kinds.entries)
+      if (e.value == SeenKind.disliked) e.key,
+  ];
+
+  /// When set, dislike writes wait for it.
+  Completer<void>? gate;
 
   @override
   Future<void> dislike(
@@ -372,11 +455,16 @@ class MemorySeenStore extends SeenStore {
     String trackId,
     String artist,
     DateTime at,
-  ) async => kinds[trackId] = SeenKind.disliked;
+  ) async {
+    await gate?.future;
+    kinds[trackId] = SeenKind.disliked;
+  }
 
   @override
-  Future<void> undislike(String identity, String trackId) async =>
-      kinds.remove(trackId);
+  Future<void> undislike(String identity, String trackId) async {
+    undone.add((identity, trackId));
+    kinds.remove(trackId);
+  }
 
   @override
   Future<void> record(

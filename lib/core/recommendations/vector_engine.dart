@@ -209,13 +209,16 @@ class VectorEngine {
       if (seen != null) ...await _syncSeen(events, identity, now),
     };
     check();
-    final dislikes = [
+    // Every dislike keeps its track out of the seeds; only the newest few
+    // shape the ranking, because edge provenance lives 90 days.
+    final allDislikes = [
       if (seen != null)
-        for (final row in await seen!.dislikes(identity, maxDislikes))
+        for (final row in await seen!.dislikes(identity, 500))
           VectorDislike(row.id, row.at, row.artist),
     ];
     check();
-    final blocked = {for (final dislike in dislikes) dislike.trackId};
+    final blocked = {for (final dislike in allDislikes) dislike.trackId};
+    final dislikes = allDislikes.take(maxDislikes).toList();
     final uses = _useByIdentity.putIfAbsent(identity, () => {});
     final picked = _pickSeeds(seeds, events, identity, uses, blocked);
     if (picked.isEmpty) return [];

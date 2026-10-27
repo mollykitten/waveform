@@ -852,6 +852,14 @@ void main() {
       Future<void> dislike(String id, {String artist = 'bad', int mins = 0}) =>
           seen.dislike('1', id, artist, now.add(Duration(minutes: mins)));
 
+      Future<List<Recommendation>> value(VectorEngine v, List<Track> seeds) =>
+          v.generate(
+            seeds: seeds,
+            identity: '1',
+            excludedTrackIds: {},
+            check: () {},
+          );
+
       Future<List<Recommendation>> two(VectorEngine value) => value.generate(
         seeds: [
           realTrack('sA', artist: 'artist a'),
@@ -968,6 +976,82 @@ void main() {
           expect(sent, isNot(contains('dislike')));
         },
       );
+
+      test(
+        'the dislike transition is neutral: no skip, no play, no double count',
+        () async {
+          api.tracks = [];
+          api.neighborhoods['s'] = [
+            realTrack('d', artist: 'bad'),
+            realTrack('ok', artist: 'good'),
+          ];
+          // a short dislike-skip would be a -1.5 skip, a long one a positive play
+          await facts.append(
+            event(
+              'd',
+              session: 'short',
+              heard: 10000,
+              cause: ListeningTransitionCause.dislike,
+            ),
+          );
+          await facts.append(
+            event(
+              'd',
+              session: 'long',
+              heard: 100000,
+              cause: ListeningTransitionCause.dislike,
+            ),
+          );
+          for (final e in await facts.read('1')) {
+            expect(e.evidence, ListeningEvidence.neutral);
+          }
+          await dislike('d');
+          await run(engine);
+          final kinds = await seen.read('1');
+          expect(kinds['d']!.kind, SeenKind.disliked);
+          // undo leaves no skipped/played residue behind
+          await seen.undislike('1', 'd');
+          expect(await seen.read('1'), isNot(contains('d')));
+          await run(engine);
+          expect(await seen.read('1'), isNot(contains('d')));
+          expect(ids(await run(engine)).toSet(), {'d', 'ok'});
+          final plain = engine.interests(['s'], {}, await facts.read('1'), '1');
+          expect(plain.single.support, 1.0);
+        },
+      );
+
+      test('an old dislike stays excluded and never becomes a seed', () async {
+        api.tracks = [];
+        api.neighborhoods['d'] = [realTrack('viaD', artist: 'v')];
+        api.neighborhoods['s'] = [realTrack('ok', artist: 'good')];
+        await facts.append(event('d', session: 'old', daysAgo: 3));
+        await dislike('d');
+        // many newer dislikes push d out of the ranking window
+        for (var i = 0; i < 30; i++) {
+          await dislike('n$i', artist: 'a$i', mins: i + 1);
+        }
+        final result = await value(engine, [
+          realTrack('s', artist: 'sa'),
+          realTrack('d', artist: 'bad'),
+        ]);
+        expect(ids(result), ['ok']);
+        expect(api.relatedCalls, isNot(contains('d')));
+        expect((await seen.read('1'))['d']!.kind, SeenKind.disliked);
+      });
+
+      test('the penalty changes the order using real provenance', () async {
+        api.tracks = [];
+        api.neighborhoods['sA'] = [
+          realTrack('d', artist: 'u'),
+          realTrack('aa', artist: 'x1'),
+        ];
+        api.neighborhoods['sB'] = [realTrack('cb', artist: 'x2')];
+        final first = ids(await two(engine));
+        expect(first.toSet(), {'d', 'aa', 'cb'});
+        await dislike('d', artist: 'unrelated');
+        // d now has stored provenance {sA}; its siblings under sA sink
+        expect(ids(await two(engine)), ['cb', 'aa']);
+      });
 
       test('dislikes outlast ordinary entries under the size limit', () async {
         final tiny = SeenStore(directory: () async => directory, maxRecords: 3);

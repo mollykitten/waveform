@@ -5,11 +5,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/api/soundcloud_auth.dart';
 import '../../core/recommendations/ai_client.dart';
 import '../../core/recommendations/ai_config.dart';
+import '../../core/recommendations/listening_event.dart';
 import '../../core/recommendations/models.dart';
 import '../../core/recommendations/providers.dart';
 import '../../core/recommendations/seen_store.dart';
 import '../../shared/models/track.dart';
 import '../player/player_controller.dart';
+
+/// A stored dislike: the account it belongs to and the track.
+typedef WaveDislike = ({String identity, Track track});
 
 class WaveState {
   const WaveState({this.active = false, this.discovering = false});
@@ -258,23 +262,39 @@ class WaveController extends Notifier<WaveState> {
     } finally {
       _mutatingQueue = false;
     }
-    final identity = ref.read(aiListeningIdentityProvider).asData?.value;
-    if (identity != null) {
-      unawaited(_markShown(identity, ids.where(_ids.contains).toList()));
-    }
+    unawaited(_markShown(ids.where(_ids.contains).toList()));
   }
 
   /// Only tracks really put in the queue get the "shown" cooldown; spare
   /// candidates stay in the pool untouched.
-  Future<void> _markShown(String identity, List<String> ids) async {
-    if (identity == 'anonymous' || ids.isEmpty) return;
+  Future<void> _markShown(List<String> ids) async {
+    if (ids.isEmpty) return;
     try {
+      final identity = await _stableIdentity();
+      if (identity == null) return;
       await ref
           .read(seenStoreProvider)
           .record(identity, SeenKind.shown, ids, DateTime.now());
     } catch (_) {
       // Memory is best effort; the queue itself is already correct.
     }
+  }
+
+  /// The verified identity of the account active right now, or null when it
+  /// is anonymous or the account changed while it was being resolved. The
+  /// auth token is captured before the first await.
+  Future<String?> _stableIdentity() async {
+    final token = ref.read(authControllerProvider).userToken;
+    final provider = ref.read(aiListeningIdentityProvider);
+    final identity =
+        provider.asData?.value ??
+        await ref.read(aiListeningIdentityProvider.future);
+    if (_disposed ||
+        ref.read(authControllerProvider).userToken != token ||
+        identity == 'anonymous') {
+      return null;
+    }
+    return identity;
   }
 
   void _prefetchIfLow(int epoch) {
@@ -290,33 +310,46 @@ class WaveController extends Notifier<WaveState> {
   /// Whether [trackId] was queued by the active wave.
   bool ownsTrack(String trackId) => state.active && _ids.contains(trackId);
 
-  /// Thumbs-down on the playing wave track: remember it for this account (id
-  /// and artist handle, locally only), then move on. Returns the track, or
-  /// null when nothing was disliked.
-  Future<Track?> dislikeCurrent() async {
+  bool _dislikeBusy = false;
+
+  /// Thumbs-down on the playing wave track: remember it for the active
+  /// account (id and artist handle, locally only), then move on. A second tap
+  /// while the first is being stored is ignored, and the player only skips if
+  /// the same track is still playing once the write is done. Returns what is
+  /// needed to undo, or null when nothing was disliked.
+  Future<WaveDislike?> dislikeCurrent() async {
     final track = ref.read(playerControllerProvider).track;
-    if (track == null || !ownsTrack(track.id)) return null;
+    if (_dislikeBusy || track == null || !ownsTrack(track.id)) return null;
+    _dislikeBusy = true;
     try {
-      final identity = await ref.read(aiListeningIdentityProvider.future);
-      if (identity == 'anonymous') return null;
+      final identity = await _stableIdentity();
+      if (identity == null) return null;
       await ref
           .read(seenStoreProvider)
           .dislike(identity, track.id, track.artistHandle, DateTime.now());
+      if (_disposed) return null;
+      if (ref.read(playerControllerProvider).track?.id == track.id &&
+          ownsTrack(track.id)) {
+        ref
+            .read(playerControllerProvider.notifier)
+            .next(reason: ListeningTransitionCause.dislike);
+      }
+      return (identity: identity, track: track);
     } catch (_) {
       return null;
+    } finally {
+      _dislikeBusy = false;
     }
-    if (_disposed) return null;
-    ref.read(playerControllerProvider.notifier).next();
-    return track;
   }
 
-  /// Take back a dislike made moments ago.
-  Future<void> undoDislike(Track track) async {
+  /// Take back a dislike for the account it was made under.
+  Future<void> undoDislike(WaveDislike dislike) async {
     try {
-      final identity = await ref.read(aiListeningIdentityProvider.future);
-      await ref.read(seenStoreProvider).undislike(identity, track.id);
+      await ref
+          .read(seenStoreProvider)
+          .undislike(dislike.identity, dislike.track.id);
     } catch (_) {
-      // Nothing was stored for an unknown identity.
+      // Nothing to undo if the memory is unavailable.
     }
   }
 
@@ -339,9 +372,12 @@ final waveRetryDelayProvider = Provider<Duration>(
   (ref) => const Duration(seconds: 4),
 );
 
-/// True while the playing track was queued by the active wave.
+/// True while the playing track was queued by the active wave and a verified
+/// account exists to remember a dislike under.
 final currentTrackInWaveProvider = Provider<bool>((ref) {
   ref.watch(waveControllerProvider);
+  final identity = ref.watch(aiListeningIdentityProvider).asData?.value;
+  if (identity == null || identity == 'anonymous') return false;
   final id = ref.watch(playerControllerProvider.select((p) => p.track?.id));
   return id != null && ref.read(waveControllerProvider.notifier).ownsTrack(id);
 });

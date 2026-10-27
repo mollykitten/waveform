@@ -79,7 +79,19 @@ final listeningFeedbackProvider = Provider<void>((ref) {
       tracker.setIdentity(null);
     }
   });
+  // Logging out drops that account's seen memory; switching accounts keeps
+  // each one's file so A -> B -> A loses nothing. Lives here because
+  // AppShell always reads this provider, unlike the recommendations screen.
+  String? knownIdentity;
   ref.listen(listeningPartitionProvider, (_, next) {
+    final identity = next.asData?.value;
+    if (identity != null) {
+      final was = knownIdentity;
+      knownIdentity = identity == 'anonymous' ? null : identity;
+      if (was != null && identity == 'anonymous') {
+        unawaited(ref.read(seenStoreProvider).forget(was));
+      }
+    }
     tracker.setIdentity(
       next.isLoading || next.hasError ? null : next.asData?.value,
     );
