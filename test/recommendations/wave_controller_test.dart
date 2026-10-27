@@ -463,6 +463,35 @@ void main() {
       expect(player.upcomingTracks.length, before);
     });
 
+    test('a failed new wave never replays the previous wave results', () async {
+      memory = MemorySeenStore();
+      final service = PoolService(api, client)..scripted = [4];
+      wave = containerWith(service, seen: memory);
+      controller = wave.read(waveControllerProvider.notifier);
+      player = wave.read(playerControllerProvider.notifier);
+      await controller.start('');
+      player.next();
+      expect(current(), 't2');
+      // the next wave's searches fail, leaving earlier items behind
+      service.failure = AiFailure.network;
+      await controller.start('');
+      expect(wave.read(waveControllerProvider).active, isFalse);
+      expect(wave.read(recommendationsProvider).items, isEmpty);
+      expect(wave.read(recommendationsProvider).error, AiFailure.network);
+      expect(current(), 't2');
+    });
+
+    test('a disliked track cannot come back when the queue wraps', () async {
+      await setUpWave();
+      await controller.dislikeCurrent();
+      final played = <String?>[];
+      for (var i = 0; i < 25; i++) {
+        player.next();
+        played.add(current());
+      }
+      expect(played, isNot(contains('t1')));
+    });
+
     test('anonymous accounts get no button and no dislike', () async {
       await setUpWave(identity: 'anonymous');
       await wave.read(aiListeningIdentityProvider.future);

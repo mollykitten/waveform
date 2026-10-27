@@ -113,6 +113,7 @@ class WaveController extends Notifier<WaveState> {
     _mood = mood;
     _waveId++;
     _ids.clear();
+    ref.read(recommendationsProvider.notifier).clear();
     _startingQueueVersion = ref.read(playerControllerProvider).queueVersion;
     await _generate(append: false);
   }
@@ -352,6 +353,15 @@ class WaveController extends Notifier<WaveState> {
         } else {
           player.next(reason: ListeningTransitionCause.dislike);
           skipped = ref.read(playerControllerProvider).track?.id != track.id;
+          // Drop it from the queue too, or a wrap or reshuffle replays it.
+          if (skipped) {
+            _mutatingQueue = true;
+            try {
+              player.removeFromQueue(track.id);
+            } finally {
+              _mutatingQueue = false;
+            }
+          }
         }
       }
       return (identity: identity, track: track, saved: saved, skipped: skipped);
