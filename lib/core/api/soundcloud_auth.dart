@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:desktop_webview_window/desktop_webview_window.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../log/talker.dart';
@@ -31,56 +32,93 @@ class SoundcloudAuth {
   SoundcloudAuth signedOut() => SoundcloudAuth(clientId: clientId);
 }
 
+/// Хранилище пользовательского токена; тесты подменяют его на временный каталог.
+final tokenStoreProvider = Provider<TokenStore>((ref) => const TokenStore());
+
+/// Сбрасывает cookie/сторадж webview (сессия входа SoundCloud). Без этого после
+/// sign out окно входа открывается с живой сессией и молча логинит обратно.
+/// На macOS чистит `WKWebsiteDataStore.default()` (cookies + localStorage);
+/// на Windows/Linux нативный `clearAll` закрывает все окна плагина и сносит
+/// данные (Windows — ещё папку WebView2). Тесты подменяют провайдер.
+final webviewSessionClearerProvider = Provider<Future<void> Function()>(
+  (ref) =>
+      () => WebviewWindow.clearAll(),
+);
+
 class AuthController extends Notifier<SoundcloudAuth> {
-  static const _store = TokenStore();
+  TokenStore get _store => ref.read(tokenStoreProvider);
+
+  /// Операции хранилища идут одной цепочкой: write/delete/restore не
+  /// обгоняют друг друга.
+  Future<void> _tail = Future<void>.value();
+
+  /// Растёт при каждом signIn/signOut. `_restore` игнорирует результат чтения
+  /// диска, если за время чтения состояние уже менял пользователь.
+  int _generation = 0;
 
   @override
   SoundcloudAuth build() {
-    _restore();
+    unawaited(_restore());
     return const SoundcloudAuth();
+  }
+
+  Future<void> _enqueue(Future<void> Function() op) {
+    final run = _tail.then((_) => _safe(op));
+    _tail = run;
+    return run;
   }
 
   /// Подтягиваем сохранённый токен при старте (best-effort; в тестах плагина
   /// path_provider нет — глушим).
   Future<void> _restore() async {
-    try {
+    final generation = _generation;
+    await _enqueue(() async {
       final token = await _store.read();
+      if (generation != _generation) {
+        ref.read(talkerProvider).info('auth: restore skipped (state changed)');
+        return;
+      }
       if (token != null && token.isNotEmpty) {
         state = state.copyWith(userToken: token);
-        ref.read(talkerProvider).info('auth: restored token ${_mask(token)}');
+        ref.read(talkerProvider).info('auth: restored ${_describe(token)}');
       } else {
         ref.read(talkerProvider).info('auth: no stored token');
       }
-    } catch (e, st) {
-      // Видимая ошибка → проблема с keychain-entitlement/доступом, а не «нет токена».
-      ref.read(talkerProvider).warning('auth: restore failed', e, st);
-    }
+    });
   }
 
-  // Маскируем токен в логах: видно форму (`2-…` = пользовательский), не секрет.
-  String _mask(String t) => t.length <= 10
-      ? '***'
-      : '${t.substring(0, 6)}…${t.substring(t.length - 3)}';
+  // В логи — только тип и длину: ни префикс, ни хвост токена не светим.
+  String _describe(String t) => 'token (len ${t.length})';
 
   /// client_id добывается автоматически из веб-бандла (как в yt-dlp/FetchClientID).
   void setClientId(String id) => state = state.copyWith(clientId: id);
 
   /// Сохраняем токен после входа. Состояние ставим сразу; запись на диск —
-  /// детачем (не блокируем UI/тесты, где плагина path_provider нет).
-  void signIn(String userToken) {
+  /// в очереди (не блокируем UI/тесты, где плагина path_provider нет).
+  /// Возвращаемый Future завершается, когда токен записан.
+  Future<void> signIn(String userToken) {
+    _generation++;
     state = state.copyWith(userToken: userToken);
-    ref
-        .read(talkerProvider)
-        .info(
-          'auth: signIn token ${_mask(userToken)} (len ${userToken.length})',
-        );
-    unawaited(_safe(() => _store.write(userToken)));
+    ref.read(talkerProvider).info('auth: signIn ${_describe(userToken)}');
+    return _enqueue(() => _store.write(userToken));
   }
 
-  void signOut() {
+  /// Выход: токен из состояния и с диска, затем сброс сессии webview, чтобы
+  /// окно входа не залогинило обратно. Sync-webview (executor) пересоздаётся
+  /// провайдером сам: он следит за `isAuthenticated`.
+  Future<void> signOut() {
+    _generation++;
     ref.read(talkerProvider).info('auth: signOut');
     state = state.signedOut();
-    unawaited(_safe(() => _store.delete()));
+    final clear = ref.read(webviewSessionClearerProvider);
+    return _enqueue(() async {
+      try {
+        await _store.delete();
+      } finally {
+        // Чистим сессию webview даже если файл токена удалить не вышло.
+        await clear();
+      }
+    });
   }
 
   Future<void> _safe(Future<void> Function() op) async {

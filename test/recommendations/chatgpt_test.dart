@@ -557,6 +557,32 @@ void main() {
   );
 
   test(
+    'unconfirmed revocation is queued locally and retried on next launch',
+    () async {
+      await auth.signIn();
+      adapter.revokeFailures = 2;
+      expect(await auth.signOut(), isFalse);
+      final queued = jsonDecode(store.value!)['pending_revocations'] as List;
+      expect(queued, hasLength(1));
+      expect(queued.single['refresh_token'], 'REFRESH_SECRET_0');
+      int revokes() => adapter.requests
+          .where((request) => request.uri.path.endsWith('/revoke'))
+          .length;
+      final before = revokes();
+
+      final next = ChatGptAuth(
+        store: store,
+        dio: Dio()..httpClientAdapter = adapter,
+      );
+      addTearDown(next.close);
+      await next.retryPendingRevocations();
+
+      expect(revokes(), before + 1);
+      expect(jsonDecode(store.value!), isNot(contains('pending_revocations')));
+    },
+  );
+
+  test(
     'latest rotated tokens are persisted on retry after transient storage failure',
     () async {
       await auth.signIn();

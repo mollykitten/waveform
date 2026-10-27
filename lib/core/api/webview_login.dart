@@ -14,6 +14,13 @@ import 'package:desktop_webview_window/desktop_webview_window.dart';
 /// запрещает OAuth в embedded user-agent под контролем приложения. Не
 /// подменяем User-Agent и не обходим отказ провайдера; см. docs/research/
 /// google-sign-in-verification.md для ограничений и разрешённого пути.
+/// Точное сравнение домена cookie: `soundcloud.com` и его поддомены, без
+/// ведущей точки. `soundcloud.evil.com` не проходит.
+bool isSoundcloudDomain(String domain) {
+  final d = domain.toLowerCase().replaceFirst(RegExp(r'^\.+'), '');
+  return d == 'soundcloud.com' || d.endsWith('.soundcloud.com');
+}
+
 abstract final class WebviewLogin {
   static Future<bool> available() => WebviewWindow.isWebviewAvailable();
 
@@ -58,7 +65,7 @@ abstract final class WebviewLogin {
               (c) =>
                   c.name == 'oauth_token' &&
                   c.value.isNotEmpty &&
-                  c.domain.contains('soundcloud'),
+                  isSoundcloudDomain(c.domain),
             )
             .map((c) => c.value)
             .firstOrNull;
