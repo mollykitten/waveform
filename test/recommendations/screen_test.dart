@@ -175,6 +175,21 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets('played wave tracks leave the list', (tester) async {
+    await show(tester);
+    await play(tester);
+    expect(find.byKey(const ValueKey('wave-row-t1')), findsOneWidget);
+    container.read(playerControllerProvider.notifier).next();
+    await settle(tester);
+    expect(container.read(playerControllerProvider).track?.id, 't2');
+    // The refill found nothing and gave up, so the wave is inactive now.
+    expect(container.read(waveControllerProvider).active, isFalse);
+    expect(find.byKey(const ValueKey('wave-row-t1')), findsNothing);
+    expect(find.byKey(const ValueKey('wave-row-t2')), findsOneWidget);
+    container.read(waveControllerProvider.notifier).cancel();
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('a failure shows a safe retry and leaves the player alone', (
     tester,
   ) async {
