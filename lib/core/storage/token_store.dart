@@ -27,12 +27,25 @@ class TokenStore {
   /// есть, [read] не отдаёт токен и повторяет удаление.
   static const _markerSuffix = '.signed_out';
 
+  /// read/write/delete идут одной цепочкой на процесс: токен читают и вне
+  /// AuthController (listening_providers), а чтение чистит `.tmp` — оно не
+  /// должно задеть temp-файл идущей записи.
+  static Future<void> _tail = Future<void>.value();
+
+  Future<T> _serialize<T>(Future<T> Function() op) {
+    final run = _tail.then((_) => op());
+    _tail = run.then((_) {}, onError: (_) {});
+    return run;
+  }
+
   Future<File> _file() async {
     final dir = await (directory ?? getApplicationSupportDirectory)();
     return File('${dir.path}/$_fileName');
   }
 
-  Future<String?> read() async {
+  Future<String?> read() => _serialize(_read);
+
+  Future<String?> _read() async {
     final f = await _file();
     final marker = File('${f.path}$_markerSuffix');
     if (await marker.exists()) {
@@ -51,7 +64,9 @@ class TokenStore {
     return v.isEmpty ? null : v;
   }
 
-  Future<void> write(String token) async {
+  Future<void> write(String token) => _serialize(() => _write(token));
+
+  Future<void> _write(String token) async {
     final f = await _file();
     final marker = File('${f.path}$_markerSuffix');
     await _deleteIfExists(marker);
@@ -60,7 +75,9 @@ class TokenStore {
 
   /// Удаляет токен и остаток temp-файла (с одним повтором). Если не вышло —
   /// ставит маркер выхода и бросает ошибку, чтобы вызвавший её залогировал.
-  Future<void> delete() async {
+  Future<void> delete() => _serialize(_delete);
+
+  Future<void> _delete() async {
     final f = await _file();
     try {
       await _removeFiles(f);

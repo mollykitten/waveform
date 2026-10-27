@@ -594,6 +594,22 @@ void main() {
     expect(jsonDecode(store.value!), isNot(contains('pending_revocations')));
   });
 
+  test('a 429 revocation answer is transient and stays queued', () async {
+    await auth.signIn();
+    adapter.revokeStatus = 429;
+    expect(await auth.signOut(), isFalse);
+    expect(jsonDecode(store.value!)['pending_revocations'], hasLength(1));
+
+    // Still rate limited on the next launch: the entry must survive.
+    final next = ChatGptAuth(
+      store: store,
+      dio: Dio()..httpClientAdapter = adapter,
+    );
+    addTearDown(next.close);
+    await next.retryPendingRevocations();
+    expect(jsonDecode(store.value!)['pending_revocations'], hasLength(1));
+  });
+
   test('a 5xx revocation answer is queued for retry', () async {
     await auth.signIn();
     adapter.revokeStatus = 503;

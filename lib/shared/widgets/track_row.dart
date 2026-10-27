@@ -73,6 +73,9 @@ class TrackRow extends ConsumerWidget {
                 ),
                 child: Icon(
                   isPlaying ? Icons.pause : Icons.play_arrow,
+                  semanticLabel: isPlaying
+                      ? 'pause ${track.title}'
+                      : 'play ${track.title}',
                   color: AppColors.bg,
                   size: 20,
                 ),
@@ -155,6 +158,9 @@ class TrackRow extends ConsumerWidget {
               },
               child: Icon(
                 liked ? Icons.favorite : Icons.favorite_border,
+                semanticLabel: liked
+                    ? 'unlike ${track.title}'
+                    : 'like ${track.title}',
                 size: 15,
                 color: liked ? AppColors.acid : AppColors.textLow,
               ),

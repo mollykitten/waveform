@@ -17,6 +17,7 @@ import '../../core/log/talker.dart';
 import '../../shared/url_share.dart';
 import '../../shared/widgets/cover_art.dart';
 import '../../shared/widgets/pressable.dart';
+import '../../shared/widgets/form_controls.dart';
 import '../../shared/widgets/section_header.dart';
 import '../../shared/widgets/toast.dart';
 import '../../shared/widgets/view_toggle.dart';
@@ -50,25 +51,25 @@ class SettingsScreen extends ConsumerWidget {
             _Back(),
             SizedBox(height: 16),
             _Title(),
-            SizedBox(height: 28),
+            SizedBox(height: 24),
             _AccountSection(),
-            SizedBox(height: 28),
+            SizedBox(height: 24),
             _ViewSection(),
-            SizedBox(height: 28),
+            SizedBox(height: 24),
             _LinksSection(),
-            SizedBox(height: 28),
+            SizedBox(height: 24),
             AiSettingsSection(),
-            SizedBox(height: 28),
+            SizedBox(height: 24),
             _PlaybackSection(),
-            SizedBox(height: 28),
+            SizedBox(height: 24),
             _ShortcutsSection(),
-            SizedBox(height: 28),
+            SizedBox(height: 24),
             _LastfmSection(),
-            SizedBox(height: 28),
+            SizedBox(height: 24),
             _CacheSection(),
-            SizedBox(height: 28),
+            SizedBox(height: 24),
             _LogsSection(),
-            SizedBox(height: 28),
+            SizedBox(height: 24),
             _AboutSection(),
           ],
         ),
@@ -389,34 +390,23 @@ class _LastfmSectionState extends ConsumerState<_LastfmSection> {
               width: AppTheme.borderWidth,
             ),
           ),
-          title: Text(
-            'connect last.fm',
-            style: AppTheme.mono(
-              size: 14,
-              color: AppColors.textHi,
-              weight: FontWeight.w600,
-            ),
-          ),
+          title: Text('connect last.fm', style: formHeadingStyle),
           content: Text(
             'authorize Waveform in your browser, then click continue',
-            style: AppTheme.mono(size: 12, color: AppColors.textMid),
+            style: formTextStyle,
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(c).pop(false),
-              child: Text(
-                'cancel',
-                style: AppTheme.mono(size: 12, color: AppColors.textMid),
-              ),
+              child: Text('cancel', style: formTextStyle),
             ),
             TextButton(
               onPressed: () => Navigator.of(c).pop(true),
               child: Text(
                 'continue',
-                style: AppTheme.mono(
-                  size: 12,
+                style: formTextStyle.copyWith(
                   color: AppColors.acid,
-                  weight: FontWeight.w600,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
             ),
@@ -448,11 +438,22 @@ class _LastfmSectionState extends ConsumerState<_LastfmSection> {
     if (!lastfmConfigured) {
       return _Section(
         title: 'last.fm',
-        child: Text(
-          'Last.fm scrobbling is not configured.\n'
-          'Build with --dart-define=LASTFM_API_KEY=… '
-          '--dart-define=LASTFM_SHARED_SECRET=… to enable.',
-          style: AppTheme.mono(size: 11, color: AppColors.textMid),
+        child: Text.rich(
+          TextSpan(
+            style: formTextStyle,
+            children: [
+              const TextSpan(
+                text: 'Last.fm scrobbling is not configured.\nBuild with ',
+              ),
+              TextSpan(
+                text:
+                    '--dart-define=LASTFM_API_KEY=… '
+                    '--dart-define=LASTFM_SHARED_SECRET=…',
+                style: AppTheme.mono(size: 12, color: AppColors.textMid),
+              ),
+              const TextSpan(text: ' to enable.'),
+            ],
+          ),
         ),
       );
     }
@@ -465,7 +466,7 @@ class _LastfmSectionState extends ConsumerState<_LastfmSection> {
               session != null
                   ? 'connected as @${session.name}'
                   : 'scrobble plays to Last.fm',
-              style: AppTheme.mono(size: 12, color: AppColors.textMid),
+              style: formTextStyle,
             ),
           ),
           if (session != null)
@@ -556,12 +557,12 @@ class _LinksSection extends ConsumerWidget {
               children: [
                 Text(
                   'open SoundCloud links from clipboard',
-                  style: AppTheme.mono(size: 12, color: AppColors.textMid),
+                  style: formTextStyle,
                 ),
                 const SizedBox(height: 3),
                 Text(
                   'copy a soundcloud.com link → offer to open it here',
-                  style: AppTheme.mono(size: 10, color: AppColors.textLow),
+                  style: formTextStyle,
                 ),
               ],
             ),
@@ -587,10 +588,7 @@ class _ViewSection extends StatelessWidget {
       child: Row(
         children: [
           Expanded(
-            child: Text(
-              'library & search layout',
-              style: AppTheme.mono(size: 12, color: AppColors.textMid),
-            ),
+            child: Text('library & search layout', style: formTextStyle),
           ),
           const ViewToggle(),
         ],
@@ -627,10 +625,7 @@ class _CacheSectionState extends State<_CacheSection> {
       child: Row(
         children: [
           Expanded(
-            child: Text(
-              'clear downloaded cover art',
-              style: AppTheme.mono(size: 12, color: AppColors.textMid),
-            ),
+            child: Text('clear downloaded cover art', style: formTextStyle),
           ),
           _Button(label: _busy ? 'clearing…' : 'clear', onTap: _clear),
         ],
@@ -648,10 +643,7 @@ class _LogsSection extends StatelessWidget {
       child: Row(
         children: [
           Expanded(
-            child: Text(
-              'in-app Talker log screen',
-              style: AppTheme.mono(size: 12, color: AppColors.textMid),
-            ),
+            child: Text('in-app Talker log screen', style: formTextStyle),
           ),
           _Button(label: 'open', onTap: () => context.push('/logs')),
         ],
@@ -671,12 +663,7 @@ class _AboutSection extends StatelessWidget {
         children: [
           Row(
             children: [
-              Expanded(
-                child: Text(
-                  'version',
-                  style: AppTheme.mono(size: 12, color: AppColors.textMid),
-                ),
-              ),
+              Expanded(child: Text('version', style: formTextStyle)),
               Text(
                 _kAppVersion,
                 style: AppTheme.mono(
@@ -690,12 +677,7 @@ class _AboutSection extends StatelessWidget {
           const SizedBox(height: 14),
           Row(
             children: [
-              Expanded(
-                child: Text(
-                  'source code',
-                  style: AppTheme.mono(size: 12, color: AppColors.textMid),
-                ),
-              ),
+              Expanded(child: Text('source code', style: formTextStyle)),
               _Button(label: 'open ↗', onTap: () => openExternalUrl(_kRepoUrl)),
             ],
           ),
@@ -719,7 +701,7 @@ class _Section extends StatelessWidget {
         SectionHeader(title: title),
         const SizedBox(height: AppTheme.headerGap),
         Container(
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             color: AppColors.surface,
             borderRadius: AppTheme.borderRadius,
@@ -738,24 +720,5 @@ class _Button extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) {
-    return Pressable(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-        decoration: BoxDecoration(
-          borderRadius: AppTheme.borderRadius,
-          border: AppTheme.border(),
-        ),
-        child: Text(
-          label,
-          style: AppTheme.mono(
-            size: 11,
-            color: AppColors.textHi,
-            weight: FontWeight.w500,
-          ),
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => FormAction(label: label, onTap: onTap);
 }

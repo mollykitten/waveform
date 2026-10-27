@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/services.dart';
+import 'package:waveform_app/shared/widgets/form_controls.dart';
+import 'visual_test_fonts.dart';
 import 'package:waveform_app/app/theme/app_theme.dart';
 import 'package:waveform_app/features/recommendations/wave_controls.dart';
 
 void main() {
+  setUpAll(installVisualTestFonts);
   testWidgets('connection card offers connect and then disconnect', (
     tester,
   ) async {
@@ -65,6 +69,77 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets(
+    'form action preserves bounds while busy and keyboard activation',
+    (tester) async {
+      var calls = 0;
+      var busy = false;
+      late StateSetter update;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.dark,
+          home: Scaffold(
+            body: Center(
+              child: StatefulBuilder(
+                builder: (context, setState) {
+                  update = setState;
+                  return FormAction(
+                    label: 'continue with ChatGPT',
+                    busyLabel: 'connecting…',
+                    busy: busy,
+                    onTap: () => calls++,
+                  );
+                },
+              ),
+            ),
+          ),
+        ),
+      );
+      final original = tester.getSize(find.byType(FormAction));
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      expect(calls, 1);
+      update(() => busy = true);
+      await tester.pump();
+      expect(tester.getSize(find.byType(FormAction)), original);
+      await tester.tap(find.text('connecting…'));
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      expect(calls, 1);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets(
+    'mood keeps the editing focus used by the player shortcut guard',
+    (tester) async {
+      final controller = TextEditingController();
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.dark,
+          home: Scaffold(
+            body: WaveMoodField(controller: controller, expanded: true),
+          ),
+        ),
+      );
+      final label = tester.getRect(find.text('what are you in the mood for?'));
+      await tester.tap(find.byType(TextField));
+      await tester.pump();
+      expect(
+        FocusManager.instance.primaryFocus?.context
+            ?.findAncestorStateOfType<EditableTextState>(),
+        isNotNull,
+        reason:
+            'AppShell disables player shortcuts while EditableText owns focus',
+      );
+      await tester.enterText(find.byType(TextField), 'quiet evening');
+      await tester.pump();
+      expect(controller.text, contains(' '));
+      expect(tester.getRect(find.text('what are you in the mood for?')), label);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('consent explains metadata and destination before approval', (
     tester,
   ) async {
@@ -90,6 +165,16 @@ void main() {
     await tester.tap(find.text('play my wave'));
     await tester.pumpAndSettle();
     expect(approved, isNull);
+    final reject = find.ancestor(
+      of: find.text('not now'),
+      matching: find.byType(FormAction),
+    );
+    final accept = find.ancestor(
+      of: find.text('allow and play'),
+      matching: find.byType(FormAction),
+    );
+    expect(tester.getRect(accept).left - tester.getRect(reject).right, 8);
+
     expect(find.text('sent to ChatGPT'), findsOneWidget);
     expect(
       find.textContaining('recent listening and current track'),

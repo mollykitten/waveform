@@ -2,9 +2,42 @@ import 'package:flutter/material.dart';
 
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/colors.dart';
-import '../../shared/widgets/pressable.dart';
+import '../../shared/widgets/form_controls.dart';
 
-/// Small, provider-independent controls shared by the wave screen and settings.
+/// Keeps an action group together, moving it below the information when needed.
+class WaveControlRow extends StatelessWidget {
+  const WaveControlRow({
+    super.key,
+    required this.information,
+    required this.actions,
+  });
+  final Widget information;
+  final Widget? actions;
+
+  @override
+  Widget build(BuildContext context) => actions == null
+      ? information
+      : LayoutBuilder(
+          builder: (context, constraints) => OverflowBar(
+            alignment: MainAxisAlignment.spaceBetween,
+            overflowAlignment: OverflowBarAlignment.end,
+            spacing: 12,
+            overflowSpacing: 8,
+            children: [
+              ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: constraints.maxWidth),
+                child: information,
+              ),
+              ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: constraints.maxWidth),
+                child: actions!,
+              ),
+            ],
+          ),
+        );
+}
+
+/// Connection identity and controls stay together above destination privacy.
 class WaveConnectionCard extends StatelessWidget {
   const WaveConnectionCard({
     super.key,
@@ -13,87 +46,78 @@ class WaveConnectionCard extends StatelessWidget {
     required this.onConnect,
     required this.onDisconnect,
     this.message,
+    this.accountLabel,
+    this.footer,
   });
-
   final bool connected;
   final bool busy;
   final VoidCallback? onConnect;
   final VoidCallback? onDisconnect;
   final String? message;
+  final String? accountLabel;
+  final Widget? footer;
+
+  Widget get _information => Column(
+    mainAxisSize: MainAxisSize.min,
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Wrap(
+        spacing: 8,
+        runSpacing: 4,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          const Text('ChatGPT', style: formHeadingStyle),
+          if (connected) const Text('connected', style: formTextStyle),
+        ],
+      ),
+      if (connected && accountLabel != null) ...[
+        const SizedBox(height: 4),
+        Text(accountLabel!, style: formTextStyle),
+      ],
+      SizedBox(height: connected ? 4 : 8),
+      Text(
+        connected
+            ? 'ready for your next wave'
+            : 'connect your ChatGPT account once. then press play and discover music from your listening. an eligible ChatGPT subscription is required; availability depends on your account.',
+        style: formTextStyle,
+      ),
+    ],
+  );
+
+  Widget get _action => FormAction(
+    label: connected ? 'disconnect ChatGPT' : 'continue with ChatGPT',
+    icon: connected ? Icons.link_off : null,
+    iconSize: connected ? 16 : 14,
+    busyLabel: 'connecting…',
+    busy: busy,
+    kind: connected ? FormActionKind.secondary : FormActionKind.primary,
+    onTap: connected ? onDisconnect : onConnect,
+  );
 
   @override
   Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(20),
+    key: const ValueKey('wave-connection-card'),
+    padding: const EdgeInsets.all(16),
     decoration: BoxDecoration(
       color: AppColors.surface,
       borderRadius: AppTheme.borderRadius,
       border: AppTheme.border(),
     ),
     child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          children: [
-            const Icon(
-              Icons.auto_awesome_outlined,
-              size: 18,
-              color: AppColors.textMid,
-            ),
-            const SizedBox(width: 10),
-            const Expanded(
-              child: Text(
-                'ChatGPT',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-              ),
-            ),
-            if (connected)
-              Text(
-                'connected',
-                style: AppTheme.mono(size: 10, color: AppColors.textMid),
-              ),
-          ],
-        ),
-        const SizedBox(height: 10),
-        Text(
-          connected
-              ? 'ready for your next wave'
-              : 'connect your ChatGPT account once. then press play and '
-                    'discover music from your listening. an eligible ChatGPT subscription is required; availability depends on your account.',
-          style: const TextStyle(color: AppColors.textMid, height: 1.5),
-        ),
-        if (message != null) ...[
-          const SizedBox(height: 10),
-          Text(message!, style: const TextStyle(color: AppColors.textMid)),
+        if (connected)
+          WaveControlRow(information: _information, actions: _action)
+        else ...[
+          _information,
+          const SizedBox(height: 8),
+          Align(alignment: Alignment.centerLeft, child: _action),
         ],
-        const SizedBox(height: 14),
-        if (busy)
-          const Row(
-            children: [
-              SizedBox(
-                width: 14,
-                height: 14,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-              SizedBox(width: 10),
-              Text('connecting…'),
-            ],
-          )
-        else if (connected)
-          TextButton(
-            onPressed: onDisconnect,
-            child: const Text('disconnect ChatGPT'),
-          )
-        else
-          FilledButton(
-            style: FilledButton.styleFrom(
-              shape: const RoundedRectangleBorder(
-                borderRadius: AppTheme.borderRadius,
-              ),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            ),
-            onPressed: onConnect,
-            child: const Text('continue with ChatGPT'),
-          ),
+        if (message != null) ...[
+          const SizedBox(height: 8),
+          Text(message!, style: formTextStyle),
+        ],
+        ?footer,
       ],
     ),
   );
@@ -122,16 +146,21 @@ class _WaveMoodFieldState extends State<WaveMoodField> {
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
       if (!widget.expanded)
-        TextButton.icon(
-          onPressed: widget.enabled
-              ? () => setState(() => _expanded = !_expanded)
-              : null,
-          icon: Icon(_expanded ? Icons.remove : Icons.add, size: 14),
-          label: const Text('add a mood (optional)'),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: FormAction(
+            onTap: widget.enabled
+                ? () => setState(() => _expanded = !_expanded)
+                : null,
+            icon: _expanded ? Icons.remove : Icons.add,
+            label: 'add a mood (optional)',
+            kind: FormActionKind.quiet,
+          ),
         ),
-      if (_expanded || widget.expanded)
-        ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 560),
+      if (_expanded || widget.expanded) ...[
+        if (!widget.expanded) const SizedBox(height: 8),
+        FormFieldLabel(
+          label: 'what are you in the mood for?',
           child: TextField(
             key: const ValueKey('wave-mood'),
             controller: widget.controller,
@@ -139,34 +168,13 @@ class _WaveMoodFieldState extends State<WaveMoodField> {
             maxLength: 500,
             minLines: 1,
             maxLines: 3,
-            style: const TextStyle(fontSize: 14),
-            decoration: InputDecoration(
-              labelText: 'what are you in the mood for?',
-              hintText: 'a quiet evening, a long run, something new…',
-              counterText: '',
-              filled: true,
-              fillColor: AppColors.bg,
-              isDense: true,
-              labelStyle: const TextStyle(
-                fontSize: 12,
-                color: AppColors.textMid,
-              ),
-              contentPadding: const EdgeInsets.all(12),
-              border: const OutlineInputBorder(
-                borderRadius: AppTheme.borderRadius,
-                borderSide: AppTheme.borderSideStatic,
-              ),
-              enabledBorder: const OutlineInputBorder(
-                borderRadius: AppTheme.borderRadius,
-                borderSide: AppTheme.borderSideStatic,
-              ),
-              focusedBorder: const OutlineInputBorder(
-                borderRadius: AppTheme.borderRadius,
-                borderSide: BorderSide(color: AppColors.acid, width: .5),
-              ),
+            style: const TextStyle(fontSize: 13, height: 1.5),
+            decoration: formInputDecoration(
+              hint: 'a quiet evening, a long run, something new…',
             ),
           ),
         ),
+      ],
     ],
   );
 }
@@ -239,10 +247,13 @@ Future<bool> showWaveListeningConsent(
             onTap: () => Navigator.pop(context, false),
             label: 'not now',
           ),
-          _ConsentAction(
-            onTap: () => Navigator.pop(context, true),
-            label: 'allow and play',
-            active: true,
+          Padding(
+            padding: const EdgeInsets.only(left: 8),
+            child: _ConsentAction(
+              onTap: () => Navigator.pop(context, true),
+              label: 'allow and play',
+              active: true,
+            ),
           ),
         ],
       ),
@@ -260,27 +271,9 @@ class _ConsentAction extends StatelessWidget {
   final bool active;
 
   @override
-  Widget build(BuildContext context) => Pressable(
+  Widget build(BuildContext context) => FormAction(
+    label: label,
     onTap: onTap,
-    child: Container(
-      margin: const EdgeInsets.only(left: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
-      decoration: BoxDecoration(
-        color: active ? AppColors.acid : AppColors.surface2,
-        borderRadius: AppTheme.borderRadius,
-        border: Border.all(
-          width: .5,
-          color: active ? AppColors.acid : AppColors.border,
-        ),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w500,
-          color: active ? AppColors.bg : AppColors.textHi,
-        ),
-      ),
-    ),
+    kind: active ? FormActionKind.primary : FormActionKind.secondary,
   );
 }
