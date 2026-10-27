@@ -11,8 +11,10 @@ import '../../../shared/format.dart';
 import '../../../shared/models/track.dart';
 import '../../../shared/url_share.dart';
 import '../../../shared/widgets/cover_art.dart';
-import '../../../shared/widgets/pressable.dart';
 import '../../../shared/widgets/live_waveform.dart';
+import '../../../shared/widgets/pressable.dart';
+import '../../../shared/widgets/toast.dart';
+import '../../recommendations/wave_controller.dart';
 import '../player_controller.dart';
 import '../player_ui_state.dart';
 import 'audio_output_picker.dart';
@@ -36,6 +38,8 @@ class BottomPlayer extends ConsumerWidget {
         position: player.position,
         onPlayPause: c.toggle,
         onNext: c.next,
+        showDislike: ref.watch(currentTrackInWaveProvider),
+        onDislike: () => _dislikeCurrent(context, ref),
         onExpand: () => ref.read(playerCollapsedProvider.notifier).expand(),
       );
     }
@@ -141,6 +145,13 @@ class BottomPlayer extends ConsumerWidget {
             const SizedBox(width: 12),
             Text(Fmt.time(track.duration), style: AppTheme.mono(size: 11)),
             const SizedBox(width: 18),
+            if (ref.watch(currentTrackInWaveProvider))
+              _IconBtn(
+                icon: Icons.thumb_down_outlined,
+                enabled: true,
+                label: 'dislike, do not suggest again',
+                onTap: () => _dislikeCurrent(context, ref),
+              ),
             _IconBtn(
               icon: player.liked ? Icons.favorite : Icons.favorite_border,
               active: player.liked,
@@ -181,6 +192,29 @@ class BottomPlayer extends ConsumerWidget {
       ),
     );
   }
+}
+
+/// Dislike the wave track, skip it, and offer a short window to take it back.
+Future<void> _dislikeCurrent(BuildContext context, WidgetRef ref) async {
+  final wave = ref.read(waveControllerProvider.notifier);
+  final dislike = await wave.dislikeCurrent();
+  if (dislike == null || !context.mounted) return;
+  if (!dislike.saved) {
+    showToast(
+      context,
+      dislike.skipped
+          ? "skipped, but couldn't save this dislike"
+          : "couldn't save this dislike",
+    );
+    return;
+  }
+  showToast(
+    context,
+    dislike.skipped
+        ? "won't suggest this again"
+        : "won't suggest this again, nothing queued to skip to yet",
+    action: (label: 'undo', onTap: () => wave.undoDislike(dislike)),
+  );
 }
 
 /// Copies the playing track, independently of the current page's context link.
@@ -374,6 +408,8 @@ class _CollapsedBar extends ConsumerWidget {
     required this.position,
     required this.onPlayPause,
     required this.onNext,
+    required this.showDislike,
+    required this.onDislike,
     required this.onExpand,
   });
 
@@ -383,6 +419,8 @@ class _CollapsedBar extends ConsumerWidget {
   final Duration position;
   final VoidCallback onPlayPause;
   final VoidCallback onNext;
+  final bool showDislike;
+  final VoidCallback onDislike;
   final VoidCallback onExpand;
 
   @override
@@ -441,6 +479,13 @@ class _CollapsedBar extends ConsumerWidget {
             enabled: enabled,
             onTap: onPlayPause,
           ),
+          if (showDislike)
+            _IconBtn(
+              icon: Icons.thumb_down_outlined,
+              enabled: true,
+              label: 'dislike, do not suggest again',
+              onTap: onDislike,
+            ),
           _IconBtn(icon: Icons.skip_next, enabled: enabled, onTap: onNext),
           const _CopyLinkButton(),
           const AudioOutputPicker(compact: true),

@@ -80,6 +80,7 @@ class AuthAdapter implements HttpClientAdapter {
   final refreshStarted = Completer<void>();
   final revokeStarted = Completer<void>();
   int revokeFailures = 0;
+  int revokeStatus = 200;
   String get idToken {
     final builder = JsonWebSignatureBuilder()
       ..jsonContent = {
@@ -140,7 +141,7 @@ class AuthAdapter implements HttpClientAdapter {
       if (revokeFailures-- > 0) {
         throw const SocketException('synthetic transport failure');
       }
-      return ResponseBody.fromString('', 200);
+      return ResponseBody.fromString('', revokeStatus);
     } else if (path.endsWith('/models')) {
       body = {
         'models': [
@@ -555,6 +556,66 @@ void main() {
       expect(auth.account!.connected, isFalse);
     },
   );
+
+  test(
+    'unconfirmed revocation is queued locally and retried on next launch',
+    () async {
+      await auth.signIn();
+      adapter.revokeFailures = 2;
+      expect(await auth.signOut(), isFalse);
+      final queued = jsonDecode(store.value!)['pending_revocations'] as List;
+      expect(queued, hasLength(1));
+      expect(queued.single['refresh_token'], 'REFRESH_SECRET_0');
+      int revokes() => adapter.requests
+          .where((request) => request.uri.path.endsWith('/revoke'))
+          .length;
+      final before = revokes();
+
+      final next = ChatGptAuth(
+        store: store,
+        dio: Dio()..httpClientAdapter = adapter,
+      );
+      addTearDown(next.close);
+      await next.retryPendingRevocations();
+
+      expect(revokes(), before + 1);
+      expect(jsonDecode(store.value!), isNot(contains('pending_revocations')));
+    },
+  );
+
+  test('a 4xx revocation answer is final and is not queued', () async {
+    await auth.signIn();
+    adapter.revokeStatus = 400;
+    expect(await auth.signOut(), isFalse);
+    expect(
+      adapter.requests.where((r) => r.uri.path.endsWith('/revoke')).length,
+      1,
+    );
+    expect(jsonDecode(store.value!), isNot(contains('pending_revocations')));
+  });
+
+  test('a 429 revocation answer is transient and stays queued', () async {
+    await auth.signIn();
+    adapter.revokeStatus = 429;
+    expect(await auth.signOut(), isFalse);
+    expect(jsonDecode(store.value!)['pending_revocations'], hasLength(1));
+
+    // Still rate limited on the next launch: the entry must survive.
+    final next = ChatGptAuth(
+      store: store,
+      dio: Dio()..httpClientAdapter = adapter,
+    );
+    addTearDown(next.close);
+    await next.retryPendingRevocations();
+    expect(jsonDecode(store.value!)['pending_revocations'], hasLength(1));
+  });
+
+  test('a 5xx revocation answer is queued for retry', () async {
+    await auth.signIn();
+    adapter.revokeStatus = 503;
+    expect(await auth.signOut(), isFalse);
+    expect(jsonDecode(store.value!)['pending_revocations'], hasLength(1));
+  });
 
   test(
     'latest rotated tokens are persisted on retry after transient storage failure',

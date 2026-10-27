@@ -27,7 +27,7 @@ import '../recommendations/ai_settings_section.dart';
 /// Версия отображается в секции About; обновлять руками синхронно с pubspec.yaml.
 // Bumped on every tagged release. Matches `version:` in pubspec.yaml.
 const _kAppVersion = '0.4.0';
-const _kRepoUrl = 'https://github.com/mollybyte/waveform';
+const _kRepoUrl = 'https://github.com/mollykitten/waveform';
 
 /// Экран настроек. Сейчас покрывает то, что реально реализовано: аккаунт,
 /// вид списков, кэш обложек, выход на логи и about. Тема / Last.fm / качество
@@ -443,15 +443,12 @@ class _LastfmSectionState extends ConsumerState<_LastfmSection> {
             style: formTextStyle,
             children: [
               const TextSpan(
-                text: 'Last.fm scrobbling is not configured.\nSet ',
+                text: 'Last.fm scrobbling is not configured.\nBuild with ',
               ),
               TextSpan(
-                text: 'lastfmApiKey + lastfmSharedSecret',
-                style: AppTheme.mono(size: 12, color: AppColors.textMid),
-              ),
-              const TextSpan(text: ' in '),
-              TextSpan(
-                text: 'lib/core/lastfm/lastfm_constants.dart',
+                text:
+                    '--dart-define=LASTFM_API_KEY=… '
+                    '--dart-define=LASTFM_SHARED_SECRET=…',
                 style: AppTheme.mono(size: 12, color: AppColors.textMid),
               ),
               const TextSpan(text: ' to enable.'),

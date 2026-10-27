@@ -17,6 +17,7 @@ import 'package:waveform_app/core/recommendations/models.dart';
 import 'package:waveform_app/features/player/player_controller.dart';
 import 'package:waveform_app/features/recommendations/ai_settings_section.dart';
 import 'package:waveform_app/features/recommendations/recommendations_screen.dart';
+import 'package:waveform_app/features/recommendations/wave_controller.dart';
 import 'package:waveform_app/shared/widgets/top_bar.dart';
 import 'package:waveform_app/shared/widgets/pressable.dart';
 import 'package:waveform_app/features/recommendations/widgets/wave_hero.dart';
@@ -55,6 +56,7 @@ void main() {
             userToken: signedIn ? 'synthetic-test-account' : null,
           ),
         ),
+        waveRetryDelayProvider.overrideWithValue(Duration.zero),
         aiSettingsProvider.overrideWith(() => settings),
         aiListeningIdentityProvider.overrideWith(
           (ref) async => 'ui-test-profile',
@@ -311,6 +313,7 @@ void main() {
     await approve(tester);
     expect(jsonDecode(client.payloads.first)['mood'], 'quiet evening');
     expect(settings.lastUseListening, isFalse);
+    container.read(waveControllerProvider.notifier).cancel();
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
@@ -608,8 +611,10 @@ void main() {
           const Duration(seconds: 2),
         );
       }
-      expect(client.payloads, hasLength(8));
+      // The script holds four batches; once spent, later searches only fail.
+      expect(client.payloads.length, greaterThanOrEqualTo(8));
       expect(container.read(recommendationsProvider).items, hasLength(16));
+      final settled = client.payloads.length;
       player.toggle();
       player.toggle();
       await tester.pumpAndSettle(
@@ -617,7 +622,7 @@ void main() {
         EnginePhase.sendSemanticsUpdate,
         const Duration(seconds: 2),
       );
-      expect(client.payloads, hasLength(8));
+      expect(client.payloads, hasLength(settled));
       expect(find.text('make my wave personal'), findsNothing);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());

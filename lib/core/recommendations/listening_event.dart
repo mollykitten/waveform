@@ -3,6 +3,10 @@ enum ListeningTransitionCause {
   naturalCompletion,
   crossfadeCompletion,
   manualNext,
+
+  /// Thumbs-down on a wave track. The dislike itself is stored in the seen
+  /// memory, so this transition is neutral and never counts as a skip or play.
+  dislike,
   manualPrevious,
   manualRestart,
   directSelection,
@@ -46,7 +50,8 @@ class ListeningEvent {
 
   /// A conservative, replaceable interpretation; the persisted facts are primary.
   ListeningEvidence get evidence {
-    if (cause == ListeningTransitionCause.unplayable) {
+    if (cause == ListeningTransitionCause.unplayable ||
+        cause == ListeningTransitionCause.dislike) {
       return ListeningEvidence.neutral;
     }
     if (durationMs > 0 && heardMs >= 30000 && heardMs >= durationMs * .7) {

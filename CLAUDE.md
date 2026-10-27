@@ -194,9 +194,10 @@ PostgreSQL с векторным индексом, фоновые jobs с вер
   push/PR (pinned Flutter 3.41.0 — match local; иначе onReorder
   deprecation warn на свежем stable). Release: на `v*` тег — 3 OS
   параллельно, macOS sign (Developer ID Application) + notarize
-  (`xcrun notarytool`) + staple + `.dmg`. Required secrets:
-  APPLE_TEAM_ID, APPLE_CERT_P12_BASE64, APPLE_CERT_PASSWORD, APPLE_ID,
-  APPLE_APP_PASSWORD, KEYCHAIN_PASSWORD.
+  (`xcrun notarytool`, ключ API) + staple + `.dmg`. Required secrets:
+  APPLE_CERT_P12_BASE64, APPLE_CERT_PASSWORD, KEYCHAIN_PASSWORD,
+  APPLE_API_KEY_P8_BASE64, APPLE_API_KEY_ID, APPLE_API_ISSUER_ID
+  (нотаризация по ключу App Store Connect API; см. docs/releasing.md).
 - **Phase 1 — Visual.** Hero cover→detail (`Hero(tag: 'cover-track-{id}'
   / 'cover-playlist-{id}')`, `CachedNetworkImage.fadeInDuration: zero`
   чтобы не конкурировать с Hero). `EmptyState` (icon+title+sub+CTA)
