@@ -4,7 +4,8 @@ open **my wave** (`/recommendations`, "discover" in the top bar) and press
 **play my wave**. with a signed-in SoundCloud account, waveform builds a queue
 of real SoundCloud tracks on this device and keeps refilling it while it plays.
 there are no settings, no accounts with other services and no consent dialog:
-nothing about your listening leaves the device. without a SoundCloud account
+nothing is sent to a model or a third party; only requests to SoundCloud
+itself (related tracks, likes) leave the device. without a SoundCloud account
 the screen asks you to sign in.
 
 ## how a batch is built
