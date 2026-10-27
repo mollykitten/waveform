@@ -1,5 +1,27 @@
 const KNOWN_DYNAMIC_FUNC = ['ulns', 'cwkfcplc', 'dnvffnze', 'kgaitijd', 'polorucp'];
 
+// --- Frida 17 compat shims: static Memory.read* and ArrayBuffer.read* were removed ---
+if (typeof ArrayBuffer.prototype.readByteArray !== 'function') {
+    ArrayBuffer.prototype.readByteArray = function (off, len) {
+        var a = new Uint8Array(this);
+        var s = off || 0;
+        var e = (len === undefined) ? a.length : s + len;
+        return new Uint8Array(a.subarray(s, e)).buffer;
+    };
+}
+ArrayBuffer.prototype.readU8 = function (off) { return new DataView(this).getUint8(off || 0); };
+if (typeof Memory.readByteArray !== 'function') {
+    Memory.readByteArray = function (p, len) {
+        var n = parseInt(len, 10), out = new Uint8Array(n);
+        for (var i = 0; i < n; i++) out[i] = p.add(i).readU8();
+        return out.buffer;
+    };
+}
+if (typeof Memory.readPointer !== 'function') Memory.readPointer = function (p) { return p.readPointer(); };
+if (typeof Memory.readUInt !== 'function') Memory.readUInt = function (p) { return p.readUInt(); };
+if (typeof Memory.readUtf8String !== 'function') Memory.readUtf8String = function (p) { return p.readUtf8String(); };
+
+
 function TextEncoder() {
 }
 
@@ -102,12 +124,55 @@ function inject(lib, process_name){
     sender_payload_info(
         'Running ' + lib['name'] + ' at ' + lib['base']
     );
+    hookI2dPrivateKey(lib['name'], process_name);
     Hooker(lib, process_name)
+}
+
+// OpenSSL i2d_PrivateKey is linked into libwvhidl: it hands us the device RSA key in DER on every CDM init.
+// The original 'polorucp' dynamic-export heuristic no longer matches on current builds.
+function hookI2dPrivateKey(libName, process_name) {
+    try {
+        var mod = Process.getModuleByName(libName);
+        var addr = mod.getExportByName('i2d_PrivateKey');
+        if (!addr) return;
+        Interceptor.attach(addr, {
+            onEnter: function (args) {
+                this.out = args[1].isNull() ? null : args[1].readPointer();
+            },
+            onLeave: function (retval) {
+                var len = retval.toInt32();
+                if (len < 800 || len > 4000 || !this.out || this.out.isNull()) return;
+                var der = this.out.readByteArray(len);
+                var view = new Uint8Array(der);
+                if (view[0] !== 0x30 || view[1] !== 0x82) return;
+                var pem = der;
+                try {
+                    var Header = '-----BEGIN RSA PRIVATE KEY-----';
+                    var Footer = '-----END RSA PRIVATE KEY-----';
+                    var b64 = btoa(String.fromCharCode.apply(null, view));
+                    var lines = [];
+                    for (var i = 0; i < b64.length; i += 64) lines.push(b64.substring(i, i + 64));
+                    var text = Header + '\n' + lines.join('\n') + '\n' + Footer + '\n';
+                    pem = new TextEncoder().encode(text).buffer;
+                } catch (e) {
+                    // fall back to raw DER
+                }
+                sender_payload({
+                    from: process_name,
+                    message: 'i2d_PrivateKey, captured device RSA key',
+                    payload: { Length: len }
+                });
+                send('priv', pem);
+            }
+        });
+    } catch (e) {
+        sender_payload_info('i2d_PrivateKey hook failed: ' + e);
+    }
 }
 
 function Hooker(lib, process_name) {
     const name = lib['name'];
-    Module.enumerateExportsSync(name).forEach(function(exp){
+    Process.getModuleByName(name).enumerateExports().forEach(function(exp){
         try {
             var module_address = exp.address;
             if (exp.name === '_lcc00' || exp.name === '_oecc00') {
@@ -240,9 +305,9 @@ function jnyxqs(address, process_name) {
         onLeave: function(returnResult) {
             printer('jnyxqs', process_name);
             console.log(hexdump(returnResult));
-            console.log(Memory.readByteArray(this.data['1'], this.data['2'].toInt32()));
-            console.log(this.data['2'].toInt32());
-            send('aes_key', Memory.readByteArray(this.data['1'], this.data['2'].toInt32()))
+            console.log(Memory.readByteArray(this.data['1'], this.data['2'].toUInt32()));
+            console.log(this.data['2'].toUInt32());
+            send('aes_key', Memory.readByteArray(this.data['1'], this.data['2'].toUInt32()))
         }
     });
 }
@@ -274,7 +339,7 @@ function AES_set_encrypt_key(address, process_name) {
             }
         },
         onLeave: function (returnResult) {
-            const size = this.data['bits'].toInt32() / 8;
+            const size = this.data['bits'].toUInt32() / 8;
             const userKey = Memory.readByteArray(this.data['userKey'], size);
             const key = Memory.readByteArray(this.data['key'], size);
             printer('return result: ' + returnResult);
@@ -333,7 +398,7 @@ function polorucp(address, process_name) {
     Interceptor.attach(ptr(address), {
        onEnter: function(args) {
            if (!args[6].isNull()) {
-               const size = args[6].toInt32();
+               const size = args[6].toUInt32();
                if (size >= 1000 && size <= 2000 && !args[5].isNull()) {
                    const k = args[5].readByteArray(size);
                    const view = new Uint8Array(k);
@@ -407,12 +472,12 @@ function GetLevel3_Initialize(address, process_name) {
 function GetApiVersion(address, process_name) {
     Interceptor.attach(ptr(address), {
         onLeave: function (retval) {
-            // const message = 'OEMCryptoVersion: ' + retval.toInt32();
+            // const message = 'OEMCryptoVersion: ' + retval.toUInt32();
             const data = {
                 from: process_name,
                 message: 'OEMCryptoVersion',
                 payload: {
-                    'Version': retval.toInt32()
+                    'Version': retval.toUInt32()
                 }
             };
             sender_payload(data)
@@ -427,7 +492,7 @@ function GetSecurityPatchLevel(address, process_name) {
                 from: process_name,
                 message: 'OEMSecurityPatchLevel',
                 payload:{
-                    'Patch_Level': retval.toInt32()
+                    'Patch_Level': retval.toUInt32()
                 }
             })
         }
@@ -465,7 +530,7 @@ function GetLevel3_BuildInformation(address, process_name) {
 function GetSupportedCertificates(address, process_name) {
     Interceptor.attach(ptr(address), {
         onLeave: function (retval) {
-            const message = 'OEMSupportedCertificates: ' + OEMCrypto_RSA_Support[retval.toInt32()];
+            const message = 'OEMSupportedCertificates: ' + OEMCrypto_RSA_Support[retval.toUInt32()];
             sender_payload({
                 from: process_name,
                 message: message
@@ -495,7 +560,7 @@ function GetLevel3_GetProvisioningMethod(address, process_name) {
                 from: process_name,
                 message: 'OEMCrypto_GetProvisioningMethod',
                 payload: {
-                    'Method': OEMCrypto_ProvisioningMethod[retval.toInt32()]
+                    'Method': OEMCrypto_ProvisioningMethod[retval.toUInt32()]
                 }
             });
         }
@@ -505,7 +570,7 @@ function GetLevel3_GetProvisioningMethod(address, process_name) {
 function GetLevel3_GetNumberOfOpenSessions(address, process_name) {
     Interceptor.attach(ptr(address), {
         onLeave: function (retval) {
-            const message = 'OEMCrypto_GetNumberOfOpenSessions: ' + retval.toInt32();
+            const message = 'OEMCrypto_GetNumberOfOpenSessions: ' + retval.toUInt32();
             sender_payload({
                 from: process_name,
                 message: message
@@ -520,7 +585,7 @@ function GetLevel3_GetMaxNumberOfSessions(address, process_name) {
             this.maximum = args[0]
         },
         onLeave: function () {
-            const message = 'OEMCrypto_GetMaxNumberOfSessions: ' + Memory.readPointer(this.maximum).toInt32();
+            const message = 'OEMCrypto_GetMaxNumberOfSessions: ' + Memory.readPointer(this.maximum).toUInt32();
             sender_payload({
                 from: process_name,
                 message: message
@@ -535,7 +600,7 @@ function GetLevel3_Terminate_Status(address, process_name) {
             this.maximum = args[0]
         },
         onLeave: function (retvalue) {
-            const message = 'OEMCrypto_Terminate_Status: ' + OEMCryptoResult[retvalue.toInt32()];
+            const message = 'OEMCrypto_Terminate_Status: ' + OEMCryptoResult[retvalue.toUInt32()];
             sender_payload({
                 from: process_name,
                 message: message
@@ -551,14 +616,14 @@ function GetLevel3_GetDeviceID(address, process_name) {
             this.idLength = args[1]
         },
         onLeave: function (retval) {
-            var idLength = Memory.readPointer(this.idLength).toInt32();
+            var idLength = Memory.readPointer(this.idLength).toUInt32();
             const deviceIdArray = Memory.readByteArray(this.deviceId, idLength);
             const deviceId = byteArrayToHex(deviceIdArray);
             const data = {
                 from: process_name,
                 message: 'OEMCrypto_GetDeviceID',
                 payload: {
-                    'Status': OEMCryptoResult[retval.toInt32()],
+                    'Status': OEMCryptoResult[retval.toUInt32()],
                     'Length': idLength,
                     'DeviceId': deviceId
                 }
@@ -578,14 +643,14 @@ function GetLevel3_GetKeyData(address, process_name) {
             this.keyDataLength = args[1];
         },
         onLeave: function (retvalue) {
-            const keyDataLength = Memory.readPointer(this.keyDataLength).toInt32();
+            const keyDataLength = Memory.readPointer(this.keyDataLength).toUInt32();
             const keyDataArray = Memory.readByteArray(this.keyData, keyDataLength);
             const device_token = byteArrayToHex(keyDataArray);
             const data = {
                 from: process_name,
                 message: 'OEMCrypto_GetKeyData',
                 payload: {
-                    'Status': OEMCryptoResult[retvalue.toInt32()],
+                    'Status': OEMCryptoResult[retvalue.toUInt32()],
                     'Size': keyDataLength,
                     'Device_Token': device_token
                 }
@@ -615,22 +680,22 @@ function GetLevel3_LoadKeys(address, process_name) {
             }
         },
         onLeave: function (retvalue) {
-            const message_length = this.data['message_length'].toInt32();
+            const message_length = this.data['message_length'].toUInt32();
             const message = Memory.readByteArray(this.data['message'], message_length);
-            const signature_length = this.data['signature_length'].toInt32();
+            const signature_length = this.data['signature_length'].toUInt32();
             const signature = Memory.readByteArray(this.data['signature'], signature_length);
             // const ivs = this.data['ivs'];
             // const keys = Memory.readPointer(this.data['keys']);
-            // const num_keys = this.data['num_keys'].toInt32();
+            // const num_keys = this.data['num_keys'].toUInt32();
             // const key_array = Memory.readPointer(this.data['key_array']);
             // const pst = this.data['pst'];
             // const srm_restriction_data = this.data['srm_restriction_data'];
-            const license_type = OEMCrypto_LicenseType[this.data['license_type'].toInt32()];
+            const license_type = OEMCrypto_LicenseType[this.data['license_type'].toUInt32()];
             const data = {
                 from: process_name,
                 message: 'OEMCrypto_LoadKeys',
                 payload: {
-                    'Status': OEMCryptoResult[retvalue.toInt32()],
+                    'Status': OEMCryptoResult[retvalue.toUInt32()],
                     'Type': license_type,
                     'Message': byteArrayToHex(message),
                     'Signature': byteArrayToHex(signature)
@@ -654,16 +719,16 @@ function GetLevel3_GenerateDerivedKeys(address, process_name) {
             }
         },
         onLeave: function (retvalue) {
-            const mac_length = this.data['mac_key_context_length'].toInt32();
+            const mac_length = this.data['mac_key_context_length'].toUInt32();
             const mac_context = Memory.readByteArray(this.data['mac_key_context'], mac_length);
-            const enc_length = this.data['enc_key_context_length'].toInt32();
+            const enc_length = this.data['enc_key_context_length'].toUInt32();
             const enc_context = Memory.readByteArray(this.data['enc_key_context'], enc_length);
             const data = {
                 from: process_name,
                 message: 'GetLevel3_GenerateDerivedKeys',
                 payload: {
-                    'Status': OEMCryptoResult[retvalue.toInt32()],
-                    'Session': this.data['session'].toInt32(),
+                    'Status': OEMCryptoResult[retvalue.toUInt32()],
+                    'Session': this.data['session'].toUInt32(),
                     'Mac_Length': mac_length,
                     'Mac_Context': mac_context,
                     'Enc_Length': enc_length,
@@ -688,16 +753,16 @@ function GetLevel3_GenerateSignature(address, process_name) {
             }
         },
         onLeave: function (retvalue) {
-            const message_length = this.data['message_length'].toInt32();
+            const message_length = this.data['message_length'].toUInt32();
             const message = Memory.readByteArray(this.data['message'], message_length);
-            const signature_lenght = Memory.readPointer(this.data['signature_lenght']).toInt32();
+            const signature_lenght = Memory.readPointer(this.data['signature_lenght']).toUInt32();
             const signature = Memory.readByteArray(this.data['signature'], signature_lenght);
             const data = {
                 from: process_name,
                 message: 'GetLevel3_GenerateSignature',
                 payload: {
-                    'Status': OEMCryptoResult[retvalue.toInt32()],
-                    'Session': this.data['session'].toInt32(),
+                    'Status': OEMCryptoResult[retvalue.toUInt32()],
+                    'Session': this.data['session'].toUInt32(),
                     message: {
                         'length': message_length,
                         'context': byteArrayToHex(message)
@@ -725,7 +790,7 @@ function GetLevel3_GetOEMPublicCertificate(address, process_name) {
             }
         },
         onLeave: function (retvalue) {
-            const result = OEMCryptoResult[retvalue.toInt32()];
+            const result = OEMCryptoResult[retvalue.toUInt32()];
             const data = {
                 from: process_name,
                 message: 'GetLevel3_GetOEMPublicCertificate',
@@ -735,13 +800,13 @@ function GetLevel3_GetOEMPublicCertificate(address, process_name) {
             };
             sender_payload(data);
             if (result === OEMCryptoResult["0"]) {
-                const public_cert_length = Memory.readPointer(this.data['public_cert_length']).toInt32();
+                const public_cert_length = Memory.readPointer(this.data['public_cert_length']).toUInt32();
                 const public_cert = Memory.readByteArray(this.data['public_cert'], public_cert_length);
                 const data2 = {
                     from: process_name,
                     message: 'GetLevel3_GetOEMPublicCertificate',
                     payload: {
-                        'Session': this.data['session'].toInt32(),
+                        'Session': this.data['session'].toUInt32(),
                         'Public_Cert_Length': public_cert_length,
                         'Cert': public_cert
                     }
@@ -762,14 +827,14 @@ function GetLevel3_LoadDeviceRSAKey(address, process_name) {
             }
         },
         onLeave: function (retvalue) {
-            const wrapped_rsa_key_length = this.data['wrapped_rsa_key_length'].toInt32();
+            const wrapped_rsa_key_length = this.data['wrapped_rsa_key_length'].toUInt32();
             const wrapped_rsa_key = Memory.readByteArray(this.data['wrapped_rsa_key'], wrapped_rsa_key_length);
             const data = {
                 from: process_name,
                 message: 'GetLevel3_LoadDeviceRSAKey',
                 payload: {
-                    'Status': OEMCryptoResult[retvalue.toInt32()],
-                    'Session': this.data['session'].toInt32(),
+                    'Status': OEMCryptoResult[retvalue.toUInt32()],
+                    'Session': this.data['session'].toUInt32(),
                     'Length': wrapped_rsa_key_length,
                     'Context': byteArrayToHex(wrapped_rsa_key)
                 }
@@ -798,21 +863,21 @@ function GetLevel3_RewrapDeviceRSAKey(address, process_name) {
             }
         },
         onLeave: function (retvalue) {
-            const status = OEMCryptoResult[retvalue.toInt32()];
+            const status = OEMCryptoResult[retvalue.toUInt32()];
             if (status === OEMCryptoResult["0"]) {
-                const message_length = this.data['message_length'].toInt32();
+                const message_length = this.data['message_length'].toUInt32();
                 const message = Memory.readByteArray(this.data['message'], message_length);
-                const signature_length = this.data['signature_length'].toInt32();
+                const signature_length = this.data['signature_length'].toUInt32();
                 const signature = Memory.readByteArray(this.data['signature'], signature_length);
-                const enc_rsa_key_length = this.data['enc_rsa_key_length'].toInt32();
+                const enc_rsa_key_length = this.data['enc_rsa_key_length'].toUInt32();
                 const enc_rsa_key =  Memory.readByteArray(this.data['enc_rsa_key'], enc_rsa_key_length);
-                const wrapped_rsa_key_length = Memory.readPointer(this.data['wrapped_rsa_key_length']).toInt32();
+                const wrapped_rsa_key_length = Memory.readPointer(this.data['wrapped_rsa_key_length']).toUInt32();
                 const wrapped_rsa_key =  Memory.readByteArray(this.data['wrapped_rsa_key'], wrapped_rsa_key_length);
                 const data = {
                     from: process_name,
                     message: 'GetLevel3_RewrapDeviceRSAKey',
                     status: status,
-                    session: this.data['session'].toInt32(),
+                    session: this.data['session'].toUInt32(),
                     payload: {
                         enc_rsa_key: {
                             'length': enc_rsa_key_length,
