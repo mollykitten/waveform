@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/colors.dart';
 import '../../core/api/soundcloud_auth.dart';
+import '../../core/recommendations/co_likers_job.dart';
 import '../../core/recommendations/models.dart';
 import '../../core/recommendations/providers.dart';
 import '../../shared/models/track.dart';
@@ -31,6 +32,7 @@ class _RecommendationsScreenState extends ConsumerState<RecommendationsScreen> {
   void initState() {
     super.initState();
     _scroll.addListener(_visibilityChanged);
+    ref.read(coLikersJobProvider).start();
   }
 
   void _visibilityChanged() {

@@ -6,6 +6,14 @@ All notable changes to Waveform are documented here. Format follows
 
 ## [Unreleased]
 
+### added
+- **my wave draws on three candidate sources**: the related-track graph, your
+  home stream and co-likers (people with similar likes), interleaved 50% /
+  25% / 25% with a shared playability filter. co-likers run as a background
+  job (at most 250 requests, cached for 24 hours without other users' ids);
+  listening facts record which source supplied each track, and stats shows a
+  listened/skipped tally per source.
+
 ### removed
 - **the model-assisted route of my wave.** the chatgpt connection, custom
   openai-compatible and ollama providers, the mood field and the listening

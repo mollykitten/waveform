@@ -3,10 +3,13 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api/soundcloud_auth.dart';
+import '../../core/log/talker.dart';
+import '../../core/recommendations/co_likers_job.dart';
 import '../../core/recommendations/listening_event.dart';
 import '../../core/recommendations/models.dart';
 import '../../core/recommendations/providers.dart';
 import '../../core/recommendations/seen_store.dart';
+import '../../core/recommendations/wave_sources.dart';
 import '../../shared/models/track.dart';
 import '../player/player_controller.dart';
 
@@ -105,7 +108,9 @@ class WaveController extends Notifier<WaveState> {
     if (state.discovering || ref.read(recommendationsProvider).busy) return;
     _waveId++;
     _ids.clear();
+    ref.read(waveSourcesProvider.notifier).clear();
     ref.read(recommendationsProvider.notifier).clear();
+    ref.read(coLikersJobProvider).start();
     _startingQueueVersion = ref.read(playerControllerProvider).queueVersion;
     await _generate(append: false);
   }
@@ -220,6 +225,13 @@ class WaveController extends Notifier<WaveState> {
     final player = ref.read(playerControllerProvider.notifier);
     final ids = batch.map((item) => item.track.id).toSet();
     _ids.addAll(ids);
+    // Sources must be known before the player starts the first track.
+    ref.read(waveSourcesProvider.notifier).add({
+      for (final item in batch) item.track.id: item.source,
+    }, startsQueue: !append);
+    ref
+        .read(talkerProvider)
+        .info('my wave queued ${batch.length}: ${_sourceCounts(batch)}');
     _mutatingQueue = true;
     try {
       if (append) {
@@ -244,6 +256,11 @@ class WaveController extends Notifier<WaveState> {
     }
     unawaited(_markShown(ids.where(_ids.contains).toList()));
   }
+
+  String _sourceCounts(List<Recommendation> batch) => [
+    for (final source in WaveSource.values)
+      '${source.name} ${batch.where((i) => i.source == source).length}',
+  ].join(', ');
 
   /// Only tracks really put in the queue get the "shown" cooldown; spare
   /// candidates stay in the pool untouched.
@@ -358,6 +375,7 @@ class WaveController extends Notifier<WaveState> {
     _lastRefillTrack = null;
     _startingQueueVersion = null;
     if (state.discovering) ref.read(recommendationsProvider.notifier).cancel();
+    ref.read(waveSourcesProvider.notifier).clear();
     state = const WaveState();
   }
 }

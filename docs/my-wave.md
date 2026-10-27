@@ -10,12 +10,50 @@ the screen asks you to sign in.
 
 ## how a batch is built
 
-the seeds are the current track, your 20 newest likes and up to 10 recent
-plays (30 in total). likes beyond the first page are walked, within a bounded
-time, only to exclude them from the result. the local graph engine then ranks
-related tracks of a few seeds (below). every result is a genuine SoundCloud
-track with an ordinary playback source; blocked, unplayable and already
-liked tracks are dropped.
+candidates come from three sources, interleaved rather than scored on one
+scale (a fixed blend hurt the stronger source in the pilots):
+
+- **related** (50% of a batch): the local graph engine ranks related tracks
+  of a few seeds, described below. the seeds are the current track, your 20
+  newest likes and up to 10 recent plays (30 in total).
+- **co-likers** (25%): people who liked your freshest likes, and what else
+  they liked. a background job takes your 50 newest likes, up to 50 likers
+  of each, keeps neighbours who share at least two of those likes (at most
+  150), reads each neighbour's latest 200 public likes and scores a track by
+  the summed weight of the neighbours who liked it (weight = shared likes;
+  the newest neighbour like breaks ties; a like without a timestamp counts
+  as the oldest). a run makes at most 250 requests, paced at 150 ms, with
+  exponential backoff on HTTP 429 (a short `Retry-After` is honoured) and is
+  cancelled on logout or account switch. the 250 covers the run itself
+  (the likes page, likers, neighbour likes, retries); it does not include
+  hydrating cached candidates into full tracks with `tracksByIds` when the
+  wave refills (one to a few requests, only for ids not yet hydrated), nor
+  the single automatic retry the api client makes after a 401. a run that
+  gives up after repeated 429s, or loses more than a fifth of its calls to
+  other failures, writes nothing: the previous cache stays in place and the
+  next attempt waits ten minutes rather than the 24 hours of a finished run.
+  it starts after sign-in and when my wave opens,
+  never blocks playback, and is cached for 24 hours in
+  `co-likers-v1-<identity>.json` (our own track ids and scores only; other
+  users' ids are never written to disk). until a cache exists, the wave runs
+  on the other two sources.
+- **stream** (25%): up to 40 fresh track items of your home stream (uploads
+  and reposts of accounts you follow), newest first. empty when signed out
+  or when the stream cannot be read.
+
+an empty source hands its share to the next one. before blending, every
+source is filtered the same way: blocked, snippet-only and encrypted-only
+tracks are dropped (they cannot play), as are your likes, the seeds, tracks
+heard, skipped, shown or disliked recently, and tracks already in the wave.
+the blended list keeps at most two tracks per artist. likes beyond the first
+page are walked, within a bounded time, only to exclude them from the result.
+every result is a genuine SoundCloud track with an ordinary playback source,
+and its reason says where it came from ("from related tracks…", "from your
+stream", "liked by people with similar likes").
+
+each listening fact of a wave track also records its source (`source`:
+`related`, `stream` or `coLikers`), so the sources can be compared by listens
+and skips; stats shows a one-line tally per source. facts stay on the device.
 
 ## local graph recommendations and learning
 

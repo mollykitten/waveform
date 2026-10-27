@@ -300,10 +300,7 @@ class VectorEngine {
     check();
     return [
       for (final track in selected)
-        Recommendation(
-          track,
-          'from related tracks, ranked using local listening interests',
-        ),
+        Recommendation(track, WaveSource.related.reason),
     ];
   }
 

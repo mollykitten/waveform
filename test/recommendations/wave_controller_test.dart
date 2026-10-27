@@ -12,6 +12,7 @@ import 'package:waveform_app/core/audio/audio_engine.dart';
 import 'package:waveform_app/core/log/talker.dart';
 import 'package:waveform_app/core/recommendations/listening_event.dart';
 import 'package:waveform_app/core/recommendations/models.dart';
+import 'package:waveform_app/core/recommendations/wave_sources.dart';
 import 'package:waveform_app/core/recommendations/recommendation_service.dart';
 import 'package:waveform_app/core/recommendations/seen_store.dart';
 import 'package:waveform_app/core/recommendations/providers.dart';
@@ -134,6 +135,37 @@ void main() {
       expect(pool.calls, 2);
     },
   );
+
+  test('the wave records each queued track\'s source and clears it', () async {
+    pool.sources = const [
+      WaveSource.related,
+      WaveSource.stream,
+      WaveSource.coLikers,
+    ];
+    pool.scripted = [3];
+    await container.read(waveControllerProvider.notifier).start();
+    await flush();
+    final sources = container.read(waveSourcesProvider);
+    // t1, t2, t3 were issued as index 1, 2, 3 of the rotation
+    expect(sources, {
+      't1': WaveSource.stream,
+      't2': WaveSource.coLikers,
+      't3': WaveSource.related,
+    });
+    container.read(waveControllerProvider.notifier).cancel();
+    expect(container.read(waveSourcesProvider), isEmpty);
+  });
+
+  test('a new wave starts with a clean source map', () async {
+    pool.scripted = [2, 0, 2];
+    final wave = container.read(waveControllerProvider.notifier);
+    await wave.start();
+    await flush();
+    expect(container.read(waveSourcesProvider).keys, containsAll(['t1', 't2']));
+    container.read(playerControllerProvider.notifier).play(realTrack('other'));
+    await flush();
+    expect(container.read(waveSourcesProvider), isEmpty);
+  });
 
   test(
     'late refill cannot append to an unrelated queue with a wave track',

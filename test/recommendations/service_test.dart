@@ -2,9 +2,12 @@ import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:waveform_app/core/recommendations/co_likers_source.dart';
+import 'package:waveform_app/core/recommendations/co_likers_store.dart';
 import 'package:waveform_app/core/recommendations/listening_store.dart';
 import 'package:waveform_app/core/recommendations/models.dart';
 import 'package:waveform_app/core/recommendations/recommendation_service.dart';
+import 'package:waveform_app/core/recommendations/stream_source.dart';
 import 'package:waveform_app/core/recommendations/vector_engine.dart';
 import 'package:waveform_app/core/recommendations/vector_store.dart';
 import 'package:waveform_app/shared/models/track.dart';
@@ -17,10 +20,26 @@ class ServiceApi extends TestSoundcloud {
   bool failLikes = false;
   List<Track> likes = [for (var i = 0; i < 30; i++) realTrack('like$i')];
   String? likesNext;
+  List<Track> stream = [];
+  bool failStream = false;
+  int streamCalls = 0;
   int likesCalls2 = 0;
 
   @override
   Future<List<Track>> relatedTracks(String id) async => related[id] ?? [];
+
+  @override
+  Future<List<Track>> streamTracks({int limit = 40}) async {
+    streamCalls++;
+    if (failStream) throw StateError('PRIVATE STREAM ERROR');
+    return stream.take(limit).toList();
+  }
+
+  @override
+  Future<List<Track>> tracksByIds(List<String> ids) async => [
+    for (final id in ids)
+      if (!id.startsWith('hidden')) realTrack(id, artist: 'cf-$id'),
+  ];
 
   @override
   Future<({List<Track> tracks, String? nextHref})> likesPage({
@@ -110,5 +129,131 @@ void main() {
   test('an empty pool fails visibly', () async {
     api.tracks = [];
     await expectLater(generate(), throwsA(WaveFailure.noTracks));
+  });
+
+  group('three sources', () {
+    late CoLikersStore cfStore;
+    late RecommendationService full;
+    setUp(() async {
+      cfStore = CoLikersStore(directory: () async => directory);
+      await cfStore.write('1', DateTime.now(), [
+        for (var i = 0; i < 12; i++) CoLikerCandidate('c$i', 20.0 - i, 100 - i),
+      ]);
+      api.related['current'] = [
+        for (var i = 0; i < 12; i++) realTrack('r$i', artist: 'rel$i'),
+      ];
+      api.stream = [
+        for (var i = 0; i < 12; i++) realTrack('s$i', artist: 'str$i'),
+      ];
+      full = RecommendationService(
+        api: api,
+        onWarning: api.warnings.add,
+        streamSource: StreamSource(api: api),
+        coLikers: CoLikersSource(api: api, store: cfStore),
+        vectorEngine: VectorEngine(
+          api: api,
+          store: VectorStore(directory: () async => directory),
+          listening: ListeningStore(directory: () async => directory),
+        ),
+      );
+    });
+
+    Future<List<Recommendation>> batch({int limit = 20}) => full.generate(
+      listeningIdentity: '1',
+      cancelToken: CancelToken(),
+      currentTrack: realTrack('current'),
+      limit: limit,
+    );
+
+    Map<WaveSource, int> counts(List<Recommendation> items) => {
+      for (final s in WaveSource.values)
+        s: items.where((i) => i.source == s).length,
+    };
+
+    test('related, stream and co-likers share a batch by quota', () async {
+      final result = await batch();
+      expect(result, hasLength(20));
+      final c = counts(result.take(8).toList());
+      expect(c[WaveSource.related], 4);
+      expect(c[WaveSource.stream], 2);
+      expect(c[WaveSource.coLikers], 2);
+      for (final item in result) {
+        expect(item.reason, item.source.reason);
+      }
+    });
+
+    test('likes, seeds, unplayable and blocked tracks are dropped', () async {
+      api.stream = [
+        realTrack('like3', artist: 'a1'),
+        realTrack('current', artist: 'a2'),
+        realTrack('s-blocked', blocked: true, artist: 'a3'),
+        realTrack('s-encrypted', playable: false, artist: 'a4'),
+        realTrack('s-ok', artist: 'a5'),
+      ];
+      await cfStore.write('1', DateTime.now(), [
+        const CoLikerCandidate('like4', 50, 1),
+        const CoLikerCandidate('hidden-cf', 40, 1),
+        const CoLikerCandidate('c-ok', 30, 1),
+      ]);
+      final result = await batch();
+      final streamIds = [
+        for (final r in result)
+          if (r.source == WaveSource.stream) r.track.id,
+      ];
+      expect(streamIds, ['s-ok']);
+      final coIds = [
+        for (final r in result)
+          if (r.source == WaveSource.coLikers) r.track.id,
+      ];
+      expect(coIds, ['c-ok']);
+    });
+
+    test('a failing stream never fails the wave', () async {
+      api.failStream = true;
+      final result = await batch();
+      expect(counts(result)[WaveSource.stream], 0);
+      expect(counts(result)[WaveSource.related], greaterThan(0));
+      expect(api.warnings.join(), isNot(contains('PRIVATE')));
+    });
+
+    test('no cached co-likers yet: related and stream still play', () async {
+      await cfStore.forget('1');
+      final fresh = RecommendationService(
+        api: api,
+        streamSource: StreamSource(api: api),
+        coLikers: CoLikersSource(api: api, store: cfStore),
+        vectorEngine: VectorEngine(
+          api: api,
+          store: VectorStore(directory: () async => directory),
+          listening: ListeningStore(directory: () async => directory),
+        ),
+      );
+      final result = await fresh.generate(
+        listeningIdentity: '1',
+        cancelToken: CancelToken(),
+        currentTrack: realTrack('current'),
+      );
+      expect(counts(result)[WaveSource.coLikers], 0);
+      expect(counts(result)[WaveSource.stream], greaterThan(0));
+    });
+
+    test('a failing stream is not retried on every refill', () async {
+      api.failStream = true;
+      await batch();
+      await batch();
+      expect(api.streamCalls, 1);
+    });
+
+    test('the stream is fetched once for repeated refills', () async {
+      await batch();
+      await batch();
+      expect(api.streamCalls, 1);
+    });
+
+    test('playability: only a playable, unblocked track is eligible', () {
+      expect(VectorEngine.eligible(realTrack('1')), isTrue);
+      expect(VectorEngine.eligible(realTrack('1', blocked: true)), isFalse);
+      expect(VectorEngine.eligible(realTrack('1', playable: false)), isFalse);
+    });
   });
 }

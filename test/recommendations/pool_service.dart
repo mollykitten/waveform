@@ -28,6 +28,9 @@ class PoolService extends RecommendationService {
   List<int>? scripted;
   WaveFailure? failure;
 
+  /// Sources handed out in rotation to the issued tracks.
+  List<WaveSource> sources = const [WaveSource.related];
+
   /// Makes the first call wait for this completer.
   Completer<void>? holdFirst;
 
@@ -55,7 +58,11 @@ class PoolService extends RecommendationService {
       final size = scripted!.isEmpty ? 0 : scripted!.removeAt(0);
       return [
         for (var i = 0; i < size; i++)
-          Recommendation(realTrack('t${++issued}'), 'a possible fit'),
+          Recommendation(
+            realTrack('t${++issued}'),
+            'a possible fit',
+            source: sources[issued % sources.length],
+          ),
       ];
     }
     return [
