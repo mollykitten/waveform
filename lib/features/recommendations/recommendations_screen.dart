@@ -404,24 +404,18 @@ class WaveQueueRow extends StatelessWidget {
   final String? reason;
 
   @override
-  Widget build(BuildContext context) => Column(
-    key: ValueKey('wave-row-${track.id}'),
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [
-      TrackRow(track: track, queue: queue),
-      if (reason != null)
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-          child: Tooltip(
-            message: reason!,
-            child: Text(
-              reason!,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: formTextStyle,
+  Widget build(BuildContext context) {
+    final row = TrackRow(track: track, queue: queue);
+    // The reason stays one hover away so the list reads as plain tracks.
+    return KeyedSubtree(
+      key: ValueKey('wave-row-${track.id}'),
+      child: reason == null
+          ? row
+          : Tooltip(
+              message: reason!,
+              waitDuration: const Duration(milliseconds: 700),
+              child: row,
             ),
-          ),
-        ),
-    ],
-  );
+    );
+  }
 }
