@@ -11,6 +11,7 @@ import '../action_feedback.dart';
 import '../format.dart';
 import '../models/track.dart';
 import 'cover_art.dart';
+import 'go_plus_badge.dart';
 import 'pressable.dart';
 import 'track_context_menu.dart';
 import 'live_waveform.dart';
@@ -117,6 +118,10 @@ class TrackRow extends ConsumerWidget {
                           ),
                         ),
                       ),
+                      if (track.goPlus) ...[
+                        const SizedBox(width: 8),
+                        const GoPlusBadge(),
+                      ],
                     ],
                   ),
                   const SizedBox(height: 2),

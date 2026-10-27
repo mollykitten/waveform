@@ -11,6 +11,7 @@ import '../../../shared/format.dart';
 import '../../../shared/models/track.dart';
 import '../../../shared/url_share.dart';
 import '../../../shared/widgets/cover_art.dart';
+import '../../../shared/widgets/go_plus_badge.dart';
 import '../../../shared/widgets/live_waveform.dart';
 import '../../../shared/widgets/pressable.dart';
 import '../../../shared/widgets/toast.dart';
@@ -112,6 +113,10 @@ class BottomPlayer extends ConsumerWidget {
                           ),
                         ),
                       ),
+                      if (track.goPlus) ...[
+                        const SizedBox(width: 6),
+                        const GoPlusBadge(),
+                      ],
                     ],
                   ),
                   const SizedBox(height: 2),

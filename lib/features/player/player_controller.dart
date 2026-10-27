@@ -19,7 +19,7 @@ import '../../shared/models/track.dart';
 
 /// Событие «трек не проигрался» — для всплывающего уведомления в UI.
 /// [seq] растёт с каждым событием, чтобы listener срабатывал и на повтор.
-typedef Unplayable = ({int seq, String title});
+typedef Unplayable = ({int seq, String title, bool goPlus});
 
 /// Состояние плеера. Прогресс/признак «играет» приходят из [AudioEngine]
 /// (just_audio); очередь next/previous — реальный список с экрана.
@@ -501,7 +501,11 @@ class PlayerController extends Notifier<PlayerState> {
     _listening.finish(ListeningTransitionCause.unplayable);
     state = state.copyWith(
       isPlaying: false,
-      unplayable: (seq: ++_unplayableSeq, title: track.title),
+      unplayable: (
+        seq: ++_unplayableSeq,
+        title: track.title,
+        goPlus: track.goPlus,
+      ),
       transitionCause: ListeningTransitionCause.unplayable,
     );
     if (_queue.length > 1 && ++_deadStreak < _maxDeadSkips) {
@@ -633,7 +637,7 @@ class PlayerController extends Notifier<PlayerState> {
         // instead of rolling metadata back over a different audio source.
         state = state.copyWith(
           isPlaying: false,
-          unplayable: (seq: ++_unplayableSeq, title: n.title),
+          unplayable: (seq: ++_unplayableSeq, title: n.title, goPlus: n.goPlus),
         );
         _listening.finish(ListeningTransitionCause.unplayable);
         _startListening(n);
