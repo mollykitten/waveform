@@ -1,6 +1,6 @@
 # roadmap
 
-status as of 2026-10-25. implemented means present in source;
+status as of 2026-10-27. implemented means present in source;
 it does not mean released or verified with a live subscribed account.
 
 ## implemented
@@ -20,13 +20,27 @@ it does not mean released or verified with a live subscribed account.
 - independent review of the combined auth, UI, player and audio-engine changes;
   three reproduced playback issues were fixed: source/heard-time attribution,
   stale preload after queue append, and pause/load cancellation.
-- final verification: Dart MCP analysis reports no errors; all 356 default
-  Flutter tests pass with 10 optional captures skipped; all 36 notifier Python
-  tests pass; the macOS debug app builds successfully without launching it.
+- final verification on main (2026-10-27): `flutter analyze` reports no issues;
+  499 default Flutter tests pass with 8 optional captures skipped. the macOS
+  debug app builds in CI; nothing here was run against a live account.
 - local structural vectors from a bounded related-track graph: up to six seed
   interests and twelve related tracks per seed. sampled listening feedback,
   timestamped provenance and stores are bounded and isolated by verified
   SoundCloud identity. ranking includes diversity and exploration.
+
+- persistent per-account memory of shown, played, skipped and disliked tracks
+  (`SeenStore`) so a restart no longer replays what was just heard; the wave
+  keeps a staged candidate pool with seed rotation, a second related level and
+  genre search under a request budget, and retries instead of going quiet.
+- a dislike button for wave tracks: the track is skipped and removed from the
+  queue, not recommended again for a year, and lowers the matching seed
+  interests; undo restores the previous state.
+- sign-out clears the webview session and token file, token access is
+  serialized, and pending chatgpt revocations are kept on 408/429.
+- macOS release pipeline signs inside out and notarizes with an app store
+  connect api key (`tool/notarize.sh`); a `*.wvd` device profile fails the build.
+  no real run yet: it needs the accepted apple agreement, an api key and a
+  developer id certificate.
 
 these vectors describe graph relationships. neural audio embeddings, a server
 catalog index and cross-device profile sync are **not implemented**. a valid
@@ -50,6 +64,15 @@ use the model-assisted path. this is not an index of the whole SoundCloud catalo
 this is a staged plan, not backend implementation. each stage needs evidence
 before the next starts.
 
+0. **experiment result (2026-10-27).** a read-only comparison of LAION
+   `larger_clap_music` audio vectors against the related graph found no usable
+   gain: on 100 new public likes of one profile against 550 negatives, audio
+   recall@10 and MRR were not better than random, and 86 of 100 likes were out
+   of reach of the graph (cold start), where audio did not help either. verdict:
+   no-go for audio as a recommendation source on this data. reopen only after a
+   repeat on 2-3 other people's likes with AUC against hard negatives of at
+   least 0.65. terms of use for analysing sound and sharing a vector cache are
+   still unchecked. the stages below stay a plan.
 1. **quality and source experiment.** choose a model and a small, permitted
    evaluation set. establish rights and source-access terms for audio and
    metadata before downloading or processing either. compare model embeddings
