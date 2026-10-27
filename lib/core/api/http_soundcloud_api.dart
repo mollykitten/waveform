@@ -66,7 +66,9 @@ class HttpSoundcloudApi implements SoundcloudApi {
     try {
       return (await call()).data;
     } on DioException catch (e) {
-      if (e.response?.statusCode == 401) {
+      // 401 на личной ручке — это токен пользователя, а не протухший
+      // client_id: ротация id тут не поможет, отдаём ошибку как есть.
+      if (e.response?.statusCode == 401 && !authed) {
         await _ids.refresh();
         return (await call()).data;
       }
@@ -226,7 +228,14 @@ class HttpSoundcloudApi implements SoundcloudApi {
   // Личные коллекции в api-v2 — по /users/{id}/…, а НЕ /me/… (последние 404).
   // Исключения, которые реально работают как /me/…: /me и /me/play-history.
   Future<String?>? _meIdFuture;
-  Future<String?> _meId() => _meIdFuture ??= _fetchMeId();
+  Future<String?> _meId() async {
+    final future = _meIdFuture ??= _fetchMeId();
+    final id = await future;
+    // Неудача (сеть, 5xx, null) не кешируется на весь срок жизни экземпляра.
+    if (id == null && identical(_meIdFuture, future)) _meIdFuture = null;
+    return id;
+  }
+
   Future<String?> _fetchMeId() async {
     try {
       final id = asMap(await _get('/me', null, true))['id'];
@@ -307,9 +316,14 @@ class HttpSoundcloudApi implements SoundcloudApi {
   /// GET абсолютного URL (для next_href пагинации). Подмешиваем свежий
   /// client_id поверх собственных query-параметров SC, 401 → refresh + retry.
   Future<dynamic> _getUrl(String url, bool authed) async {
+    final uri = Uri.parse(url);
+    // next_href приходит из ответа сервера: Bearer уходит только на api-v2,
+    // чужой хост игнорируем целиком (токен не утекает на сторонний адрес).
+    if (uri.scheme != 'https' || uri.host != 'api-v2.soundcloud.com') {
+      throw StateError('refusing next_href on foreign host: ${uri.host}');
+    }
     Future<Response<dynamic>> call() async {
       final cid = await _ids.get();
-      final uri = Uri.parse(url);
       final query = {...uri.queryParameters, 'client_id': cid};
       final full = uri.replace(queryParameters: query).toString();
       return _dio.get(full, options: authed ? _authOptions : null);
@@ -318,7 +332,7 @@ class HttpSoundcloudApi implements SoundcloudApi {
     try {
       return (await call()).data;
     } on DioException catch (e) {
-      if (e.response?.statusCode == 401) {
+      if (e.response?.statusCode == 401 && !authed) {
         await _ids.refresh();
         return (await call()).data;
       }
@@ -416,8 +430,15 @@ class HttpSoundcloudApi implements SoundcloudApi {
       () => _mePlaylists(),
       () async => const <Collection>[],
     );
-    final albums = _searchPlaylists(_genres[0], albums: true);
-    final stations = _genreStations(_genres[1]);
+    // Публичные секции не должны ронять лайки и плейлисты при сбое.
+    final albums = _publicOrEmpty(
+      'albums',
+      () => _searchPlaylists(_genres[0], albums: true),
+    );
+    final stations = _publicOrEmpty(
+      'stations',
+      () => _genreStations(_genres[1]),
+    );
     final following = _tryAuthed(
       () => _meFollowings(),
       () async => const <Collection>[],
@@ -435,6 +456,18 @@ class HttpSoundcloudApi implements SoundcloudApi {
       following: await following,
       history: await history,
     );
+  }
+
+  Future<List<Collection>> _publicOrEmpty(
+    String what,
+    Future<List<Collection>> Function() load,
+  ) async {
+    try {
+      return await load();
+    } catch (e, st) {
+      _log.warning('library: $what failed → empty', e, st);
+      return const <Collection>[];
+    }
   }
 
   Future<List<Collection>> _meFollowings() async {
@@ -665,12 +698,13 @@ class HttpSoundcloudApi implements SoundcloudApi {
     try {
       final data = asMap(await _get('/resolve', {'url': u}));
       final kind = data['kind'] as String?;
+      final id = data['id'];
       switch (kind) {
         case 'track':
-          return '/track/${data['id']}';
+          return id == null ? null : '/track/${Uri.encodeComponent('$id')}';
         case 'playlist':
         case 'system-playlist':
-          return '/playlist/${data['id']}';
+          return id == null ? null : '/playlist/${Uri.encodeComponent('$id')}';
         case 'user':
           final permalink = data['permalink'] as String?;
           return (permalink == null || permalink.isEmpty)
