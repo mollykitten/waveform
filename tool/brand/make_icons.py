@@ -232,6 +232,76 @@ def og_image(fonts):
     return img.resize((w, h), Image.LANCZOS).convert("RGB")
 
 
+# Окно DMG в points. Координаты иконок дублирует tool/dmg/settings.py —
+# меняешь здесь, меняй там.
+DMG_W, DMG_H = 640, 400
+DMG_APP = (170, 180)
+DMG_APPS = (470, 180)
+DMG_LABEL_Y = 245  # верх плашки под подписью Finder
+LABEL_PLATE = (122, 122, 122)  # серый, на котором читается и чёрный, и белый текст
+
+
+def dmg_background(fonts, scale):
+    """Фон окна DMG: app → waveform-стрелка → Applications.
+
+    Finder рисует подписи иконок цветом системной темы, а не фона, поэтому
+    под подписями лежат серые плашки — читаются и в светлой, и в тёмной теме.
+    """
+    s = scale * SS
+    w, h = DMG_W * s, DMG_H * s
+    img = vertical_gradient((w, h), (17, 17, 17), BG).convert("RGBA")
+
+    # Тёплое свечение за иконкой приложения, как в самой иконке.
+    glow = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    r = 120 * s
+    cx, cy = DMG_APP[0] * s, DMG_APP[1] * s
+    ImageDraw.Draw(glow).ellipse((cx - r, cy - r, cx + r, cy + r), fill=ACID + (34,))
+    img.alpha_composite(glow.filter(ImageFilter.GaussianBlur(70 * s)))
+
+    d = ImageDraw.Draw(img)
+
+    # Стрелка — кусок waveform: прослушанная часть acid, дальше waveDim,
+    # в конце шеврон. Середина между иконками, по вертикали — центр иконок.
+    import math
+
+    bw, gap = 4 * s, 4 * s
+    n = 14
+    x = (DMG_APP[0] + DMG_APPS[0]) / 2 * s - (n * (bw + gap) + 14 * s) / 2
+    cy = DMG_APP[1] * s
+    for i in range(n):
+        amp = (0.25 + 0.75 * abs(math.sin(i * 0.9 + 0.4) * math.cos(i * 0.23))) * 16 * s
+        col = ACID if i < n * 0.6 else WAVE_DIM
+        d.rounded_rectangle(
+            (x, cy - amp, x + bw, cy + amp), radius=bw * 0.2, fill=col
+        )
+        x += bw + gap
+    x += 4 * s
+    arm = 9 * s
+    d.line(
+        [(x, cy - arm), (x + arm, cy), (x, cy + arm)],
+        fill=WAVE_DIM,
+        width=round(3 * s),
+        joint="curve",
+    )
+
+    # Плашки под подписи Finder.
+    for ix, _ in (DMG_APP, DMG_APPS):
+        pw, ph = 100 * s, 18 * s
+        d.rounded_rectangle(
+            (ix * s - pw / 2, DMG_LABEL_Y * s, ix * s + pw / 2, DMG_LABEL_Y * s + ph),
+            radius=3 * s,
+            fill=LABEL_PLATE,
+        )
+
+    _, regular_path = fonts
+    mono = load_font(regular_path, 11 * s, "Regular")
+    hint = "drag waveform to applications to install"
+    tw = d.textlength(hint, font=mono)
+    d.text(((w - tw) / 2, 340 * s), hint, font=mono, fill=(85, 85, 85))
+
+    return img.resize((DMG_W * scale, DMG_H * scale), Image.LANCZOS).convert("RGB")
+
+
 def main():
     brand = ROOT / "assets/brand"
     site = ROOT / "site/assets"
@@ -250,6 +320,8 @@ def main():
         site / "apple-touch-icon.png": full_bleed(180).convert("RGB"),
         site / "favicon-32.png": full_bleed(32, transparent=True),
         site / "og.png": og_image(fonts),
+        brand / "dmg-background.png": dmg_background(fonts, 1),
+        brand / "dmg-background@2x.png": dmg_background(fonts, 2),
     }
 
     for path, image in outputs.items():

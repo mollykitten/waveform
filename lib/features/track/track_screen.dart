@@ -255,7 +255,9 @@ class _Hero extends StatelessWidget {
                       ],
                     ),
                   ),
-                  _TagChip(text: '#${track.genre}'),
+                  _TagChip(
+                    text: '#${track.genre.isEmpty ? 'music' : track.genre}',
+                  ),
                 ],
               ),
               const SizedBox(height: 18),

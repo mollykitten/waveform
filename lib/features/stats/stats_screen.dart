@@ -10,6 +10,7 @@ import '../../shared/widgets/async_view.dart';
 import '../../shared/widgets/empty_state.dart';
 import '../../shared/widgets/pressable.dart';
 import '../../shared/widgets/section_header.dart';
+import 'wave_source_summary.dart';
 
 class StatsScreen extends ConsumerWidget {
   const StatsScreen({super.key});
@@ -122,6 +123,7 @@ class _Body extends StatelessWidget {
             ],
           ),
         ],
+        const WaveSourceSummary(),
       ],
     );
   }

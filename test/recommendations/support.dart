@@ -1,27 +1,28 @@
-import 'dart:async';
-
-import 'package:dio/dio.dart';
 import 'package:waveform_app/core/api/soundcloud_api.dart';
-import 'package:waveform_app/core/recommendations/ai_client.dart';
-import 'package:waveform_app/core/recommendations/ai_config.dart';
 import 'package:waveform_app/shared/models/track.dart';
 
-Track realTrack(String id, {bool blocked = false, String artist = 'artist'}) =>
-    Track(
-      id: id,
-      title: 'track $id',
-      artist: artist,
-      durationMs: 120000,
-      likes: 1,
-      reposts: 0,
-      plays: 10,
-      waveform: const [0.3, 0.5],
-      genre: 'ambient',
-      description: 'PRIVATE DESCRIPTION',
-      permalinkUrl: 'https://soundcloud.com/private?secret=PRIVATE_LINK',
-      streamCandidates: ['https://stream.invalid/$id?token=STREAM_SECRET'],
-      blocked: blocked,
-    );
+Track realTrack(
+  String id, {
+  bool blocked = false,
+  String artist = 'artist',
+  bool playable = true,
+}) => Track(
+  id: id,
+  title: 'track $id',
+  artist: artist,
+  durationMs: 120000,
+  likes: 1,
+  reposts: 0,
+  plays: 10,
+  waveform: const [0.3, 0.5],
+  genre: 'ambient',
+  description: 'PRIVATE DESCRIPTION',
+  permalinkUrl: 'https://soundcloud.com/private?secret=PRIVATE_LINK',
+  streamCandidates: playable
+      ? ['https://stream.invalid/$id?token=STREAM_SECRET']
+      : const [],
+  blocked: blocked,
+);
 
 class TestSoundcloud implements SoundcloudApi {
   List<Track> tracks = [realTrack('1'), realTrack('2')];
@@ -66,42 +67,3 @@ class TestSoundcloud implements SoundcloudApi {
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
-
-class ScriptedAi implements AiClient {
-  final payloads = <String>[];
-  final systems = <String>[];
-  final replies = <String>[
-    '{"queries":["ambient","dream pop"]}',
-    '{"recommendations":[{"id":"2","reason":"a possible fit"}]}',
-  ];
-  Completer<String>? pending;
-  AiFailureForTest? failure;
-
-  @override
-  Future<String> complete({
-    required AiConfig config,
-    required AiConsent consent,
-    required String apiKey,
-    required String system,
-    required String data,
-    required CancelToken cancelToken,
-  }) async {
-    payloads.add(data);
-    systems.add(system);
-    if (failure != null) throw StateError('PRIVATE KEY $apiKey');
-    if (pending != null) return pending!.future;
-    return replies.removeAt(0);
-  }
-}
-
-enum AiFailureForTest { transport }
-
-const testConfig = AiConfig(
-  endpoint: 'http://localhost:12345/v1',
-  model: 'test-model',
-);
-
-const testConsent = AiConsent(
-  destination: 'http://localhost:12345/v1/chat/completions',
-  listening: false,
-);

@@ -14,6 +14,7 @@ import '../core/deeplinks/clipboard_watcher.dart';
 import '../core/deeplinks/deep_links.dart';
 import '../core/lastfm/scrobbler.dart';
 import '../core/log/talker.dart';
+import '../core/recommendations/co_likers_job.dart';
 import '../core/recommendations/listening_providers.dart';
 import '../features/omnibox/omnibox_dropdown.dart';
 import '../features/omnibox/omnibox_providers.dart';
@@ -107,6 +108,7 @@ class _AppShellState extends ConsumerState<AppShell> {
     // на playerController.
     ref.watch(lastfmScrobblerProvider);
     ref.watch(listeningFeedbackProvider);
+    ref.watch(coLikersJobProvider);
     // Lazy-bootstrap deep-link сервиса (waveform:// + soundcloud.com ссылки).
     ref.watch(deepLinkServiceProvider);
     // Lazy-bootstrap слежения за буфером (ссылки soundcloud.com → тост «открыть»).

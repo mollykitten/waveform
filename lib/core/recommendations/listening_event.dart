@@ -1,3 +1,5 @@
+import 'models.dart' show WaveSource;
+
 /// Explicit playback intent; automatic transitions never masquerade as skips.
 enum ListeningTransitionCause {
   naturalCompletion,
@@ -35,6 +37,7 @@ class ListeningEvent {
     required this.startedAt,
     required this.endedAt,
     required this.cause,
+    this.source,
   });
 
   final String sessionId;
@@ -47,6 +50,10 @@ class ListeningEvent {
   final DateTime startedAt;
   final DateTime endedAt;
   final ListeningTransitionCause cause;
+
+  /// The wave source that supplied the track; null outside my wave and for
+  /// facts written before sources were recorded.
+  final WaveSource? source;
 
   /// A conservative, replaceable interpretation; the persisted facts are primary.
   ListeningEvidence get evidence {
@@ -79,6 +86,7 @@ class ListeningEvent {
     'started_at': startedAt.toUtc().toIso8601String(),
     'ended_at': endedAt.toUtc().toIso8601String(),
     'cause': cause.name,
+    if (source != null) 'source': source!.name,
   };
 
   factory ListeningEvent.fromJson(Map<String, dynamic> json) {
@@ -93,6 +101,7 @@ class ListeningEvent {
       startedAt: DateTime.parse(json['started_at'] as String),
       endedAt: DateTime.parse(json['ended_at'] as String),
       cause: ListeningTransitionCause.values.byName(json['cause'] as String),
+      source: WaveSource.tryParse(json['source']),
     );
     if (!event.isValid) throw const FormatException('invalid listening event');
     return event;

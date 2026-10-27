@@ -23,7 +23,7 @@ bool get visualTestFontsAvailable => _fontFiles.values.every(
 );
 
 /// Explicit local opt-in; ordinary test runs never produce visual evidence.
-/// Create this ignored marker to regenerate the six wave/consent captures.
+/// Create this ignored marker to regenerate the wave captures.
 bool get waveVisualCaptureEnabled =>
     visualTestFontsAvailable &&
     File('build/visual-review/.capture-wave').existsSync();

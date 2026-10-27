@@ -174,19 +174,17 @@ jobs:
         run: |
           APP="build/macos/Build/Products/Release/Waveform.app"
           DMG="waveform-macos-$REF_NAME.dmg"
-          # Stage the stapled .app + Applications symlink, then make DMG.
-          # ditto keeps symlinks, xattrs and the stapled ticket intact.
-          STAGE="$RUNNER_TEMP/dmg-stage"
-          rm -rf "$STAGE"
-          mkdir -p "$STAGE"
-          /usr/bin/ditto "$APP" "$STAGE/Waveform.app"
-          ln -s /Applications "$STAGE/Applications"
-          hdiutil create -format UDZO -fs HFS+ \
-            -volname "Waveform $REF_NAME" \
-            -srcfolder "$STAGE" "$DMG"
+          # Styled DMG (background, window, icon layout) from the stapled
+          # .app; make_dmg.sh copies it with ditto, keeping the ticket.
+          python3 -m venv "$RUNNER_TEMP/dmgbuild"
+          "$RUNNER_TEMP/dmgbuild/bin/pip" install --quiet dmgbuild==1.6.5
+          PATH="$RUNNER_TEMP/dmgbuild/bin:$PATH" \
+            tool/make_dmg.sh "$APP" "$DMG" "Waveform $REF_NAME"
           MNT="$RUNNER_TEMP/dmg-check"
           mkdir -p "$MNT"
           hdiutil attach -readonly -nobrowse -mountpoint "$MNT" "$DMG"
+          xcrun stapler validate "$MNT/Waveform.app" \
+            || { hdiutil detach "$MNT"; exit 1; }
           tool/check_no_wvd.sh "$MNT" || { hdiutil detach "$MNT"; exit 1; }
           hdiutil detach "$MNT"
           codesign --force --timestamp \
@@ -301,14 +299,13 @@ jobs:
 
       - name: Install linux build deps
         # webkit2gtk + libsoup are REQUIRED by the vendored
-        # desktop_webview_window CMake; libsecret is required for protected
-        # ChatGPT credentials. Without these, configure fails
+        # desktop_webview_window CMake. Without these, configure fails
         # within seconds.
         run: |
           sudo apt-get update -y
           sudo apt-get install -y \
             clang cmake ninja-build pkg-config libgtk-3-dev \
-            liblzma-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev libsecret-1-dev
+            liblzma-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev
 
       - name: Install pub dependencies
         run: flutter pub get
