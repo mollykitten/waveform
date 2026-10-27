@@ -113,18 +113,20 @@ this replaces the earlier plan for audio embeddings and a vector backend. it
 starts after v0.4.0 ships (horizon 0). each stage needs evidence before the
 next starts.
 
-1. **candidate sources.** (in progress) add co-liker CF (bounded: 50 likers per seed, at
+1. **candidate sources.** (implemented, unreleased) add co-liker CF (bounded: 50 likers per seed, at
    least two shared seeds, 200 recent likes per neighbour, a neighbour cap) and
    the authenticated home stream next to the related graph. run them as a
    background job with an on-disk cache and incremental refresh, never on the
    playback path, within explicit request budgets and backoff on rate limits.
-2. **filtering and ranking.** drop unplayable and DRM-only candidates before
+   the batch interleaves the sources 50% related / 25% co-likers / 25% stream
+   instead of blending scores; see [my-wave.md](my-wave.md).
+2. **filtering and ranking.** (implemented) drop unplayable and DRM-only candidates before
    ranking; exclude known likes, seeds and recent recommendations; keep
    artist/repeat limits, diversity and deliberate exploration. rank CF
    candidates by neighbour weight and recency of the neighbour's like. do not
    ship a fixed 0.5 graph/CF blend: in the pilot it hurt CF on its own
    reachable slice.
-3. **in-app evaluation.** record local, redacted like/skip/completion outcomes
+3. **in-app evaluation.** (facts recorded; comparison pending) record local, redacted like/skip/completion outcomes
    per candidate source for recommended tracks and compare sources on live
    sessions. offline pilots cannot answer which source ranks better.
 4. **backend, only if needed.** a server index is justified only if the
