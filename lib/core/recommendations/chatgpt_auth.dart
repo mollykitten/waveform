@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:developer' as developer;
 import 'dart:io';
 import 'dart:math';
 
@@ -66,12 +67,18 @@ class LoopbackChatGptCallback implements ChatGptCallback {
         'Content-Security-Policy',
         "default-src 'none'",
       );
-      request.response.statusCode = valid ? 200 : 400;
-      request.response.write(
-        valid ? 'You can return to waveform.' : 'Invalid sign-in callback.',
-      );
-      await request.response.close();
+      // Complete first: a browser that drops the connection must not lose
+      // an otherwise valid callback.
       if (valid && !_result.isCompleted) _result.complete(request.uri);
+      try {
+        request.response.statusCode = valid ? 200 : 400;
+        request.response.write(
+          valid ? 'You can return to waveform.' : 'Invalid sign-in callback.',
+        );
+        await request.response.close();
+      } catch (_) {
+        // The browser went away; the result above is already delivered.
+      }
     });
   }
   final HttpServer _server;
@@ -94,6 +101,8 @@ class LoopbackChatGptCallback implements ChatGptCallback {
     await _server.close(force: true);
   }
 }
+
+enum _Revocation { revoked, rejected, retry }
 
 /// Official open-source Sign in with ChatGPT public-client flow.
 /// https://developers.openai.com/siwc/token-sharing-open-source/sign-in
@@ -127,6 +136,7 @@ class ChatGptAuth {
   Map<String, dynamic> _vault = {};
   Future<void>? _restore;
   Future<String>? _refresh;
+  Future<void>? _retrying;
   Future<void> _writes = Future.value();
   ChatGptCallback? _pending;
   int _epoch = 0;
@@ -164,9 +174,11 @@ class ChatGptAuth {
   }
 
   Future<void> restore() async {
+    final fresh = _restore == null;
     final operation = _restore ??= _load();
     try {
       await operation;
+      if (fresh) unawaited(retryPendingRevocations());
     } catch (_) {
       if (identical(_restore, operation)) _restore = null;
       rethrow;
@@ -527,35 +539,27 @@ class ChatGptAuth {
       } catch (_) {}
       ++_epoch;
       final current = account;
-      var revoked = current?.connected != true;
+      var outcome = current?.connected != true
+          ? _Revocation.revoked
+          : _Revocation.retry;
+      final refreshToken = current?.record['refresh_token'];
       if (current?.connected == true) {
         try {
           final discovery = await _discovery();
-          for (var attempt = 0; attempt < 2 && !revoked; attempt++) {
-            if (attempt > 0) {
-              await Future<void>.delayed(const Duration(milliseconds: 250));
-            }
-            try {
-              final response = await _dio.post<String>(
-                _trusted(discovery['revocation_endpoint'] as String).toString(),
-                data: {
-                  'token': current!.record['refresh_token'],
-                  'token_type_hint': 'refresh_token',
-                  'client_id': current.clientId,
-                },
-                options: Options(
-                  contentType: Headers.formUrlEncodedContentType,
-                  responseType: ResponseType.plain,
-                ),
-              );
-              revoked = response.statusCode == 200;
-            } catch (_) {
-              // Retry transient transport failures once before clearing locally.
-            }
-          }
+          outcome = await _revoke(
+            discovery,
+            refreshToken as String,
+            current!.clientId,
+          );
         } catch (_) {
-          revoked = false;
+          outcome = _Revocation.retry;
         }
+      }
+      final revoked = outcome == _Revocation.revoked;
+      // A transient failure must survive the local sign-out, otherwise a
+      // still-valid refresh token would be orphaned for good. A 4xx is final.
+      if (outcome == _Revocation.retry && refreshToken is String) {
+        _queueRevocation(refreshToken, current!.clientId);
       }
       if (current != null) {
         for (final key in [
@@ -573,6 +577,100 @@ class ChatGptAuth {
       return revoked;
     } finally {
       _loggingOut = false;
+    }
+  }
+
+  Future<_Revocation> _revoke(
+    Map<String, dynamic> discovery,
+    String refreshToken,
+    String clientId,
+  ) async {
+    for (var attempt = 0; attempt < 2; attempt++) {
+      if (attempt > 0) {
+        await Future<void>.delayed(const Duration(milliseconds: 250));
+      }
+      try {
+        final response = await _dio.post<String>(
+          _trusted(discovery['revocation_endpoint'] as String).toString(),
+          data: {
+            'token': refreshToken,
+            'token_type_hint': 'refresh_token',
+            'client_id': clientId,
+          },
+          options: Options(
+            contentType: Headers.formUrlEncodedContentType,
+            responseType: ResponseType.plain,
+          ),
+        );
+        final code = response.statusCode ?? 0;
+        if (code == 200) return _Revocation.revoked;
+        // 4xx will not change on retry; 5xx and anything else might.
+        if (code >= 400 && code < 500) return _Revocation.rejected;
+      } catch (_) {
+        // Retry transient transport failures once.
+      }
+    }
+    return _Revocation.retry;
+  }
+
+  void _queueRevocation(String refreshToken, String clientId) {
+    final queue = _vault['pending_revocations'];
+    final list = queue is List ? List<dynamic>.from(queue) : <dynamic>[];
+    list.add({'refresh_token': refreshToken, 'client_id': clientId});
+    // Bound the queue so a permanently failing endpoint cannot grow the vault.
+    if (list.length > 5) {
+      developer.log(
+        'chatgpt: pending revocation queue full, dropping oldest entry',
+        name: 'waveform.chatgpt',
+        level: 900,
+      );
+    }
+    _vault['pending_revocations'] = list.length > 5
+        ? list.sublist(list.length - 5)
+        : list;
+  }
+
+  /// Retries revocations that could not be confirmed during sign-out (offline
+  /// or 5xx). Confirmed entries are dropped; the rest stay for next launch.
+  Future<void> retryPendingRevocations() => _retrying ??=
+      _retryPendingRevocations().whenComplete(() => _retrying = null);
+
+  Future<void> _retryPendingRevocations() async {
+    try {
+      await restore();
+      final queue = _vault['pending_revocations'];
+      if (queue is! List || queue.isEmpty) return;
+      final discovery = await _discovery();
+      final done = <String>{};
+      for (final item in queue.toList()) {
+        if (item is Map &&
+            item['refresh_token'] is String &&
+            item['client_id'] is String &&
+            await _revoke(
+                  discovery,
+                  item['refresh_token'] as String,
+                  item['client_id'] as String,
+                ) !=
+                _Revocation.retry) {
+          done.add(item['refresh_token'] as String);
+        }
+      }
+      if (done.isEmpty) return;
+      // Re-read: a sign-out may have queued another entry while we awaited.
+      final current = _vault['pending_revocations'];
+      final remaining = current is List
+          ? current
+                .where((i) => i is Map && !done.contains(i['refresh_token']))
+                .toList()
+          : <dynamic>[];
+      if (remaining.isEmpty) {
+        _vault.remove('pending_revocations');
+      } else {
+        _vault['pending_revocations'] = remaining;
+      }
+      await _save();
+    } catch (_) {
+      // Best effort; entries stay queued.
     }
   }
 

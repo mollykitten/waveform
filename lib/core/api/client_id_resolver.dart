@@ -9,12 +9,25 @@ class ClientIdResolver {
 
   final Dio _dio;
   String? _cached;
+  Future<String>? _inflight;
 
   static final _scriptSrc = RegExp(r'<script[^>]+src="([^"]+)"');
   static final _clientId = RegExp(r'client_id\s*:\s*"([0-9a-zA-Z]{32})"');
   static const _plain = ResponseType.plain;
 
-  Future<String> get() async => _cached ??= await _fetch();
+  Future<String> get() async => _cached ?? await _dedupedFetch();
+
+  /// Параллельные get()/refresh() делят один запрос в полёте, а не качают
+  /// главную и бандлы по нескольку раз.
+  Future<String> _dedupedFetch() {
+    final running = _inflight;
+    if (running != null) return running;
+    final f = _fetch().then((id) => _cached = id);
+    _inflight = f;
+    return f.whenComplete(() {
+      if (identical(_inflight, f)) _inflight = null;
+    });
+  }
 
   Future<String> refresh() async {
     _cached = null;

@@ -2,6 +2,13 @@ import 'dart:async';
 
 import 'package:desktop_webview_window/desktop_webview_window.dart';
 
+/// Точное сравнение домена cookie: `soundcloud.com` и его поддомены, без
+/// ведущей точки. `soundcloud.evil.com` не проходит.
+bool isSoundcloudDomain(String domain) {
+  final d = domain.toLowerCase().replaceFirst(RegExp(r'^\.+'), '');
+  return d == 'soundcloud.com' || d.endsWith('.soundcloud.com');
+}
+
 /// Вход через настоящую страницу логина SoundCloud в embedded WebView.
 /// Пароль вводится на сайте SC — мы его не видим; после входа вытаскиваем
 /// `oauth_token` из cookie сессии (poll).
@@ -58,7 +65,7 @@ abstract final class WebviewLogin {
               (c) =>
                   c.name == 'oauth_token' &&
                   c.value.isNotEmpty &&
-                  c.domain.contains('soundcloud'),
+                  isSoundcloudDomain(c.domain),
             )
             .map((c) => c.value)
             .firstOrNull;
