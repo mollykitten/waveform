@@ -7,6 +7,7 @@ import '../../core/recommendations/ai_client.dart';
 import '../../core/recommendations/ai_config.dart';
 import '../../core/recommendations/models.dart';
 import '../../core/recommendations/providers.dart';
+import '../../core/recommendations/seen_store.dart';
 import '../player/player_controller.dart';
 
 class WaveState {
@@ -255,6 +256,20 @@ class WaveController extends Notifier<WaveState> {
       _ids.removeAll(ids.where((id) => !queued.contains(id)));
     } finally {
       _mutatingQueue = false;
+    }
+    unawaited(_markShown(ids.where(_ids.contains).toList()));
+  }
+
+  /// Only tracks really put in the queue get the "shown" cooldown; spare
+  /// candidates stay in the pool untouched.
+  Future<void> _markShown(List<String> ids) async {
+    try {
+      final identity = await ref.read(aiListeningIdentityProvider.future);
+      await ref
+          .read(seenStoreProvider)
+          .record(identity, SeenKind.shown, ids, DateTime.now());
+    } catch (_) {
+      // Memory is best effort; the queue itself is already correct.
     }
   }
 

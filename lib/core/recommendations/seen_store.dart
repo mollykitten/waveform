@@ -21,7 +21,8 @@ enum SeenKind {
   final Duration cooldown;
 }
 
-/// Per-account, bounded, atomic memory of tracks the wave must not repeat.
+/// Per-account (one file each), bounded, atomic memory of tracks the wave
+/// must not repeat.
 /// Holds ids and timestamps only. It outlives the wave session and the
 /// bounded [ListeningStore], so a restart never re-offers a heard track.
 class SeenStore {
@@ -66,33 +67,65 @@ class SeenStore {
 
   /// Latest remembered state per track. Unknown accounts return nothing.
   Future<Map<String, ({SeenKind kind, DateTime at})>> read(String identity) =>
-      _serial(() => _read(identity));
+      _serial(() async => (await _read(identity)).entries);
 
-  Future<Map<String, ({SeenKind kind, DateTime at})>> _read(
-    String identity,
-  ) async {
-    if (!validListeningIdentity(identity)) return {};
+  /// Rows that fail to parse are skipped one by one. A transient IO error
+  /// yields `writable: false` so nothing is overwritten. A structurally
+  /// broken file is moved to `.bak` and the memory starts afresh.
+  Future<({Map<String, ({SeenKind kind, DateTime at})> entries, bool writable})>
+  _read(String identity) async {
+    final entries = <String, ({SeenKind kind, DateTime at})>{};
+    if (!validListeningIdentity(identity)) {
+      return (entries: entries, writable: false);
+    }
+    final File file;
+    final String text;
     try {
-      final file = await _file(identity);
-      if (!await file.exists()) return {};
-      if (await file.length() > maxBytes) throw const FormatException();
-      final root = jsonDecode(await file.readAsString()) as Map;
-      if (root['version'] != 1 || root['identity'] != identity) {
-        throw const FormatException();
-      }
-      final result = <String, ({SeenKind kind, DateTime at})>{};
-      for (final row in root['entries'] as List) {
-        final id = row['id'] as String;
-        if (!validVectorId(id)) continue;
-        result[id] = (
-          kind: SeenKind.values.byName(row['kind'] as String),
-          at: DateTime.parse(row['at'] as String),
-        );
-      }
-      return result;
-    } catch (_) {
+      file = await _file(identity);
+      if (!await file.exists()) return (entries: entries, writable: true);
+      if (await file.length() > maxBytes) return await _broken(file);
+      text = await file.readAsString();
+    } on FileSystemException {
       onFailure?.call('seen tracks storage unavailable');
-      return {};
+      return (entries: entries, writable: false);
+    }
+    try {
+      final root = jsonDecode(text) as Map;
+      if (root['version'] != 1 || root['identity'] != identity) {
+        return await _broken(file);
+      }
+      for (final row in root['entries'] as List) {
+        try {
+          final id = row['id'] as String;
+          if (!validVectorId(id)) continue;
+          entries[id] = (
+            kind: SeenKind.values.byName(row['kind'] as String),
+            at: DateTime.parse(row['at'] as String),
+          );
+        } catch (_) {
+          onFailure?.call('seen tracks storage had an unreadable row');
+        }
+      }
+      return (entries: entries, writable: true);
+    } catch (_) {
+      return await _broken(file);
+    }
+  }
+
+  Future<({Map<String, ({SeenKind kind, DateTime at})> entries, bool writable})>
+  _broken(File file) async {
+    onFailure?.call('seen tracks storage was corrupt, kept as .bak');
+    try {
+      await file.rename('${file.path}.bak');
+      return (
+        entries: <String, ({SeenKind kind, DateTime at})>{},
+        writable: true,
+      );
+    } on FileSystemException {
+      return (
+        entries: <String, ({SeenKind kind, DateTime at})>{},
+        writable: false,
+      );
     }
   }
 
@@ -113,7 +146,9 @@ class SeenStore {
     if (!validListeningIdentity(identity) || facts.isEmpty) return;
     File? temporary;
     try {
-      final entries = await _read(identity);
+      final loaded = await _read(identity);
+      if (!loaded.writable) return;
+      final entries = loaded.entries;
       for (final fact in facts.entries) {
         if (!validVectorId(fact.key)) continue;
         final old = entries[fact.key];
@@ -160,20 +195,13 @@ class SeenStore {
     }
   });
 
-  /// Drop every file of other accounts so a switch leaves no stale memory.
-  Future<void> clearOthers(String identity) => _serial(() async {
+  /// Delete one account's memory, e.g. on its logout or consent revocation.
+  /// Other accounts keep theirs, so switching A to B and back loses nothing.
+  Future<void> forget(String identity) => _serial(() async {
+    if (!validListeningIdentity(identity)) return;
     try {
-      final directory = await _directory();
-      if (!await directory.exists()) return;
-      final keep = 'seen-tracks-v1-$identity.json';
-      await for (final entity in directory.list()) {
-        final name = entity.uri.pathSegments.last;
-        if (entity is File &&
-            name.startsWith('seen-tracks-v1-') &&
-            name != keep) {
-          await entity.delete();
-        }
-      }
+      final file = await _file(identity);
+      if (await file.exists()) await file.delete();
     } catch (_) {
       onFailure?.call('seen tracks storage unavailable');
     }

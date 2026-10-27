@@ -43,6 +43,7 @@ class VectorEngine {
     required this.store,
     required this.listening,
     this.seen,
+    this.maxRequests = 12,
     DateTime Function()? now,
   }) : _now = now ?? DateTime.now;
   final SoundcloudApi api;
@@ -51,6 +52,9 @@ class VectorEngine {
 
   /// Persistent cross-session memory of shown, heard and skipped tracks.
   final SeenStore? seen;
+
+  /// Hard cap on SoundCloud requests for one generation.
+  final int maxRequests;
   final DateTime Function() _now;
 
   static bool eligible(Track track) =>
@@ -141,13 +145,14 @@ class VectorEngine {
       if (seen != null) ...await _syncSeen(events, identity, now),
     };
     check();
-    final picked = _pickSeeds(seeds, events, identity);
+    final uses = _useByIdentity.putIfAbsent(identity, () => {});
+    final picked = _pickSeeds(seeds, events, identity, uses);
     if (picked.isEmpty) return [];
     // Count use up front so even an empty pool rotates to other seeds.
     for (final seed in picked) {
-      _seedUses[seed.id] = (_seedUses[seed.id] ?? 0) + 1;
+      uses[seed.id] = (uses[seed.id] ?? 0) + 1;
     }
-    if (_seedUses.length > 200) _seedUses.clear();
+    if (uses.length > 200) uses.clear();
     final uniqueSeeds = {for (final seed in picked) seed.id: seed};
     final sessions = events.map((e) => e.sessionId).toSet();
     attributions.removeWhere((session, _) => !sessions.contains(session));
@@ -213,13 +218,6 @@ class VectorEngine {
       check: check,
     );
     check();
-    await seen?.record(
-      identity,
-      SeenKind.shown,
-      selected.map((track) => track.id),
-      observedAt,
-    );
-    check();
     return [
       for (final track in selected)
         Recommendation(
@@ -229,13 +227,10 @@ class VectorEngine {
     ];
   }
 
-  /// Hard cap on SoundCloud requests for one generation.
-  static const maxRequests = 12;
-
   /// Below this many filtered candidates the pool is widened by stages.
   static const minPool = 20;
 
-  final _seedUses = <String, int>{};
+  final _useByIdentity = <String, Map<String, int>>{};
 
   /// Tracks heard or skipped recently, straight from the local facts.
   Set<String> _heardCooldown(
@@ -257,6 +252,18 @@ class VectorEngine {
     ListeningEvidence.neutral => null,
   };
 
+  /// Ids that must not be offered again for [identity]: recent listens and
+  /// skips plus the durable seen memory. Used by every recommendation mode.
+  Future<Set<String>> memoryExclusions(String identity) async {
+    if (!validListeningIdentity(identity)) return {};
+    final events = await listening.read(identity);
+    final now = _now();
+    return {
+      ..._heardCooldown(events, identity, now),
+      if (seen != null) ...await _syncSeen(events, identity, now),
+    };
+  }
+
   /// Copy listening facts into the durable memory and return its cooldown set.
   Future<Set<String>> _syncSeen(
     List<ListeningEvent> events,
@@ -273,7 +280,6 @@ class VectorEngine {
       facts[event.trackId] = (kind: kind, at: event.endedAt);
     }
     await store.recordAll(identity, facts);
-    await store.clearOthers(identity);
     return store.excluded(identity, now);
   }
 
@@ -283,6 +289,7 @@ class VectorEngine {
     List<Track> callerSeeds,
     List<ListeningEvent> events,
     String identity,
+    Map<String, int> uses,
   ) {
     final all = <String, _Seed>{};
     for (final track in callerSeeds) {
@@ -308,7 +315,7 @@ class VectorEngine {
     final ordered = all.values.toList();
     final ranks = {for (var i = 0; i < ordered.length; i++) ordered[i].id: i};
     ordered.sort((a, b) {
-      final byUse = (_seedUses[a.id] ?? 0).compareTo(_seedUses[b.id] ?? 0);
+      final byUse = (uses[a.id] ?? 0).compareTo(uses[b.id] ?? 0);
       return byUse != 0 ? byUse : ranks[a.id]!.compareTo(ranks[b.id]!);
     });
     final picked = <_Seed>[];

@@ -692,6 +692,8 @@ void main() {
       ];
       final first = await run(engine);
       expect(first, hasLength(6));
+      // The wave marks what it really queued as shown.
+      await seen.record('1', SeenKind.shown, ids(first), now);
       final restarted = VectorEngine(
         api: api,
         store: VectorStore(directory: () async => directory),
@@ -720,7 +722,8 @@ void main() {
         await run(engine);
         await File('${directory.path}/${ListeningStore.fileName}').delete();
         final again = await run(engine);
-        expect(ids(again), isEmpty);
+        // c0 stays out; unqueued candidates are not penalised.
+        expect(ids(again).toSet(), {'c1', 'c2'});
         expect((await seen.read('1'))['c0']!.kind, SeenKind.played);
       },
     );
@@ -735,11 +738,114 @@ void main() {
       expect((await small.read('1')).keys.toSet(), {'t2', 't3', 't4'});
     });
 
-    test('another account does not inherit the memory', () async {
+    test('memory is per account and forget drops only that account', () async {
       await seen.record('1', SeenKind.played, ['c0'], now);
+      await seen.record('2', SeenKind.played, ['c9'], now);
+      expect(await seen.excluded('2', now), {'c9'});
+      await seen.forget('2');
       expect(await seen.excluded('2', now), isEmpty);
-      await seen.clearOthers('2');
-      expect(await seen.excluded('1', now), isEmpty);
+      expect(await seen.excluded('1', now), {'c0'});
+    });
+
+    test('a corrupt file is kept as .bak and the memory restarts', () async {
+      final file = File('${directory.path}/seen-tracks-v1-1.json');
+      await file.writeAsString('{not json');
+      expect(await seen.read('1'), isEmpty);
+      expect(await File('${file.path}.bak').exists(), isTrue);
+      await seen.record('1', SeenKind.played, ['c0'], now);
+      expect(await seen.excluded('1', now), {'c0'});
+    });
+
+    test('one unreadable row does not discard the others', () async {
+      final file = File('${directory.path}/seen-tracks-v1-1.json');
+      await file.writeAsString(
+        jsonEncode({
+          'version': 1,
+          'identity': '1',
+          'entries': [
+            {'id': 'good', 'kind': 'played', 'at': now.toIso8601String()},
+            {'id': 'odd', 'kind': 'mystery', 'at': now.toIso8601String()},
+            {'id': 'late', 'kind': 'played', 'at': 'not a date'},
+            {'id': 'ok2', 'kind': 'skipped', 'at': now.toIso8601String()},
+          ],
+        }),
+      );
+      expect((await seen.read('1')).keys.toSet(), {'good', 'ok2'});
+      expect(await File('${file.path}.bak').exists(), isFalse);
+    });
+
+    test('a failed read never overwrites the file', () async {
+      final blocked = SeenStore(
+        directory: () async => Directory('${directory.path}/missing/x'),
+      );
+      await Directory('${directory.path}/missing').create();
+      await File('${directory.path}/missing/x').writeAsString('plain file');
+      await blocked.record('1', SeenKind.played, ['c0'], now);
+      expect(
+        await File('${directory.path}/missing/x').readAsString(),
+        'plain file',
+      );
+    });
+
+    test('maxBytes truncates the oldest entries', () async {
+      final tiny = SeenStore(directory: () async => directory, maxBytes: 400);
+      for (var i = 0; i < 20; i++) {
+        await tiny.record('1', SeenKind.played, [
+          'track$i',
+        ], now.add(Duration(minutes: i)));
+      }
+      final kept = (await tiny.read('1')).keys.toSet();
+      expect(kept, contains('track19'));
+      expect(kept, isNot(contains('track0')));
+      expect(
+        await File('${directory.path}/seen-tracks-v1-1.json').length(),
+        lessThanOrEqualTo(400),
+      );
+    });
+
+    test('mood mode drops heard and liked tracks after a restart', () async {
+      api.tracks = [
+        for (var i = 0; i < 4; i++) realTrack('m$i', artist: 'm$i'),
+      ];
+      await facts.append(event('m0', session: 'a'));
+      await seen.record('1', SeenKind.shown, ['m1'], now);
+      final restarted = VectorEngine(
+        api: api,
+        store: VectorStore(directory: () async => directory),
+        listening: ListeningStore(directory: () async => directory),
+        seen: SeenStore(directory: () async => directory),
+        now: () => now,
+      );
+      final client = ScriptedAi()
+        ..replies.clear()
+        ..replies.addAll([
+          '{"queries":["ambient"]}',
+          '{"recommendations":[{"id":"m2","reason":"fit"}]}',
+        ]);
+      final result =
+          await RecommendationService(
+            api: api,
+            client: client,
+            vectorEngine: restarted,
+          ).generate(
+            config: testConfig.withConsent(true),
+            consent: AiConsent(
+              destination: testConfig.destination,
+              listening: true,
+            ),
+            apiKey: '',
+            mood: 'quiet',
+            useListening: true,
+            cancelToken: CancelToken(),
+            listeningIdentity: '1',
+            localExcludedTrackIds: {'m3'},
+          );
+      expect(result.single.track.id, 'm2');
+      final sent = client.payloads.last;
+      for (final hidden in ['m0', 'm1', 'm3']) {
+        expect(sent, isNot(contains('"id":"$hidden"')));
+      }
+      expect(client.payloads.first, isNot(contains('m0')));
     });
 
     test('a small pool widens to second level, then genre search', () async {
@@ -758,18 +864,31 @@ void main() {
       expect(ids(result).toSet(), {'c0', 'd0', 'd1', 'g0', 'g1'});
     });
 
-    test('request budget is bounded', () async {
-      api.neighborhoods['s'] = [
-        for (var i = 0; i < 12; i++) realTrack('c$i', artist: 'a$i'),
-      ];
-      for (var i = 0; i < 12; i++) {
-        api.neighborhoods['c$i'] = [realTrack('d$i', artist: 'b$i')];
-      }
-      await run(engine);
-      expect(
-        api.relatedCalls.length + api.searches.length,
-        lessThanOrEqualTo(VectorEngine.maxRequests),
+    test('request budget is a hard ceiling', () async {
+      final capped = VectorEngine(
+        api: api,
+        store: store,
+        listening: facts,
+        seen: seen,
+        maxRequests: 4,
+        now: () => now,
       );
+      api.neighborhoods['s'] = [realTrack('c0', artist: 'a0')];
+      final seeds = [
+        for (var i = 0; i < 8; i++) realTrack('r$i', artist: 'ra$i'),
+      ];
+      for (final seed in seeds) {
+        api.neighborhoods[seed.id] = [
+          realTrack('x${seed.id}', artist: seed.id),
+        ];
+      }
+      await capped.generate(
+        seeds: seeds,
+        identity: '1',
+        excludedTrackIds: {},
+        check: () {},
+      );
+      expect(api.relatedCalls.length + api.searches.length, 4);
     });
 
     test('seeds rotate between consecutive generations', () async {

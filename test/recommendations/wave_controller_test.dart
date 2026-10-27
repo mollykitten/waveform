@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -14,6 +15,7 @@ import 'package:waveform_app/core/recommendations/ai_config.dart';
 import 'package:waveform_app/core/recommendations/ai_client.dart';
 import 'package:waveform_app/core/recommendations/models.dart';
 import 'package:waveform_app/core/recommendations/recommendation_service.dart';
+import 'package:waveform_app/core/recommendations/seen_store.dart';
 import 'package:waveform_app/shared/models/track.dart';
 import 'package:waveform_app/core/recommendations/providers.dart';
 import 'package:waveform_app/features/player/player_controller.dart';
@@ -31,6 +33,7 @@ void main() {
   late TestSoundcloud api;
   late FakeAudioEngine engine;
   String? userToken;
+  late Directory seenDirectory;
   Future<void> flush() async {
     for (var i = 0; i < 8; i++) {
       await Future<void>.delayed(Duration.zero);
@@ -49,6 +52,7 @@ void main() {
   }
 
   setUp(() {
+    seenDirectory = Directory.systemTemp.createTempSync('waveform-seen-');
     userToken = null;
     settings = WaveTestSettings(
       initial: const AiSettingsState(
@@ -79,6 +83,7 @@ void main() {
     );
   });
   tearDown(() {
+    seenDirectory.deleteSync(recursive: true);
     container.dispose();
     engine.dispose();
   });
@@ -94,6 +99,9 @@ void main() {
         aiListeningIdentityProvider.overrideWith((ref) async => 'test-profile'),
         aiClientProvider.overrideWithValue(client),
         recommendationServiceProvider.overrideWithValue(service),
+        seenStoreProvider.overrideWithValue(
+          SeenStore(directory: () async => seenDirectory),
+        ),
         soundcloudApiProvider.overrideWithValue(api),
         audioEngineProvider.overrideWithValue(engine),
         likedTracksProvider.overrideWith(StubLikedTracks.new),
@@ -149,7 +157,7 @@ void main() {
   );
 
   test(
-    'late refill cannot append to an unrelated queue even with a wave current track',
+    'late refill cannot append to an unrelated queue with a wave track',
     () async {
       batch(['1', '2', '3', '4']);
       await container.read(waveControllerProvider.notifier).start('ambient');

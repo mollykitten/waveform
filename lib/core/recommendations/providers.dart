@@ -325,6 +325,11 @@ class AiSettingsController extends Notifier<AiSettingsState> {
   }
 
   Future<void> disconnectChatGpt() async {
+    // Revoking access also drops the local seen memory of this account.
+    final identity = ref.read(aiListeningIdentityProvider).asData?.value;
+    if (identity != null) {
+      unawaited(ref.read(seenStoreProvider).forget(identity));
+    }
     ++_restoreVersion;
     ++_connectionVersion;
     _connected = false;
@@ -443,6 +448,7 @@ final recommendationServiceProvider = Provider<RecommendationService>(
   (ref) => RecommendationService(
     api: ref.watch(soundcloudApiProvider),
     client: ref.watch(aiClientProvider),
+    onWarning: ref.read(talkerProvider).warning,
     vectorEngine: VectorEngine(
       api: ref.watch(soundcloudApiProvider),
       store: ref.watch(vectorStoreProvider),
@@ -480,6 +486,16 @@ class RecommendationsController extends Notifier<RecommendationState> {
     ref.listen(aiSettingsProvider.select((value) => value.revision), (_, _) {
       cancel();
       state = const RecommendationState();
+    });
+    // Logging out drops that account's seen memory; switching accounts keeps
+    // each one's file so A -> B -> A loses nothing.
+    ref.listen(aiListeningIdentityProvider, (previous, next) {
+      final was = previous?.asData?.value;
+      if (was != null &&
+          was != 'anonymous' &&
+          next.asData?.value == 'anonymous') {
+        unawaited(ref.read(seenStoreProvider).forget(was));
+      }
     });
     ref.onDispose(() {
       _generation++;
