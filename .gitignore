@@ -58,6 +58,7 @@ docs/superpowers/
 
 # приватный Widevine-профиль устройства, не коммитится
 assets/widevine/*.wvd
+*.wvd
 
 # Local secrets / per-user Superset overrides
 .env
