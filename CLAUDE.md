@@ -183,9 +183,22 @@ CF по весу соседа и давности его лайка, без фи
   заиграет. Зашифрованные (`cbc-/ctr-encrypted-hls`) транскодинги из
   обычных кандидатов отсеиваются (just_audio их не играет). Любая неудачная
   загрузка триггерит видимое уведомление (AppShell `ref.listen`), не silent
-  skip. Бейджа `🔒 GO+` нет: такие треки в UI ничем не выделяются.
-- **GO+ через DRM (решение владельца 2026-10, правило переписано).** Играть
-  GO+ (`ctr-encrypted-hls`, Widevine CENC) — допустимо. Go-ядро
+  skip.
+- **Бейдж GO+ (возвращён 2026-10-28, детекция новая).** `Track.goPlus` =
+  `TrackDto.isGoPlus`: `policy == 'SNIP'`, или `monetization_model ==
+  'SUB_HIGH_TIER'`, или все транскодинги — превью (`snipped`). Наличие
+  зашифрованного транскодинга GO+ НЕ означает: DRM-треки дистрибьюторов
+  (`policy: ALLOW`) играют без подписки и бейджа не получают. Бейдж
+  `GoPlusBadge` — в `TrackRow`, BottomPlayer и шапке трека; кнопка play не
+  блокируется. Если GO+ трек не проигрался, тост «GO+ only — can’t play
+  without a subscription» (`Unplayable.goPlus`), иначе общий «unavailable —
+  skipped». `policy`/`monetization_model` могут не приходить в search/stream/
+  likes — тогда срабатывает только признак «все превью»; на живом аккаунте
+  не проверено.
+- **DRM через Widevine (решение владельца 2026-10, правило переписано).**
+  Играть треки с `ctr-encrypted-hls` (Widevine CENC) — допустимо: это DRM
+  дистрибьюторов/лейблов (играют без подписки) и GO+ у подписчика (без
+  подписки сервис отдаёт только превью). Go-ядро
   `third_party/scdrm` → `libscdrm.dylib` по `dart:ffi`
   (`lib/core/drm/`), фолбэк после обычных кандидатов: лицензия → расшифровка
   → mp3 в кэш. Только macOS. Профиль устройства `assets/widevine/device.wvd`

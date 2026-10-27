@@ -26,7 +26,9 @@ desktop clients for it either don't exist or they're electron wrapped around the
 >
 > one button, an endless queue of real soundcloud tracks. it's built on your machine from your likes, your home stream and people with similar taste, and refills while it plays. no settings, no model, nothing sent anywhere but soundcloud itself
 >
-> also: audio output picker with airplay, go+ tracks on macos, keyboard focus everywhere and reduced motion. daily-driver loop works on macos, windows and linux build too but i test them less. the api is unofficial so rough edges stay. everything else in [`CHANGELOG.md`](CHANGELOG.md)
+> also: drm-protected tracks from distributors and labels play on macos through a small go core that decrypts widevine streams over `dart:ffi` (go+ tracks still need a go+ subscription; the macos release bundles a device profile, from source you bring your own, see [limitations](docs/limitations.md)). plus an audio output picker with airplay, keyboard focus everywhere, reduced motion, a new icon, and web3 bits are gone for good
+>
+> daily-driver loop works on macos, windows and linux build too but i test them less. the api is unofficial so rough edges stay. everything else in [`CHANGELOG.md`](CHANGELOG.md)
 
 <p align="center">
   <img src="screenshots/my-wave.png" alt="my wave screen: a pause button over an orange ribbon ring, with the upcoming wave queue below" width="100%" />

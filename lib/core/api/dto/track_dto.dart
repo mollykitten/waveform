@@ -72,6 +72,7 @@ class TrackDto {
     this.publisherArtist,
     this.transcodings = const [],
     this.policy,
+    this.monetizationModel,
   });
 
   final int id;
@@ -95,10 +96,18 @@ class TrackDto {
   final String? publisherArtist;
   final List<TranscodingDto> transcodings;
   final String? policy;
+  final String? monetizationModel;
 
   /// Explicitly blocked, or every available source is a preview.
   bool get isBlocked =>
       policy == 'BLOCK' ||
+      (transcodings.isNotEmpty && transcodings.every((t) => t.snipped));
+
+  /// Subscription-gated: preview-only (SNIP), subscription tier, or every
+  /// source is a snippet. BLOCK is not GO+; free distributor DRM is not GO+.
+  bool get isGoPlus =>
+      policy == 'SNIP' ||
+      monetizationModel == 'SUB_HIGH_TIER' ||
       (transcodings.isNotEmpty && transcodings.every((t) => t.snipped));
 
   factory TrackDto.fromJson(Map<String, dynamic> j) {
@@ -107,6 +116,7 @@ class TrackDto {
       id: asInt(j['id']),
       title: asStr(j['title']),
       policy: j['policy'] as String?,
+      monetizationModel: j['monetization_model'] as String?,
       // api-v2 отдаёт duration в мс; full_duration — без сниппета.
       durationMs: asInt(j['full_duration'] ?? j['duration']),
       user: UserDto.fromJson(asMap(j['user'])),

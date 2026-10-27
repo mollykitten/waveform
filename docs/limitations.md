@@ -1,6 +1,6 @@
 # known limitations
 
-- **go+ tracks need your own widevine device profile.** they're served as encrypted hls that `just_audio` can't decode. on macos a bundled decryption core (`scdrm`) can play them, and the official macos release bundles a device profile. when running from source you supply `assets/widevine/device.wvd` yourself, it's not in the repo. without a profile those tracks are skipped as unavailable. windows and linux: not yet
+- **drm-protected tracks (from distributors and labels) need a widevine device profile.** go+ tracks still need a go+ subscription. drm tracks are served as encrypted hls that `just_audio` can't decode. on macos a bundled decryption core (`scdrm`) can play them, and the official macos release bundles a device profile. when running from source you supply `assets/widevine/device.wvd` yourself, it's not in the repo. without a profile those tracks are skipped as unavailable. windows and linux: not yet
 - **macos first.** windows and linux build but i run them less
 - **likes and reposts are best effort.** the api-v2 write endpoints aren't a stable contract. if one gets blocked (vpn, captcha) you'll see it in the ui but it may not recover
 - **no play-history writes or comment likes.** i checked with curl: the write endpoints 404 and there's no per-user like flag on tracks or comments. the home history rail shows plays from official soundcloud clients

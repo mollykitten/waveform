@@ -44,9 +44,11 @@ and release preparation. includes the merged work in #50–#56.
 - **opt-in developer worker notifier** delivers completed ACP worker messages
   to a coordinator with durable identities, retries and journal replay. its
   python regressions run in CI; no active watcher or credentials are shipped.
-- **go+ tracks play on macos** through a bundled Widevine decryption core
-  (`scdrm`, go over `dart:ffi`), as a fallback after regular streams. needs
-  your own device profile in `assets/widevine/device.wvd`; it's never shipped.
+- **drm-protected tracks play on macos** (uploaded by distributors and labels)
+  through a bundled Widevine decryption core (`scdrm`, go over `dart:ffi`), as
+  a fallback after regular streams. go+ tracks still require a go+
+  subscription. from source you need your own device profile in
+  `assets/widevine/device.wvd`; it's never committed.
 - **copy-link button** in both player layouts; selectable track title and
   description.
 - **new app icon, svg logo** and a static landing page.

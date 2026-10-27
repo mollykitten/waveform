@@ -3,16 +3,20 @@ import 'package:waveform_app/core/api/dto/track_dto.dart';
 import 'package:waveform_app/core/api/mappers.dart';
 
 void main() {
-  TrackDto parse(List<Map<String, Object>> sources, {String? policy}) =>
-      TrackDto.fromJson({
-        'id': 1,
-        'title': 'preview',
-        'duration': 30000,
-        'full_duration': 231184,
-        'user': {'id': 1, 'username': 'artist'},
-        'policy': policy,
-        'media': {'transcodings': sources},
-      });
+  TrackDto parse(
+    List<Map<String, Object>> sources, {
+    String? policy,
+    String? monetization,
+  }) => TrackDto.fromJson({
+    'id': 1,
+    'title': 'preview',
+    'duration': 30000,
+    'full_duration': 231184,
+    'user': {'id': 1, 'username': 'artist'},
+    'policy': policy,
+    'monetization_model': monetization,
+    'media': {'transcodings': sources},
+  });
   Map<String, Object> source(
     String url, {
     bool snipped = false,
@@ -90,5 +94,46 @@ void main() {
     expect(track.blocked, isTrue);
     expect(track.streamCandidates, isEmpty);
     expect(track.drmStreamCandidates, isEmpty);
+  });
+
+  group('goPlus', () {
+    test('SNIP policy is GO+', () {
+      final dto = parse([source('https://x/p', snipped: true)], policy: 'SNIP');
+      expect(dto.isGoPlus, isTrue);
+      expect(dto.toDomain().goPlus, isTrue);
+    });
+
+    test('SUB_HIGH_TIER is GO+', () {
+      final dto = parse([source('https://x/f')], monetization: 'SUB_HIGH_TIER');
+      expect(dto.toDomain().goPlus, isTrue);
+    });
+
+    test('all snipped transcodings are GO+', () {
+      final dto = parse([
+        source('https://x/a', snipped: true),
+        source('https://x/b', snipped: true),
+      ]);
+      expect(dto.toDomain().goPlus, isTrue);
+    });
+
+    test('free distributor DRM with ALLOW is not GO+', () {
+      final track = parse([
+        source('https://x/drm', protocol: 'ctr-encrypted-hls'),
+      ], policy: 'ALLOW').toDomain();
+      expect(track.goPlus, isFalse);
+    });
+
+    test('plain track and BLOCK are not GO+', () {
+      expect(parse([source('https://x/f')]).toDomain().goPlus, isFalse);
+      final blocked = parse([source('https://x/f')], policy: 'BLOCK');
+      expect(blocked.toDomain().goPlus, isFalse);
+    });
+
+    test('goPlus survives copyWith', () {
+      final track = parse([
+        source('https://x/p', snipped: true),
+      ], policy: 'SNIP').toDomain();
+      expect(track.copyWith(waveform: const [0.5]).goPlus, isTrue);
+    });
   });
 }

@@ -37,6 +37,7 @@ class ListeningTracker {
         durationMs: previous.durationMs,
         positionMs: previous.positionMs,
         source: previous.source,
+        obscure: previous.obscure,
       );
       setPlaying(previous.playing);
     }
@@ -47,6 +48,7 @@ class ListeningTracker {
     required int durationMs,
     int positionMs = 0,
     WaveSource? source,
+    bool obscure = false,
   }) {
     finish(ListeningTransitionCause.directSelection);
     _session = _Session(
@@ -57,6 +59,7 @@ class ListeningTracker {
       _timestamp().toUtc(),
       math.max(0, positionMs),
       source,
+      obscure,
     );
   }
 
@@ -112,6 +115,7 @@ class ListeningTracker {
       endedAt: _timestamp().toUtc(),
       cause: cause,
       source: session.source,
+      obscure: session.obscure,
     );
     if (event.isValid) onEvent(event);
   }
@@ -126,6 +130,7 @@ class _Session {
     this.startedAt,
     this.positionMs,
     this.source,
+    this.obscure,
   );
   static final _random = math.Random.secure();
   final String id = List.generate(
@@ -136,6 +141,7 @@ class _Session {
   final int durationMs;
   final String? identity;
   final WaveSource? source;
+  final bool obscure;
   final DateTime startedAt;
   int sampledAt;
   int positionMs;
