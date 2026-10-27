@@ -53,6 +53,55 @@ class VectorEngine {
   /// Persistent cross-session memory of shown, heard and skipped tracks.
   final SeenStore? seen;
 
+  /// Most recent dislikes that shape ranking.
+  static const maxDislikes = 20;
+
+  /// Soft ranking penalties for candidates near disliked tracks: cosine to the
+  /// centroid of the disliked tracks' structural vectors, and a gentle factor
+  /// for the same artist. Nothing is excluded here; exclusion is a separate
+  /// rule of the seen memory. All of this stays on the device.
+  void _penalizeDisliked(
+    ({
+      Map<String, Track> candidates,
+      Map<String, Map<String, double>> edges,
+      Map<String, double> discounts,
+    })
+    pool,
+    Map<String, StructuralVector> vectors,
+    Map<String, VectorProvenance> provenance,
+    List<VectorDislike> dislikes,
+    Map<String, Track> candidates,
+  ) {
+    if (dislikes.isEmpty) return;
+    final sum = <String, double>{};
+    for (final dislike in dislikes) {
+      final weights = provenance[dislike.trackId]?.weights;
+      if (weights == null) continue;
+      final unit = StructuralVector(weights);
+      for (final edge in unit.weights.entries) {
+        sum[edge.key] = (sum[edge.key] ?? 0) + edge.value;
+      }
+    }
+    final centroid = sum.isEmpty ? null : StructuralVector(sum);
+    final artists = <String, int>{};
+    for (final dislike in dislikes) {
+      final artist = dislike.artist;
+      if (artist != null && artist.isNotEmpty) {
+        artists[artist] = (artists[artist] ?? 0) + 1;
+      }
+    }
+    for (final track in candidates.values) {
+      var factor = 1.0;
+      final vector = vectors[track.id];
+      if (centroid != null && vector != null) {
+        factor *= 1 - .6 * vector.cosine(centroid);
+      }
+      final count = artists[track.artistHandle.toLowerCase()] ?? 0;
+      if (count > 0) factor *= math.pow(.7, math.min(3, count));
+      pool.discounts[track.id] = (pool.discounts[track.id] ?? 1) * factor;
+    }
+  }
+
   /// Hard cap on SoundCloud requests for one generation.
   final int maxRequests;
   final DateTime Function() _now;
@@ -72,6 +121,7 @@ class VectorEngine {
     List<ListeningEvent> events,
     String identity, {
     Map<String, VectorProvenance>? attributions,
+    List<VectorDislike> dislikes = const [],
   }) {
     final support = {for (final seed in seeds) seed: 1.0};
     final observations = {for (final seed in seeds) seed: 0.0};
@@ -105,11 +155,25 @@ class VectorEngine {
         support[edge.key] = support[edge.key]! + sign * amount;
       }
     }
+    // A dislike weakens the interests its track came from, with the same
+    // 30-day half-life, but never removes more than 60% of an interest.
+    final penalty = {for (final seed in seeds) seed: 0.0};
+    for (final dislike in dislikes) {
+      final age = _now().difference(dislike.at).inSeconds;
+      if (age < 0) continue;
+      final decay = math.pow(.5, age / const Duration(days: 30).inSeconds);
+      final weights = provenance[dislike.trackId]?.weights ?? const {};
+      for (final edge in weights.entries) {
+        if (penalty.containsKey(edge.key)) {
+          penalty[edge.key] = penalty[edge.key]! + edge.value * decay * .4;
+        }
+      }
+    }
     return [
       for (final seed in seeds)
         VectorInterest(
           seed,
-          support[seed]!.clamp(.1, 4.0),
+          support[seed]!.clamp(.1, 4.0) * (1 - math.min(.6, penalty[seed]!)),
           observations[seed]!,
         ),
     ];
@@ -145,8 +209,15 @@ class VectorEngine {
       if (seen != null) ...await _syncSeen(events, identity, now),
     };
     check();
+    final dislikes = [
+      if (seen != null)
+        for (final row in await seen!.dislikes(identity, maxDislikes))
+          VectorDislike(row.id, row.at, row.artist),
+    ];
+    check();
+    final blocked = {for (final dislike in dislikes) dislike.trackId};
     final uses = _useByIdentity.putIfAbsent(identity, () => {});
-    final picked = _pickSeeds(seeds, events, identity, uses);
+    final picked = _pickSeeds(seeds, events, identity, uses, blocked);
     if (picked.isEmpty) return [];
     // Count use up front so even an empty pool rotates to other seeds.
     for (final seed in picked) {
@@ -193,7 +264,9 @@ class VectorEngine {
       events,
       identity,
       attributions: attributions,
+      dislikes: dislikes,
     );
+    _penalizeDisliked(pool, vectors, provenance, dislikes, candidates);
     // These edges became known only after retrieval finished. Request start
     // must never masquerade as observation time for an intervening session.
     final observedAt = _now();
@@ -271,13 +344,13 @@ class VectorEngine {
     DateTime now,
   ) async {
     final store = seen!;
-    final facts = <String, ({SeenKind kind, DateTime at})>{};
+    final facts = <String, SeenEntry>{};
     for (final event in events) {
       final kind = _kindOf(event);
       if (event.identity != identity || !event.isValid || kind == null) {
         continue;
       }
-      facts[event.trackId] = (kind: kind, at: event.endedAt);
+      facts[event.trackId] = (kind: kind, at: event.endedAt, artist: null);
     }
     await store.recordAll(identity, facts);
     return store.excluded(identity, now);
@@ -290,10 +363,11 @@ class VectorEngine {
     List<ListeningEvent> events,
     String identity,
     Map<String, int> uses,
+    Set<String> blocked,
   ) {
     final all = <String, _Seed>{};
     for (final track in callerSeeds) {
-      if (eligible(track)) {
+      if (eligible(track) && !blocked.contains(track.id)) {
         all.putIfAbsent(
           track.id,
           () => _Seed(track.id, track.artistHandle.toLowerCase(), track.genre),
@@ -307,6 +381,7 @@ class VectorEngine {
           event.isValid &&
           event.evidence == ListeningEvidence.positive &&
           validVectorId(event.trackId) &&
+          !blocked.contains(event.trackId) &&
           !all.containsKey(event.trackId)) {
         all[event.trackId] = _Seed(event.trackId, '', '');
         listened++;
@@ -495,6 +570,14 @@ class VectorEngine {
     }
     return result;
   }
+}
+
+/// A thumbs-down remembered locally: the track, when, and its artist handle.
+class VectorDislike {
+  const VectorDislike(this.trackId, this.at, this.artist);
+  final String trackId;
+  final DateTime at;
+  final String? artist;
 }
 
 class _Seed {

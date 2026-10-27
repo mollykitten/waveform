@@ -145,6 +145,34 @@ available during refresh or retryable failure; connection changes clear stale
 results. errors expose fixed messages without response bodies or transport
 exceptions.
 
+## dislike in my wave
+
+while a track queued by the active wave plays, the player shows a thumbs-down
+button (expanded and collapsed layouts). pressing it stores the track id and
+its artist handle in the local seen memory for the verified identity, skips to
+the next track, and shows a toast with undo, which removes the entry.
+
+what it changes, all on the device:
+
+- the track is excluded for 365 days in every mode, including a nonempty mood,
+  where it only filters candidates after the search.
+- the interests (seeds) the track was related to lose up to 40% of their
+  weight per dislike, weighted by the stored related-graph edges and decayed
+  with the usual 30-day half-life. the total reduction is capped at 60%, so one
+  or several dislikes never zero an interest.
+- candidates whose structural vector is close (cosine) to the centroid of the
+  20 latest disliked tracks are ranked lower, and tracks by the same artist get
+  a mild multiplier (0.7 per dislike, at most three). nothing else is excluded.
+- dislikes are kept ahead of ordinary seen entries (up to 500) when the store
+  is trimmed.
+
+limits: this works on sparse seed-to-related-track vectors, not audio. a
+dislike only shifts candidates that share seeds with the disliked track, and a
+track served in mood mode has no stored graph vector, so there it only
+excludes the track and softens its artist. dislikes, the centroid and the
+penalties are never sent to a model. the effect on real recommendation quality
+has not been measured.
+
 ## verification handoff
 
 an earlier core verification passed **51 tests** across auth, SSE transport,

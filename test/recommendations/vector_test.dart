@@ -848,6 +848,141 @@ void main() {
       expect(client.payloads.first, isNot(contains('m0')));
     });
 
+    group('dislikes', () {
+      Future<void> dislike(String id, {String artist = 'bad', int mins = 0}) =>
+          seen.dislike('1', id, artist, now.add(Duration(minutes: mins)));
+
+      Future<List<Recommendation>> two(VectorEngine value) => value.generate(
+        seeds: [
+          realTrack('sA', artist: 'artist a'),
+          realTrack('sB', artist: 'artist b'),
+        ],
+        identity: '1',
+        excludedTrackIds: {},
+        check: () {},
+      );
+
+      void graph() {
+        api.neighborhoods['sA'] = [realTrack('cA', artist: 'x1')];
+        api.neighborhoods['sB'] = [realTrack('cB', artist: 'x2')];
+      }
+
+      test(
+        'a disliked track is excluded after a restart; undo restores',
+        () async {
+          api.neighborhoods['s'] = [
+            realTrack('d', artist: 'bad'),
+            realTrack('ok', artist: 'good'),
+          ];
+          await dislike('d');
+          VectorEngine fresh() => VectorEngine(
+            api: api,
+            store: VectorStore(directory: () async => directory),
+            listening: ListeningStore(directory: () async => directory),
+            seen: SeenStore(directory: () async => directory),
+            now: () => now.add(const Duration(days: 200)),
+          );
+          expect(ids(await run(fresh())), ['ok']);
+          await SeenStore(directory: () async => directory).undislike('1', 'd');
+          expect(ids(await run(fresh())).toSet(), {'d', 'ok'});
+        },
+      );
+
+      test(
+        'a dislike weakens the interest it came from, not to zero',
+        () async {
+          final provenance = {
+            'd': VectorProvenance({'sA': 1.0}, now),
+          };
+          final dislikes = [VectorDislike('d', now, 'bad')];
+          List<double> support(List<VectorDislike> d) => engine
+              .interests(['sA', 'sB'], provenance, [], '1', dislikes: d)
+              .map((p) => p.support)
+              .toList();
+          final plain = support([]);
+          final hurt = support(dislikes);
+          expect(hurt[0], lessThan(plain[0]));
+          expect(hurt[0], greaterThan(plain[0] * .39));
+          expect(hurt[1], plain[1]);
+          // many dislikes are capped
+          final many = support([for (var i = 0; i < 20; i++) dislikes.first]);
+          expect(many[0], greaterThanOrEqualTo(plain[0] * .4 - 1e-9));
+        },
+      );
+
+      test('similar candidates rank lower but stay in the pool', () async {
+        graph();
+        api.tracks = [];
+        expect(ids(await two(engine)), ['cA', 'cB']);
+        await store.write('1', {
+          'd': VectorProvenance({'sA': 1.0}, now),
+        }, check: () {});
+        await dislike('d', artist: 'unrelated');
+        expect(ids(await two(engine)), ['cB', 'cA']);
+      });
+
+      test('the artist penalty is soft', () async {
+        api.tracks = [];
+        api.neighborhoods['sA'] = [
+          realTrack('cA', artist: 'bad'),
+          realTrack('cB', artist: 'good'),
+        ];
+        expect(ids(await two(engine)), ['cA', 'cB']);
+        await dislike('gone', artist: 'bad');
+        expect(ids(await two(engine)), ['cB', 'cA']);
+      });
+
+      test(
+        'mood mode drops disliked tracks and sends no dislike data',
+        () async {
+          api.tracks = [
+            for (var i = 0; i < 3; i++) realTrack('m$i', artist: 'bad'),
+          ];
+          await dislike('m0', artist: 'bad');
+          final client = ScriptedAi()
+            ..replies.clear()
+            ..replies.addAll([
+              '{"queries":["ambient"]}',
+              '{"recommendations":[{"id":"m1","reason":"fit"}]}',
+            ]);
+          final result =
+              await RecommendationService(
+                api: api,
+                client: client,
+                vectorEngine: engine,
+              ).generate(
+                config: testConfig.withConsent(true),
+                consent: AiConsent(
+                  destination: testConfig.destination,
+                  listening: true,
+                ),
+                apiKey: '',
+                mood: 'quiet',
+                useListening: true,
+                cancelToken: CancelToken(),
+                listeningIdentity: '1',
+              );
+          expect(result.single.track.id, 'm1');
+          final sent = client.payloads.join();
+          expect(sent, isNot(contains('"id":"m0"')));
+          expect(sent, isNot(contains('dislike')));
+        },
+      );
+
+      test('dislikes outlast ordinary entries under the size limit', () async {
+        final tiny = SeenStore(directory: () async => directory, maxRecords: 3);
+        await tiny.dislike('1', 'bad1', 'a', now);
+        for (var i = 0; i < 5; i++) {
+          await tiny.record('1', SeenKind.played, [
+            'p$i',
+          ], now.add(Duration(minutes: i + 1)));
+        }
+        final kept = (await tiny.read('1')).keys.toSet();
+        expect(kept, contains('bad1'));
+        expect(kept, hasLength(3));
+      });
+    });
+
     test('a small pool widens to second level, then genre search', () async {
       api.neighborhoods['s'] = [realTrack('c0', artist: 'a0')];
       api.neighborhoods['c0'] = [

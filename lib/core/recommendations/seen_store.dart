@@ -15,11 +15,18 @@ enum SeenKind {
   played(Duration(days: 45)),
 
   /// Manually skipped early.
-  skipped(Duration(days: 30));
+  skipped(Duration(days: 30)),
+
+  /// Explicit thumbs-down from the wave; a long, effectively sticky memory.
+  disliked(Duration(days: 365));
 
   const SeenKind(this.cooldown);
   final Duration cooldown;
 }
+
+/// One remembered track. [artist] is a bounded lowercase handle kept only for
+/// dislikes, to soften later offers from the same artist.
+typedef SeenEntry = ({SeenKind kind, DateTime at, String? artist});
 
 /// Per-account (one file each), bounded, atomic memory of tracks the wave
 /// must not repeat.
@@ -38,6 +45,9 @@ class SeenStore {
   final Future<Directory> Function() _directory;
   final int maxRecords;
   final int maxBytes;
+
+  /// Dislikes are kept ahead of every other entry, up to this many.
+  static const maxDisliked = 500;
   final void Function(String message)? onFailure;
   Future<void> _pending = Future.value();
 
@@ -62,19 +72,20 @@ class SeenStore {
     };
   }
 
-  bool _active(({SeenKind kind, DateTime at}) value, DateTime now) =>
+  bool _active(SeenEntry value, DateTime now) =>
       now.difference(value.at) < value.kind.cooldown;
 
   /// Latest remembered state per track. Unknown accounts return nothing.
-  Future<Map<String, ({SeenKind kind, DateTime at})>> read(String identity) =>
+  Future<Map<String, SeenEntry>> read(String identity) =>
       _serial(() async => (await _read(identity)).entries);
 
   /// Rows that fail to parse are skipped one by one. A transient IO error
   /// yields `writable: false` so nothing is overwritten. A structurally
   /// broken file is moved to `.bak` and the memory starts afresh.
-  Future<({Map<String, ({SeenKind kind, DateTime at})> entries, bool writable})>
-  _read(String identity) async {
-    final entries = <String, ({SeenKind kind, DateTime at})>{};
+  Future<({Map<String, SeenEntry> entries, bool writable})> _read(
+    String identity,
+  ) async {
+    final entries = <String, SeenEntry>{};
     if (!validListeningIdentity(identity)) {
       return (entries: entries, writable: false);
     }
@@ -101,6 +112,7 @@ class SeenStore {
           entries[id] = (
             kind: SeenKind.values.byName(row['kind'] as String),
             at: DateTime.parse(row['at'] as String),
+            artist: row['artist'] as String?,
           );
         } catch (_) {
           onFailure?.call('seen tracks storage had an unreadable row');
@@ -112,20 +124,15 @@ class SeenStore {
     }
   }
 
-  Future<({Map<String, ({SeenKind kind, DateTime at})> entries, bool writable})>
-  _broken(File file) async {
+  Future<({Map<String, SeenEntry> entries, bool writable})> _broken(
+    File file,
+  ) async {
     onFailure?.call('seen tracks storage was corrupt, kept as .bak');
     try {
       await file.rename('${file.path}.bak');
-      return (
-        entries: <String, ({SeenKind kind, DateTime at})>{},
-        writable: true,
-      );
+      return (entries: <String, SeenEntry>{}, writable: true);
     } on FileSystemException {
-      return (
-        entries: <String, ({SeenKind kind, DateTime at})>{},
-        writable: false,
-      );
+      return (entries: <String, SeenEntry>{}, writable: false);
     }
   }
 
@@ -136,31 +143,90 @@ class SeenStore {
     SeenKind kind,
     Iterable<String> ids,
     DateTime at,
-  ) => recordAll(identity, {for (final id in ids) id: (kind: kind, at: at)});
+  ) => recordAll(identity, {
+    for (final id in ids) id: (kind: kind, at: at, artist: null),
+  });
+
+  /// Remember a thumbs-down for [trackId] (and its artist) on this account.
+  Future<void> dislike(
+    String identity,
+    String trackId,
+    String artist,
+    DateTime at,
+  ) {
+    final handle = artist.trim().toLowerCase();
+    return recordAll(identity, {
+      trackId: (
+        kind: SeenKind.disliked,
+        at: at,
+        artist: handle.length > 64 ? handle.substring(0, 64) : handle,
+      ),
+    });
+  }
+
+  /// Undo a dislike. Other kinds of memory for the track stay as they are.
+  Future<void> undislike(String identity, String trackId) => _serial(() async {
+    final loaded = await _read(identity);
+    final entry = loaded.entries[trackId];
+    if (!loaded.writable || entry?.kind != SeenKind.disliked) return;
+    loaded.entries.remove(trackId);
+    await _write(identity, loaded.entries);
+  });
+
+  /// Newest dislikes first, at most [limit].
+  Future<List<({String id, DateTime at, String? artist})>> dislikes(
+    String identity,
+    int limit,
+  ) async {
+    final entries = await read(identity);
+    final rows = [
+      for (final e in entries.entries)
+        if (e.value.kind == SeenKind.disliked)
+          (id: e.key, at: e.value.at, artist: e.value.artist),
+    ]..sort((a, b) => b.at.compareTo(a.at));
+    return rows.take(limit).toList();
+  }
 
   /// Merge many facts in one atomic write.
-  Future<void> recordAll(
-    String identity,
-    Map<String, ({SeenKind kind, DateTime at})> facts,
-  ) => _serial(() async {
-    if (!validListeningIdentity(identity) || facts.isEmpty) return;
+  Future<void> recordAll(String identity, Map<String, SeenEntry> facts) =>
+      _serial(() async {
+        if (!validListeningIdentity(identity) || facts.isEmpty) return;
+        final loaded = await _read(identity);
+        if (!loaded.writable) return;
+        final entries = loaded.entries;
+        for (final fact in facts.entries) {
+          if (!validVectorId(fact.key)) continue;
+          final old = entries[fact.key];
+          final oldEnd = old?.at.add(old.kind.cooldown);
+          final end = fact.value.at.add(fact.value.kind.cooldown);
+          if (oldEnd == null || end.isAfter(oldEnd)) {
+            entries[fact.key] = fact.value;
+          }
+        }
+        await _write(identity, entries);
+      });
+
+  /// Dislikes first (newest, capped), then everything else by recency; size
+  /// pressure trims from the tail, so ordinary entries go before dislikes.
+  Future<void> _write(String identity, Map<String, SeenEntry> entries) async {
     File? temporary;
     try {
-      final loaded = await _read(identity);
-      if (!loaded.writable) return;
-      final entries = loaded.entries;
-      for (final fact in facts.entries) {
-        if (!validVectorId(fact.key)) continue;
-        final old = entries[fact.key];
-        final oldEnd = old?.at.add(old.kind.cooldown);
-        final end = fact.value.at.add(fact.value.kind.cooldown);
-        if (oldEnd == null || end.isAfter(oldEnd)) {
-          entries[fact.key] = fact.value;
-        }
-      }
-      final latest = entries.keys.toList()
-        ..sort((a, b) => entries[b]!.at.compareTo(entries[a]!.at));
-      var keep = latest.take(maxRecords).toList();
+      int newest(String a, String b) =>
+          entries[b]!.at.compareTo(entries[a]!.at);
+      final disliked =
+          entries.keys
+              .where((id) => entries[id]!.kind == SeenKind.disliked)
+              .toList()
+            ..sort(newest);
+      final others =
+          entries.keys
+              .where((id) => entries[id]!.kind != SeenKind.disliked)
+              .toList()
+            ..sort(newest);
+      var keep = [
+        ...disliked.take(maxDisliked),
+        ...others,
+      ].take(maxRecords).toList();
       String encode() => jsonEncode({
         'version': 1,
         'identity': identity,
@@ -170,6 +236,7 @@ class SeenStore {
               'id': id,
               'kind': entries[id]!.kind.name,
               'at': entries[id]!.at.toUtc().toIso8601String(),
+              'artist': ?entries[id]!.artist,
             },
         ],
       });
@@ -193,7 +260,7 @@ class SeenStore {
         }
       }
     }
-  });
+  }
 
   /// Delete one account's memory, e.g. on its logout or consent revocation.
   /// Other accounts keep theirs, so switching A to B and back loses nothing.

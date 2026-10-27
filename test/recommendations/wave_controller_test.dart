@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:talker_flutter/talker_flutter.dart';
@@ -19,6 +20,8 @@ import 'package:waveform_app/core/recommendations/seen_store.dart';
 import 'package:waveform_app/shared/models/track.dart';
 import 'package:waveform_app/core/recommendations/providers.dart';
 import 'package:waveform_app/features/player/player_controller.dart';
+import 'package:waveform_app/features/player/player_ui_state.dart';
+import 'package:waveform_app/features/player/widgets/bottom_player.dart';
 import 'package:waveform_app/features/recommendations/wave_controller.dart';
 
 import '../support/fake_audio_engine.dart';
@@ -88,7 +91,10 @@ void main() {
     engine.dispose();
   });
 
-  ProviderContainer containerWith(RecommendationService service) {
+  ProviderContainer containerWith(
+    RecommendationService service, {
+    SeenStore? seen,
+  }) {
     final other = ProviderContainer(
       overrides: [
         waveRetryDelayProvider.overrideWithValue(Duration.zero),
@@ -100,7 +106,7 @@ void main() {
         aiClientProvider.overrideWithValue(client),
         recommendationServiceProvider.overrideWithValue(service),
         seenStoreProvider.overrideWithValue(
-          SeenStore(directory: () async => seenDirectory),
+          seen ?? SeenStore(directory: () async => seenDirectory),
         ),
         soundcloudApiProvider.overrideWithValue(api),
         audioEngineProvider.overrideWithValue(engine),
@@ -234,6 +240,49 @@ void main() {
     expect(other.read(recommendationsProvider).error, isNull);
   });
 
+  testWidgets('dislike button shows for wave tracks, skips and can undo', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1500, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final memory = MemorySeenStore();
+    final other = containerWith(PoolService(api, client), seen: memory);
+    await other.read(waveControllerProvider.notifier).start('');
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: other,
+        child: const MaterialApp(
+          home: Scaffold(body: Column(children: [Spacer(), BottomPlayer()])),
+        ),
+      ),
+    );
+    const label = 'dislike, do not suggest again';
+    expect(find.byTooltip(label), findsOneWidget);
+    expect(other.read(playerControllerProvider).track?.id, 't1');
+
+    await tester.tap(find.byTooltip(label));
+    await tester.pump();
+    await tester.pump();
+    expect(other.read(playerControllerProvider).track?.id, 't2');
+    expect(find.text("won't suggest this again"), findsOneWidget);
+    expect(memory.kinds['t1'], SeenKind.disliked);
+
+    await tester.tap(find.text('undo'));
+    await tester.pump();
+    await tester.pump();
+    expect(memory.kinds.containsKey('t1'), isFalse);
+
+    other.read(playerCollapsedProvider.notifier).collapse();
+    await tester.pump();
+    expect(find.byTooltip(label), findsOneWidget);
+
+    other.read(playerControllerProvider.notifier).play(realTrack('foreign'));
+    await tester.pump(const Duration(seconds: 5));
+    expect(find.byTooltip(label), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   for (final change in ['disconnect', 'config', 'logout', 'cancel']) {
     test(
       '$change aborts a pending refill and does not change the queue',
@@ -310,5 +359,34 @@ class PoolService extends RecommendationService {
       for (var i = 0; i < 20; i++)
         Recommendation(realTrack('t${i + 1}'), 'a possible fit'),
     ];
+  }
+}
+
+/// In-memory stand-in so widget tests need no file IO.
+class MemorySeenStore extends SeenStore {
+  final kinds = <String, SeenKind>{};
+
+  @override
+  Future<void> dislike(
+    String identity,
+    String trackId,
+    String artist,
+    DateTime at,
+  ) async => kinds[trackId] = SeenKind.disliked;
+
+  @override
+  Future<void> undislike(String identity, String trackId) async =>
+      kinds.remove(trackId);
+
+  @override
+  Future<void> record(
+    String identity,
+    SeenKind kind,
+    Iterable<String> ids,
+    DateTime at,
+  ) async {
+    for (final id in ids) {
+      kinds.putIfAbsent(id, () => kind);
+    }
   }
 }

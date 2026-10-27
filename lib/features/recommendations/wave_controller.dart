@@ -8,6 +8,7 @@ import '../../core/recommendations/ai_config.dart';
 import '../../core/recommendations/models.dart';
 import '../../core/recommendations/providers.dart';
 import '../../core/recommendations/seen_store.dart';
+import '../../shared/models/track.dart';
 import '../player/player_controller.dart';
 
 class WaveState {
@@ -283,6 +284,38 @@ class WaveController extends Notifier<WaveState> {
     });
   }
 
+  /// Whether [trackId] was queued by the active wave.
+  bool ownsTrack(String trackId) => state.active && _ids.contains(trackId);
+
+  /// Thumbs-down on the playing wave track: remember it for this account (id
+  /// and artist handle, locally only), then move on. Returns the track, or
+  /// null when nothing was disliked.
+  Future<Track?> dislikeCurrent() async {
+    final track = ref.read(playerControllerProvider).track;
+    if (track == null || !ownsTrack(track.id)) return null;
+    try {
+      final identity = await ref.read(aiListeningIdentityProvider.future);
+      await ref
+          .read(seenStoreProvider)
+          .dislike(identity, track.id, track.artistHandle, DateTime.now());
+    } catch (_) {
+      return null;
+    }
+    if (_disposed) return null;
+    ref.read(playerControllerProvider.notifier).next();
+    return track;
+  }
+
+  /// Take back a dislike made moments ago.
+  Future<void> undoDislike(Track track) async {
+    try {
+      final identity = await ref.read(aiListeningIdentityProvider.future);
+      await ref.read(seenStoreProvider).undislike(identity, track.id);
+    } catch (_) {
+      // Nothing was stored for an unknown identity.
+    }
+  }
+
   void cancel() {
     _epoch++;
     _wake();
@@ -301,3 +334,10 @@ final waveControllerProvider = NotifierProvider<WaveController, WaveState>(
 final waveRetryDelayProvider = Provider<Duration>(
   (ref) => const Duration(seconds: 4),
 );
+
+/// True while the playing track was queued by the active wave.
+final currentTrackInWaveProvider = Provider<bool>((ref) {
+  ref.watch(waveControllerProvider);
+  final id = ref.watch(playerControllerProvider.select((p) => p.track?.id));
+  return id != null && ref.read(waveControllerProvider.notifier).ownsTrack(id);
+});
