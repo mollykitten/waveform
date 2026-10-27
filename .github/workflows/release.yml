@@ -92,6 +92,7 @@ jobs:
 
       - name: Codesign .app (Developer ID Application)
         run: |
+          set -euo pipefail
           APP="build/macos/Build/Products/Release/Waveform.app"
           # apple-actions/import-codesign-certs imports into a dedicated
           # signing_temp.keychain that isn't always added to the user
@@ -134,7 +135,7 @@ jobs:
           } | awk '{ print gsub("/", "/") "\t" $0 }' | sort -rn | cut -f2- |
             while IFS= read -r target; do
               echo "signing: $target"
-              sign "$target"
+              sign "$target" || exit 1
             done
           sign --entitlements macos/Runner/Release.entitlements "$APP"
 
