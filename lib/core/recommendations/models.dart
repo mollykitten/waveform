@@ -14,15 +14,6 @@ enum WaveFailure implements Exception {
   String toString() => message;
 }
 
-/// Bounded public text only: no URLs or control characters.
-String boundedText(String value, int limit) {
-  final clean = value
-      .replaceAll(RegExp(r'(?:https?://|www\.)\S+', caseSensitive: false), '')
-      .replaceAll(RegExp(r'[\x00-\x1f\x7f]'), ' ')
-      .trim();
-  return String.fromCharCodes(clean.runes.take(limit));
-}
-
 /// Where a wave candidate came from. Stored with local listening facts so the
 /// sources can later be compared by completions and skips.
 enum WaveSource {

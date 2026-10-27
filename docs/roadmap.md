@@ -97,10 +97,10 @@ pastes, so the outcomes are recorded here.
   uploader or a track. 9% of ranking replies were invalid under the app's
   strict parser, which ends a batch. a stronger model could reach the
   uploader-name level of the ceiling, which is still below the graph, so the
-  conclusion does not depend on model size. mood-to-query translation is the
-  only use the route keeps; it cannot be evaluated against likes. side
-  finding: the track mapper substitutes `electronic` for an empty genre, so
-  half of some users' seeds reach the prompt with a fake genre.
+  conclusion does not depend on model size. the route was removed entirely,
+  mood field included. side finding, since fixed: the track mapper
+  substituted `electronic` for an empty genre, so half of some users' seeds
+  reached the prompt with a fake genre.
 - **limits.** four users, one of them degenerate (100 likes in a single day),
   100 positives each, wide intervals including zero on most pairs, and
   look-ahead bias because followings, likers and neighbour likes were fetched
