@@ -5,6 +5,7 @@ import '../api/soundcloud_api.dart';
 import 'listening_event.dart';
 import 'listening_store.dart';
 import 'models.dart';
+import 'seen_store.dart';
 import 'vector_store.dart';
 
 /// Coordinates identify actual source seeds, never hashed musical features.
@@ -41,11 +42,15 @@ class VectorEngine {
     required this.api,
     required this.store,
     required this.listening,
+    this.seen,
     DateTime Function()? now,
   }) : _now = now ?? DateTime.now;
   final SoundcloudApi api;
   final VectorStore store;
   final ListeningStore listening;
+
+  /// Persistent cross-session memory of shown, heard and skipped tracks.
+  final SeenStore? seen;
   final DateTime Function() _now;
 
   static bool eligible(Track track) =>
@@ -111,6 +116,7 @@ class VectorEngine {
     required String identity,
     required Set<String> excludedTrackIds,
     required void Function() check,
+    int limit = 10,
   }) async {
     check();
     if (!validListeningIdentity(identity)) return [];
@@ -129,20 +135,20 @@ class VectorEngine {
       (revision) =>
           now.difference(revision.value.observedAt) > const Duration(days: 90),
     );
-    final uniqueSeeds = <String, Track>{};
-    // Prefer different known artists, then fill any spare seed slots.
-    final artists = <String>{};
-    for (final seed in seeds) {
-      if (eligible(seed) && artists.add(seed.artistHandle.toLowerCase())) {
-        uniqueSeeds.putIfAbsent(seed.id, () => seed);
-      }
-      if (uniqueSeeds.length == 6) break;
+    final excluded = {
+      ...excludedTrackIds,
+      ..._heardCooldown(events, identity, now),
+      if (seen != null) ...await _syncSeen(events, identity, now),
+    };
+    check();
+    final picked = _pickSeeds(seeds, events, identity);
+    if (picked.isEmpty) return [];
+    // Count use up front so even an empty pool rotates to other seeds.
+    for (final seed in picked) {
+      _seedUses[seed.id] = (_seedUses[seed.id] ?? 0) + 1;
     }
-    for (final seed in seeds) {
-      if (uniqueSeeds.length == 6) break;
-      if (eligible(seed)) uniqueSeeds.putIfAbsent(seed.id, () => seed);
-    }
-    if (uniqueSeeds.isEmpty) return [];
+    if (_seedUses.length > 200) _seedUses.clear();
+    final uniqueSeeds = {for (final seed in picked) seed.id: seed};
     final sessions = events.map((e) => e.sessionId).toSet();
     attributions.removeWhere((session, _) => !sessions.contains(session));
     for (final event in events) {
@@ -167,33 +173,9 @@ class VectorEngine {
         return VectorProvenance(Map.of(weights), event.endedAt);
       });
     }
-    final candidates = <String, Track>{};
-    final edges = <String, Map<String, double>>{};
-    for (final seed in uniqueSeeds.values) {
-      check();
-      List<Track> related;
-      try {
-        related = await api
-            .relatedTracks(seed.id)
-            .timeout(const Duration(seconds: 15));
-      } catch (_) {
-        check();
-        continue;
-      }
-      check();
-      // Never follow next_href or expand returned tracks recursively.
-      for (var rank = 0; rank < math.min(12, related.length); rank++) {
-        final track = related[rank];
-        if (!eligible(track) ||
-            excludedTrackIds.contains(track.id) ||
-            uniqueSeeds.containsKey(track.id)) {
-          continue;
-        }
-        candidates.putIfAbsent(track.id, () => track);
-        final coordinates = edges.putIfAbsent(track.id, () => {});
-        coordinates.putIfAbsent(seed.id, () => 1 / math.sqrt(rank + 1));
-      }
-    }
+    final pool = await _gather(picked, excluded, check);
+    final candidates = pool.candidates;
+    final edges = pool.edges;
     if (candidates.isEmpty) return [];
     final vectors = {
       for (final edge in edges.entries) edge.key: StructuralVector(edge.value),
@@ -215,7 +197,13 @@ class VectorEngine {
       if (previous != null) revisions.add(VectorRevision(entry.key, previous));
       provenance[entry.key] = VectorProvenance(entry.value.weights, observedAt);
     }
-    final selected = rank(candidates.values.toList(), vectors, profiles);
+    final selected = rank(
+      candidates.values.toList(),
+      vectors,
+      profiles,
+      limit: limit,
+      discounts: pool.discounts,
+    );
     check();
     await store.write(
       identity,
@@ -223,6 +211,13 @@ class VectorEngine {
       attributions: attributions,
       revisions: revisions,
       check: check,
+    );
+    check();
+    await seen?.record(
+      identity,
+      SeenKind.shown,
+      selected.map((track) => track.id),
+      observedAt,
     );
     check();
     return [
@@ -234,13 +229,220 @@ class VectorEngine {
     ];
   }
 
+  /// Hard cap on SoundCloud requests for one generation.
+  static const maxRequests = 12;
+
+  /// Below this many filtered candidates the pool is widened by stages.
+  static const minPool = 20;
+
+  final _seedUses = <String, int>{};
+
+  /// Tracks heard or skipped recently, straight from the local facts.
+  Set<String> _heardCooldown(
+    List<ListeningEvent> events,
+    String identity,
+    DateTime now,
+  ) => {
+    for (final event in events)
+      if (event.identity == identity &&
+          event.isValid &&
+          _kindOf(event) != null &&
+          now.difference(event.endedAt) < _kindOf(event)!.cooldown)
+        event.trackId,
+  };
+
+  SeenKind? _kindOf(ListeningEvent event) => switch (event.evidence) {
+    ListeningEvidence.positive => SeenKind.played,
+    ListeningEvidence.negative => SeenKind.skipped,
+    ListeningEvidence.neutral => null,
+  };
+
+  /// Copy listening facts into the durable memory and return its cooldown set.
+  Future<Set<String>> _syncSeen(
+    List<ListeningEvent> events,
+    String identity,
+    DateTime now,
+  ) async {
+    final store = seen!;
+    final facts = <String, ({SeenKind kind, DateTime at})>{};
+    for (final event in events) {
+      final kind = _kindOf(event);
+      if (event.identity != identity || !event.isValid || kind == null) {
+        continue;
+      }
+      facts[event.trackId] = (kind: kind, at: event.endedAt);
+    }
+    await store.recordAll(identity, facts);
+    await store.clearOthers(identity);
+    return store.excluded(identity, now);
+  }
+
+  /// Choose up to six seeds: caller seeds, then recent positive listens, with
+  /// least-used seeds first so consecutive refills explore different roots.
+  List<_Seed> _pickSeeds(
+    List<Track> callerSeeds,
+    List<ListeningEvent> events,
+    String identity,
+  ) {
+    final all = <String, _Seed>{};
+    for (final track in callerSeeds) {
+      if (eligible(track)) {
+        all.putIfAbsent(
+          track.id,
+          () => _Seed(track.id, track.artistHandle.toLowerCase(), track.genre),
+        );
+      }
+    }
+    var listened = 0;
+    for (final event in events.reversed) {
+      if (listened == 10) break;
+      if (event.identity == identity &&
+          event.isValid &&
+          event.evidence == ListeningEvidence.positive &&
+          validVectorId(event.trackId) &&
+          !all.containsKey(event.trackId)) {
+        all[event.trackId] = _Seed(event.trackId, '', '');
+        listened++;
+      }
+    }
+    final ordered = all.values.toList();
+    final ranks = {for (var i = 0; i < ordered.length; i++) ordered[i].id: i};
+    ordered.sort((a, b) {
+      final byUse = (_seedUses[a.id] ?? 0).compareTo(_seedUses[b.id] ?? 0);
+      return byUse != 0 ? byUse : ranks[a.id]!.compareTo(ranks[b.id]!);
+    });
+    final picked = <_Seed>[];
+    final artists = <String>{};
+    for (final seed in ordered) {
+      if (picked.length == 6) break;
+      if (seed.artist.isEmpty || artists.add(seed.artist)) picked.add(seed);
+    }
+    for (final seed in ordered) {
+      if (picked.length == 6) break;
+      if (!picked.contains(seed)) picked.add(seed);
+    }
+    return picked;
+  }
+
+  /// Staged retrieval: related of seeds, related of the best candidates, then
+  /// genre search. Candidates are filtered before ranking. The related
+  /// endpoint is read as one page: the API contract exposes no next page.
+  Future<
+    ({
+      Map<String, Track> candidates,
+      Map<String, Map<String, double>> edges,
+      Map<String, double> discounts,
+    })
+  >
+  _gather(
+    List<_Seed> picked,
+    Set<String> excluded,
+    void Function() check,
+  ) async {
+    final seedIds = {for (final seed in picked) seed.id};
+    final candidates = <String, Track>{};
+    final edges = <String, Map<String, double>>{};
+    final discounts = <String, double>{};
+    var requests = 0;
+
+    void add(Track track, Map<String, double> weights, double discount) {
+      if (!eligible(track) ||
+          excluded.contains(track.id) ||
+          seedIds.contains(track.id)) {
+        return;
+      }
+      candidates.putIfAbsent(track.id, () => track);
+      if (discount > (discounts[track.id] ?? 0)) discounts[track.id] = discount;
+      final coordinates = edges.putIfAbsent(track.id, () => {});
+      for (final weight in weights.entries) {
+        final old = coordinates[weight.key] ?? 0;
+        if (weight.value > old) coordinates[weight.key] = weight.value;
+      }
+    }
+
+    Future<List<Track>> related(String id) async {
+      if (requests >= maxRequests) return const [];
+      requests++;
+      check();
+      try {
+        final result = await api
+            .relatedTracks(id)
+            .timeout(const Duration(seconds: 15));
+        check();
+        return result;
+      } catch (_) {
+        check();
+        return const [];
+      }
+    }
+
+    for (final seed in picked) {
+      final tracks = await related(seed.id);
+      for (var rank = 0; rank < math.min(12, tracks.length); rank++) {
+        add(tracks[rank], {seed.id: 1 / math.sqrt(rank + 1)}, 1);
+      }
+    }
+    if (candidates.length < minPool) {
+      final parents = edges.entries.toList()
+        ..sort((a, b) {
+          double sum(Map<String, double> m) =>
+              m.values.fold(0, (s, v) => s + v);
+          return sum(b.value).compareTo(sum(a.value));
+        });
+      for (final parent in parents.take(3)) {
+        final tracks = await related(parent.key);
+        for (var rank = 0; rank < math.min(12, tracks.length); rank++) {
+          add(tracks[rank], {
+            for (final e in parent.value.entries)
+              e.key: e.value * .5 / math.sqrt(rank + 1),
+          }, .6);
+        }
+      }
+    }
+    if (candidates.length < minPool) {
+      final counts = <String, int>{};
+      for (final seed in picked) {
+        final genre = seed.genre.trim().toLowerCase();
+        if (genre.isNotEmpty) counts[genre] = (counts[genre] ?? 0) + 1;
+      }
+      final genres = counts.keys.toList()
+        ..sort((a, b) => counts[b]!.compareTo(counts[a]!));
+      for (final genre in genres.take(2)) {
+        if (requests >= maxRequests) break;
+        requests++;
+        check();
+        try {
+          final found = await api
+              .search(genre)
+              .timeout(const Duration(seconds: 15));
+          check();
+          final roots = {
+            for (final seed in picked)
+              if (seed.genre.trim().toLowerCase() == genre) seed.id,
+          };
+          for (var rank = 0; rank < math.min(20, found.tracks.length); rank++) {
+            if (roots.isEmpty) break;
+            add(found.tracks[rank], {
+              roots.first: .3 / math.sqrt(rank + 1),
+            }, .3);
+          }
+        } catch (_) {
+          check();
+        }
+      }
+    }
+    return (candidates: candidates, edges: edges, discounts: discounts);
+  }
+
   /// Cosine to separate one-seed interest vectors, weighted by bounded support.
   /// Every fifth place explores an underrepresented, less-observed interest.
   List<Track> rank(
     List<Track> candidates,
     Map<String, StructuralVector> vectors,
-    List<VectorInterest> profiles,
-  ) {
+    List<VectorInterest> profiles, {
+    int limit = 10,
+    Map<String, double> discounts = const {},
+  }) {
     final units = {
       for (final p in profiles) p.seedId: StructuralVector({p.seedId: 1}),
     };
@@ -248,7 +450,7 @@ class VectorEngine {
     final artists = <String, int>{};
     final remaining = {for (final t in candidates) t.id: t};
     final result = <Track>[];
-    while (remaining.isNotEmpty && result.length < 10) {
+    while (remaining.isNotEmpty && result.length < limit) {
       final explore = result.length % 5 == 4;
       double score(Track track) {
         final vector = vectors[track.id];
@@ -261,7 +463,7 @@ class VectorEngine {
               : profile.support;
           value += similarity * weight / (1 + coverage[profile.seedId]!);
         }
-        return value;
+        return value * (discounts[track.id] ?? 1);
       }
 
       final available = remaining.values
@@ -286,4 +488,11 @@ class VectorEngine {
     }
     return result;
   }
+}
+
+class _Seed {
+  const _Seed(this.id, this.artist, this.genre);
+  final String id;
+  final String artist;
+  final String genre;
 }

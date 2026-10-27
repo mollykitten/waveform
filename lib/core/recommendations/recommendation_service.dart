@@ -30,8 +30,12 @@ class RecommendationService {
     required CancelToken cancelToken,
     Track? currentTrack,
     Set<String> excludedTrackIds = const {},
+
+    /// Used by the local engine only; never sent to a model.
+    Set<String> localExcludedTrackIds = const {},
     String? listeningIdentity,
     void Function()? checkCurrent,
+    int limit = 10,
   }) async {
     final requestMood = validatedMood(mood);
     if (!config.isValid ||
@@ -50,10 +54,10 @@ class RecommendationService {
     if (useListening) {
       try {
         final likes = await api
-            .likesPage(limit: 10)
+            .likesPage(limit: 20)
             .timeout(const Duration(seconds: 25));
         check();
-        seeds.addAll(likes.tracks.take(10));
+        seeds.addAll(likes.tracks.take(20));
         final history = await api
             .historyPage(limit: 10)
             .timeout(const Duration(seconds: 25));
@@ -66,11 +70,13 @@ class RecommendationService {
       }
     }
     check();
-    final uniqueSeeds = <String, Track>{};
+    // The model sees at most 20 seeds; the local engine rotates among 30.
+    final localSeeds = <String, Track>{};
     for (final track in seeds) {
-      uniqueSeeds.putIfAbsent(track.id, () => track);
-      if (uniqueSeeds.length == 20) break;
+      localSeeds.putIfAbsent(track.id, () => track);
+      if (localSeeds.length == 30) break;
     }
+    final uniqueSeeds = Map.fromEntries(localSeeds.entries.take(20));
     if (requestMood.isEmpty && uniqueSeeds.isEmpty) {
       throw AiFailure.configuration;
     }
@@ -79,13 +85,17 @@ class RecommendationService {
         vectorEngine != null &&
         listeningIdentity != null) {
       final local = await vectorEngine!.generate(
-        seeds: uniqueSeeds.values.toList(),
+        seeds: localSeeds.values.toList(),
         identity: listeningIdentity,
-        excludedTrackIds: excludedTrackIds,
+        excludedTrackIds: {...excludedTrackIds, ...localExcludedTrackIds},
         check: check,
+        limit: limit,
       );
       check();
       if (local.isNotEmpty) return local;
+      // The local mode promises no model call: never fall back to the cloud
+      // with listening metadata when the user gave no mood.
+      throw AiFailure.noTracks;
     }
     final context = {
       'mood': requestMood,

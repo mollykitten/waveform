@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:talker_flutter/talker_flutter.dart';
@@ -10,6 +11,10 @@ import 'package:waveform_app/core/api/soundcloud_auth.dart';
 import 'package:waveform_app/core/audio/audio_engine.dart';
 import 'package:waveform_app/core/log/talker.dart';
 import 'package:waveform_app/core/recommendations/ai_config.dart';
+import 'package:waveform_app/core/recommendations/ai_client.dart';
+import 'package:waveform_app/core/recommendations/models.dart';
+import 'package:waveform_app/core/recommendations/recommendation_service.dart';
+import 'package:waveform_app/shared/models/track.dart';
 import 'package:waveform_app/core/recommendations/providers.dart';
 import 'package:waveform_app/features/player/player_controller.dart';
 import 'package:waveform_app/features/recommendations/wave_controller.dart';
@@ -25,6 +30,7 @@ void main() {
   late ScriptedAi client;
   late TestSoundcloud api;
   late FakeAudioEngine engine;
+  String? userToken;
   Future<void> flush() async {
     for (var i = 0; i < 8; i++) {
       await Future<void>.delayed(Duration.zero);
@@ -43,6 +49,7 @@ void main() {
   }
 
   setUp(() {
+    userToken = null;
     settings = WaveTestSettings(
       initial: const AiSettingsState(
         ready: true,
@@ -57,8 +64,10 @@ void main() {
     container = ProviderContainer(
       overrides: [
         authControllerProvider.overrideWithBuild(
-          (ref, notifier) => const SoundcloudAuth(clientId: 'test'),
+          (ref, notifier) =>
+              SoundcloudAuth(clientId: 'test', userToken: userToken),
         ),
+        waveRetryDelayProvider.overrideWithValue(Duration.zero),
         aiSettingsProvider.overrideWith(() => settings),
         aiListeningIdentityProvider.overrideWith((ref) async => 'test-profile'),
         aiClientProvider.overrideWithValue(client),
@@ -73,6 +82,27 @@ void main() {
     container.dispose();
     engine.dispose();
   });
+
+  ProviderContainer containerWith(RecommendationService service) {
+    final other = ProviderContainer(
+      overrides: [
+        waveRetryDelayProvider.overrideWithValue(Duration.zero),
+        authControllerProvider.overrideWithBuild(
+          (ref, notifier) => const SoundcloudAuth(clientId: 'test'),
+        ),
+        aiSettingsProvider.overrideWith(() => settings),
+        aiListeningIdentityProvider.overrideWith((ref) async => 'test-profile'),
+        aiClientProvider.overrideWithValue(client),
+        recommendationServiceProvider.overrideWithValue(service),
+        soundcloudApiProvider.overrideWithValue(api),
+        audioEngineProvider.overrideWithValue(engine),
+        likedTracksProvider.overrideWith(StubLikedTracks.new),
+        talkerProvider.overrideWithValue(Talker()),
+      ],
+    );
+    addTearDown(other.dispose);
+    return other;
+  }
 
   test('a late initial result cannot replace a newly selected track', () async {
     final pending = Completer<String>();
@@ -138,28 +168,62 @@ void main() {
     },
   );
 
-  test('no new candidates stops the wave with no repeated requests', () async {
-    batch(['1', '2', '3', '4']);
-    batch(['1']);
-    await container.read(waveControllerProvider.notifier).start('ambient');
-    final player = container.read(playerControllerProvider.notifier);
-    player.next();
-    await flush();
-    expect(container.read(waveControllerProvider).active, isFalse);
-    final count = client.payloads.length;
-    for (var i = 0; i < 8; i++) {
+  test(
+    'exhausted candidates retry, then stop with a visible message',
+    () async {
+      final service = PoolService(api, client)..scripted = [4];
+      final other = containerWith(service);
+      await other.read(waveControllerProvider.notifier).start('');
+      final player = other.read(playerControllerProvider.notifier);
       player.next();
-      await flush();
-    }
-    expect(client.payloads, hasLength(count));
-    expect(
-      container
-          .read(recommendationsProvider)
-          .items
-          .map((i) => i.track.id)
-          .toSet(),
-      hasLength(4),
-    );
+      await pumpEventQueue();
+      expect(other.read(waveControllerProvider).active, isFalse);
+      expect(other.read(recommendationsProvider).error, AiFailure.noTracks);
+      final calls = service.calls;
+      expect(calls, 1 + WaveController.maxRetries + 1);
+      for (var i = 0; i < 3; i++) {
+        player.next();
+        await pumpEventQueue();
+      }
+      expect(service.calls, calls);
+    },
+  );
+
+  test('a failing search is retried and its error stays visible', () async {
+    final service = PoolService(api, client)..scripted = [4];
+    final other = containerWith(service);
+    await other.read(waveControllerProvider.notifier).start('');
+    service.failure = AiFailure.network;
+    other.read(playerControllerProvider.notifier).next();
+    await pumpEventQueue();
+    expect(other.read(waveControllerProvider).active, isFalse);
+    expect(other.read(recommendationsProvider).error, AiFailure.network);
+    expect(service.calls, 1 + WaveController.maxRetries + 1);
+  });
+
+  test('a user-fixable error is shown at once without retries', () async {
+    final service = PoolService(api, client)..scripted = [4];
+    final other = containerWith(service);
+    await other.read(waveControllerProvider.notifier).start('');
+    service.failure = AiFailure.credentials;
+    other.read(playerControllerProvider.notifier).next();
+    await pumpEventQueue();
+    expect(other.read(waveControllerProvider).active, isFalse);
+    expect(other.read(recommendationsProvider).error, AiFailure.credentials);
+    expect(service.calls, 2);
+  });
+
+  test('an empty refill keeps the wave searching and recovers', () async {
+    final service = PoolService(api, client)..scripted = [4, 0, 2];
+    final other = containerWith(service);
+    await other.read(waveControllerProvider.notifier).start('');
+    final player = other.read(playerControllerProvider.notifier);
+    player.next();
+    await pumpEventQueue();
+    expect(service.calls, 3);
+    expect(other.read(waveControllerProvider).active, isTrue);
+    expect(other.read(waveControllerProvider).discovering, isFalse);
+    expect(other.read(recommendationsProvider).error, isNull);
   });
 
   for (final change in ['disconnect', 'config', 'logout', 'cancel']) {
@@ -179,6 +243,7 @@ void main() {
           case 'config':
             await settings.save(testConfig);
           case 'logout':
+            userToken = 'another-account';
             container.invalidate(authControllerProvider);
             await flush();
           case 'cancel':
@@ -193,5 +258,49 @@ void main() {
         expect(player.upcomingTracks.map((t) => t.id), queued);
       },
     );
+  }
+}
+
+/// Returns twenty fresh candidates on the first call and records limits.
+class PoolService extends RecommendationService {
+  PoolService(TestSoundcloud api, ScriptedAi client)
+    : super(api: api, client: client);
+  int calls = 0;
+  int issued = 0;
+
+  /// Sizes of successive answers; afterwards every answer is empty.
+  List<int>? scripted;
+  AiFailure? failure;
+  final limits = <int>[];
+
+  @override
+  Future<List<Recommendation>> generate({
+    required AiConfig config,
+    required AiConsent consent,
+    required String apiKey,
+    required String mood,
+    required bool useListening,
+    required CancelToken cancelToken,
+    Track? currentTrack,
+    Set<String> excludedTrackIds = const {},
+    Set<String> localExcludedTrackIds = const {},
+    String? listeningIdentity,
+    void Function()? checkCurrent,
+    int limit = 10,
+  }) async {
+    calls++;
+    limits.add(limit);
+    if (failure != null) throw failure!;
+    if (scripted != null) {
+      final size = scripted!.isEmpty ? 0 : scripted!.removeAt(0);
+      return [
+        for (var i = 0; i < size; i++)
+          Recommendation(realTrack('t${++issued}'), 'a possible fit'),
+      ];
+    }
+    return [
+      for (var i = 0; i < 20; i++)
+        Recommendation(realTrack('t${i + 1}'), 'a possible fit'),
+    ];
   }
 }

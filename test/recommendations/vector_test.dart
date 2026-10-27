@@ -9,6 +9,7 @@ import 'package:waveform_app/core/recommendations/ai_client.dart';
 import 'package:waveform_app/core/recommendations/listening_event.dart';
 import 'package:waveform_app/core/recommendations/listening_store.dart';
 import 'package:waveform_app/core/recommendations/models.dart';
+import 'package:waveform_app/core/recommendations/seen_store.dart';
 import 'package:waveform_app/core/recommendations/recommendation_service.dart';
 import 'package:waveform_app/core/recommendations/vector_engine.dart';
 import 'package:waveform_app/core/recommendations/vector_store.dart';
@@ -109,7 +110,8 @@ void main() {
         check: () {},
       );
       final old = await store.readSnapshot('1');
-      expect(old.attributions['session']!.weights, isEmpty);
+      // A heard track is itself a seed now, so its own interest is known.
+      expect(old.attributions['session']!.weights, {'x': 1.0});
       api.neighborhoods['x'] = [realTrack('a')];
       await engine.generate(
         seeds: [
@@ -128,7 +130,7 @@ void main() {
         '1',
         attributions: snapshot.attributions,
       );
-      expect(snapshot.attributions['session']!.weights, isEmpty);
+      expect(snapshot.attributions['session']!.weights, {'x': 1.0});
       expect(profiles.map((p) => p.support), [2, 1]);
       final selfAttributed = engine.interests(
         ['x', 'seedB'],
@@ -256,7 +258,11 @@ void main() {
       );
       final result = await batch(restored);
       final snapshot = await restored.store.readSnapshot('1');
-      expect(snapshot.vectors['x']!.weights.keys, ['seedB']);
+      // A skipped track sits out its cooldown, so its vector stays frozen.
+      expect(
+        snapshot.vectors['x']!.weights.keys,
+        activeDuringRefresh ? ['seedB'] : ['seedA'],
+      );
       expect(snapshot.attributions['skip']!.weights.keys, ['seedA']);
       expect(snapshot.attributions['unknown']!.weights, isEmpty);
       final profiles = restored.interests(
@@ -563,7 +569,7 @@ void main() {
         currentTrack: realTrack('seed'),
       );
       final local = await generate('');
-      expect(local.single.track.id, 'local');
+      expect(local.first.track.id, 'local');
       expect(client.payloads, isEmpty);
       api.relatedCalls.clear();
       final mood = await generate('quiet evening');
@@ -574,30 +580,222 @@ void main() {
     },
   );
 
-  test('graph failure falls back once to existing model workflow', () async {
+  test(
+    'graph failure widens by genre search and never calls the model',
+    () async {
+      api.failRelated = true;
+      final client = ScriptedAi();
+      final result =
+          await RecommendationService(
+            api: api,
+            client: client,
+            vectorEngine: engine,
+          ).generate(
+            config: testConfig.withConsent(true),
+            consent: AiConsent(
+              destination: testConfig.destination,
+              listening: true,
+            ),
+            apiKey: '',
+            mood: '',
+            useListening: true,
+            cancelToken: CancelToken(),
+            listeningIdentity: '1',
+            currentTrack: realTrack('seed'),
+          );
+      expect(result.map((r) => r.track.id), containsAll(['1', '2']));
+      expect(api.relatedCalls.length, 6);
+      expect(api.relatedCalls.toSet().length, 6);
+      expect(api.searches, ['ambient']);
+      expect(client.payloads, isEmpty);
+    },
+  );
+
+  test('an empty local pool fails visibly without calling the model', () async {
     api.failRelated = true;
+    api.tracks = [];
     final client = ScriptedAi();
-    final result =
-        await RecommendationService(
-          api: api,
-          client: client,
-          vectorEngine: engine,
-        ).generate(
-          config: testConfig.withConsent(true),
-          consent: AiConsent(
-            destination: testConfig.destination,
-            listening: true,
-          ),
-          apiKey: '',
-          mood: '',
-          useListening: true,
-          cancelToken: CancelToken(),
-          listeningIdentity: '1',
-          currentTrack: realTrack('seed'),
-        );
-    expect(result.single.track.id, '2');
-    expect(api.relatedCalls.length, 6);
-    expect(api.relatedCalls.toSet().length, 6);
-    expect(client.payloads.length, 2);
+    final service = RecommendationService(
+      api: api,
+      client: client,
+      vectorEngine: engine,
+    );
+    expect(
+      service.generate(
+        config: testConfig.withConsent(true),
+        consent: AiConsent(
+          destination: testConfig.destination,
+          listening: true,
+        ),
+        apiKey: '',
+        mood: '',
+        useListening: true,
+        cancelToken: CancelToken(),
+        listeningIdentity: '1',
+        currentTrack: realTrack('seed'),
+      ),
+      throwsA(AiFailure.noTracks),
+    );
+    await pumpEventQueueSafe();
+    expect(client.payloads, isEmpty);
+  });
+
+  group('seen memory and pool stages', () {
+    late SeenStore seen;
+    setUp(() {
+      api.tracks = [];
+      seen = SeenStore(directory: () async => directory);
+      engine = VectorEngine(
+        api: api,
+        store: store,
+        listening: facts,
+        seen: seen,
+        now: () => now,
+      );
+    });
+    Future<List<Recommendation>> run(
+      VectorEngine value, {
+      Set<String> excluded = const {},
+      int limit = 10,
+    }) => value.generate(
+      seeds: [realTrack('s', artist: 'sa')],
+      identity: '1',
+      excludedTrackIds: excluded,
+      check: () {},
+      limit: limit,
+    );
+    List<String> ids(List<Recommendation> r) =>
+        r.map((e) => e.track.id).toList();
+
+    test('heard, skipped and liked tracks never reach the output', () async {
+      api.neighborhoods['s'] = [
+        for (var i = 0; i < 8; i++) realTrack('c$i', artist: 'a$i'),
+      ];
+      await facts.append(event('c0', session: 'a'));
+      await facts.append(
+        event(
+          'c1',
+          session: 'b',
+          heard: 10000,
+          cause: ListeningTransitionCause.manualNext,
+        ),
+      );
+      final result = await run(engine, excluded: {'c2'});
+      expect(ids(result), isNot(containsAll(['c0'])));
+      expect(ids(result).toSet().intersection({'c0', 'c1', 'c2'}), isEmpty);
+      expect(ids(result), hasLength(5));
+    });
+
+    test('exclusions survive a restart with fresh store instances', () async {
+      api.neighborhoods['s'] = [
+        for (var i = 0; i < 6; i++) realTrack('c$i', artist: 'a$i'),
+      ];
+      final first = await run(engine);
+      expect(first, hasLength(6));
+      final restarted = VectorEngine(
+        api: api,
+        store: VectorStore(directory: () async => directory),
+        listening: ListeningStore(directory: () async => directory),
+        seen: SeenStore(directory: () async => directory),
+        now: () => now.add(const Duration(days: 1)),
+      );
+      expect(ids(await run(restarted)), isEmpty);
+      final later = VectorEngine(
+        api: api,
+        store: VectorStore(directory: () async => directory),
+        listening: ListeningStore(directory: () async => directory),
+        seen: SeenStore(directory: () async => directory),
+        now: () => now.add(const Duration(days: 8)),
+      );
+      expect(ids(await run(later)), hasLength(6));
+    });
+
+    test(
+      'a heard track stays excluded after the fact log forgets it',
+      () async {
+        api.neighborhoods['s'] = [
+          for (var i = 0; i < 3; i++) realTrack('c$i', artist: 'a$i'),
+        ];
+        await facts.append(event('c0', session: 'a'));
+        await run(engine);
+        await File('${directory.path}/${ListeningStore.fileName}').delete();
+        final again = await run(engine);
+        expect(ids(again), isEmpty);
+        expect((await seen.read('1'))['c0']!.kind, SeenKind.played);
+      },
+    );
+
+    test('the memory stays bounded and keeps the newest entries', () async {
+      final small = SeenStore(directory: () async => directory, maxRecords: 3);
+      for (var i = 0; i < 5; i++) {
+        await small.record('1', SeenKind.played, [
+          't$i',
+        ], now.add(Duration(minutes: i)));
+      }
+      expect((await small.read('1')).keys.toSet(), {'t2', 't3', 't4'});
+    });
+
+    test('another account does not inherit the memory', () async {
+      await seen.record('1', SeenKind.played, ['c0'], now);
+      expect(await seen.excluded('2', now), isEmpty);
+      await seen.clearOthers('2');
+      expect(await seen.excluded('1', now), isEmpty);
+    });
+
+    test('a small pool widens to second level, then genre search', () async {
+      api.neighborhoods['s'] = [realTrack('c0', artist: 'a0')];
+      api.neighborhoods['c0'] = [
+        realTrack('d0', artist: 'b0'),
+        realTrack('d1', artist: 'b1'),
+      ];
+      api.tracks = [
+        realTrack('g0', artist: 'g0'),
+        realTrack('g1', artist: 'g1'),
+      ];
+      final result = await run(engine);
+      expect(api.relatedCalls, ['s', 'c0']);
+      expect(api.searches, ['ambient']);
+      expect(ids(result).toSet(), {'c0', 'd0', 'd1', 'g0', 'g1'});
+    });
+
+    test('request budget is bounded', () async {
+      api.neighborhoods['s'] = [
+        for (var i = 0; i < 12; i++) realTrack('c$i', artist: 'a$i'),
+      ];
+      for (var i = 0; i < 12; i++) {
+        api.neighborhoods['c$i'] = [realTrack('d$i', artist: 'b$i')];
+      }
+      await run(engine);
+      expect(
+        api.relatedCalls.length + api.searches.length,
+        lessThanOrEqualTo(VectorEngine.maxRequests),
+      );
+    });
+
+    test('seeds rotate between consecutive generations', () async {
+      final seeds = [
+        for (var i = 0; i < 12; i++) realTrack('r$i', artist: 'artist $i'),
+      ];
+      Future<void> go() => engine.generate(
+        seeds: seeds,
+        identity: '1',
+        excludedTrackIds: {},
+        check: () {},
+      );
+      await go();
+      final first = api.relatedCalls.toSet();
+      api.relatedCalls.clear();
+      await go();
+      expect(first, hasLength(6));
+      expect(api.relatedCalls.toSet().intersection(first), isEmpty);
+    });
+
+    test('recent positive listens become seeds', () async {
+      await facts.append(event('heard1', session: 'a'));
+      await run(engine);
+      expect(api.relatedCalls, containsAll(['s', 'heard1']));
+    });
   });
 }
+
+Future<void> pumpEventQueueSafe() => Future<void>.delayed(Duration.zero);

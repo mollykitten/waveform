@@ -6,6 +6,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../shared/models/track.dart';
+import '../api/liked_tracks.dart';
 import '../api/providers.dart';
 import '../api/soundcloud_auth.dart';
 import '../log/talker.dart';
@@ -16,6 +17,7 @@ import 'chatgpt_client.dart';
 import 'models.dart';
 import 'listening_store_provider.dart';
 import 'recommendation_service.dart';
+import 'seen_store.dart';
 import 'vector_engine.dart';
 import 'vector_store.dart';
 
@@ -354,6 +356,8 @@ class AiSettingsController extends Notifier<AiSettingsState> {
     required CancelToken cancelToken,
     Track? currentTrack,
     Set<String> excludedTrackIds = const {},
+    Set<String> localExcludedTrackIds = const {},
+    int limit = 10,
   }) async {
     final config = state.config;
     final revision = state.revision;
@@ -415,7 +419,9 @@ class AiSettingsController extends Notifier<AiSettingsState> {
       currentTrack: currentTrack,
       excludedTrackIds: excludedTrackIds,
       listeningIdentity: verifiedListeningIdentity,
+      localExcludedTrackIds: localExcludedTrackIds,
       checkCurrent: check,
+      limit: limit,
     );
   }
 }
@@ -441,8 +447,13 @@ final recommendationServiceProvider = Provider<RecommendationService>(
       api: ref.watch(soundcloudApiProvider),
       store: ref.watch(vectorStoreProvider),
       listening: ref.watch(listeningStoreProvider),
+      seen: ref.watch(seenStoreProvider),
     ),
   ),
+);
+
+final seenStoreProvider = Provider<SeenStore>(
+  (ref) => SeenStore(onFailure: ref.read(talkerProvider).warning),
 );
 
 final vectorStoreProvider = Provider<VectorStore>(
@@ -477,6 +488,11 @@ class RecommendationsController extends Notifier<RecommendationState> {
     return const RecommendationState();
   }
 
+  /// Surface a visible failure after an automatic search gave up quietly.
+  void reportFailure(AiFailure failure) {
+    state = RecommendationState(items: state.items, error: failure);
+  }
+
   void cancel() {
     _generation++;
     _cancel?.cancel();
@@ -490,6 +506,7 @@ class RecommendationsController extends Notifier<RecommendationState> {
     required bool useListening,
     Track? currentTrack,
     bool append = false,
+    int limit = 10,
   }) async {
     cancel();
     final generation = _generation;
@@ -507,6 +524,8 @@ class RecommendationsController extends Notifier<RecommendationState> {
             currentTrack: currentTrack,
             cancelToken: token,
             excludedTrackIds: previous.map((item) => item.track.id).toSet(),
+            localExcludedTrackIds: ref.read(likedTracksProvider),
+            limit: limit,
           );
       if (!ref.mounted || generation != _generation) return;
       state = RecommendationState(items: [...previous, ...result]);

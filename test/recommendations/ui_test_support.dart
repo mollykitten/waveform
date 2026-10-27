@@ -120,6 +120,8 @@ class WaveTestSettings extends AiSettingsController {
     required CancelToken cancelToken,
     Track? currentTrack,
     Set<String> excludedTrackIds = const {},
+    Set<String> localExcludedTrackIds = const {},
+    int limit = 10,
   }) {
     generations++;
     lastUseListening = useListening;
@@ -133,6 +135,8 @@ class WaveTestSettings extends AiSettingsController {
       cancelToken: cancelToken,
       currentTrack: currentTrack,
       excludedTrackIds: excludedTrackIds,
+      localExcludedTrackIds: localExcludedTrackIds,
+      limit: limit,
     );
   }
 }
