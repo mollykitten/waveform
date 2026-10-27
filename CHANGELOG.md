@@ -6,20 +6,27 @@ All notable changes to Waveform are documented here. Format follows
 
 ## [Unreleased]
 
+### removed
+- **the model-assisted route of my wave.** the chatgpt connection, custom
+  openai-compatible and ollama providers, the mood field and the listening
+  consent dialog are gone: my wave now runs entirely on this device. an
+  offline pilot found the model route reached none of 100 new likes, below the
+  related-track graph. dev builds may leave a keychain item
+  `waveform.chatgpt.credentials.v1` and an `ai_config.json` in the support
+  directory; both can be deleted by hand.
+- the `jose`, `flutter_secure_storage` and `url_launcher` dependencies, the
+  loopback-server entitlement and the linux libsecret build requirement.
+
 ## [0.4.0] — unreleased
 
 my wave recommendations, macos audio output controls, keyboard accessibility,
 and release preparation. includes the merged work in #50–#56.
 
 ### added
-- **my wave** searches and ranks real soundcloud tracks with an explicitly
-  configured openai-compatible or ollama provider. model settings live in
-  settings; listening metadata requires consent. no model server is bundled.
-- **chatgpt connection** with browser PKCE, signed identity validation and OS
-  secure storage, account/destination-bound metadata consent, and continuous
-  queue refill. local structural vectors rank a bounded related-track pool
-  using account-isolated listening evidence, diversity and exploration; these
-  are graph vectors, not audio embeddings.
+- **my wave** plays a continuous queue of real soundcloud tracks. local
+  structural vectors rank a bounded related-track pool using account-isolated
+  listening evidence, diversity and exploration; these are graph vectors, not
+  audio embeddings. nothing is sent to a model.
 - **macos audio output selection** lists real core audio devices and routes
   waveform's players without changing the system default. a native airplay
   picker stays attached to the active player; opening it conservatively
@@ -37,8 +44,8 @@ and release preparation. includes the merged work in #50–#56.
 - **new app icon, svg logo** and a static landing page.
 
 ### changed
-- **my wave presentation** uses animated ribbons, compact tune controls and
-  optional mood controls. generation preserves the queue until results play.
+- **my wave presentation** uses animated ribbons and a single play action.
+  generation preserves the queue until results play.
 - desktop account controls stay aligned 16px from the window edge.
 - **macos 12 monterey is now the minimum supported version.** runner, tests,
   and cocoapods targets use a consistent minimum compatible with xcode 27.
@@ -50,19 +57,15 @@ and release preparation. includes the merged work in #50–#56.
 
 ### fixed
 - settings and my wave forms share compact controls, consistent labels and
-  spacing, with grouped connections and mood settings.
+  spacing.
 - the owned wave control pauses and resumes playback; compact rows show the
   actual upcoming queue and preserve recommendation reasons.
 - my wave background reacts to fetched soundcloud waveform envelopes during
   advancing playback, not an fft/pcm spectrum; the envelope reaction stops
   when hidden or paused.
 - audio output uses an icon-only trigger and shows full device names in its menu.
-- chatgpt authorization uses a persisted supported UUIDv4 host identifier and
-  migrates the legacy format without changing saved account credentials.
 - initial profile lookup failures retry with bounded backoff; listening
   attribution stays suspended until identity is verified.
-- chatgpt sign-in state stays consistent after a soundcloud account switch or
-  logout without restoring revoked listening consent.
 - player source generations and swap recovery preserve playback intent,
   reject stale preloads after queue edits, and avoid attributing outgoing
   audio to a pending track.
@@ -73,13 +76,12 @@ and release preparation. includes the merged work in #50–#56.
 - webview engines start through their own titlebar entrypoint.
 - the ⌘K search trigger stays in sync with query edits.
 - release workflow uses a bounded notarization wait, retrieves the apple log
-  when a submission id is available, installs linux webkit/libsoup/libsecret
+  when a submission id is available, installs linux webkit/libsoup
   build dependencies, and waits for all platforms before the publish gate.
 
 ### validation limits
-- interactive chatgpt OAuth with an eligible account, subscription access,
-  keychain restart/refresh/logout, live inference, native playback/refill and
-  musical recommendation quality still require manual validation.
+- native playback/refill of my wave and its musical recommendation quality
+  still require manual validation.
 - physical airplay receiver playback and switching outputs during playback
   still require hardware verification; a compiled picker is not that evidence.
 - the older [dry run on 2026-10-25](https://github.com/mollykitten/waveform/actions/runs/40156324361)

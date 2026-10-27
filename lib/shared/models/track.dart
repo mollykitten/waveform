@@ -19,7 +19,7 @@ class Track {
     this.drmStreamCandidates = const [],
     this.permalinkUrl,
     this.blocked = false,
-    this.genre = 'electronic',
+    this.genre = '',
     this.postedAt = '3 days ago',
     this.description = '',
   });

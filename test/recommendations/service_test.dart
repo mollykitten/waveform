@@ -1,187 +1,114 @@
-import 'dart:async';
-import 'dart:convert';
+import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:waveform_app/core/recommendations/ai_client.dart';
+import 'package:waveform_app/core/recommendations/listening_store.dart';
 import 'package:waveform_app/core/recommendations/models.dart';
 import 'package:waveform_app/core/recommendations/recommendation_service.dart';
+import 'package:waveform_app/core/recommendations/vector_engine.dart';
+import 'package:waveform_app/core/recommendations/vector_store.dart';
+import 'package:waveform_app/shared/models/track.dart';
 
 import 'support.dart';
 
+class ServiceApi extends TestSoundcloud {
+  final related = <String, List<Track>>{};
+  final warnings = <String>[];
+  bool failLikes = false;
+  List<Track> likes = [for (var i = 0; i < 30; i++) realTrack('like$i')];
+  String? likesNext;
+  int likesCalls2 = 0;
+
+  @override
+  Future<List<Track>> relatedTracks(String id) async => related[id] ?? [];
+
+  @override
+  Future<({List<Track> tracks, String? nextHref})> likesPage({
+    String? nextHref,
+    int limit = 50,
+  }) async {
+    likesCalls2++;
+    if (failLikes) throw StateError('PRIVATE TRANSPORT ERROR');
+    return (tracks: likes, nextHref: nextHref == null ? likesNext : null);
+  }
+}
+
 void main() {
-  late TestSoundcloud api;
-  late ScriptedAi client;
+  late Directory directory;
+  late ServiceApi api;
   late RecommendationService service;
-  setUp(() {
-    api = TestSoundcloud();
-    client = ScriptedAi();
-    service = RecommendationService(api: api, client: client);
+  setUp(() async {
+    directory = await Directory.systemTemp.createTemp('waveform-service');
+    api = ServiceApi()..tracks = [];
+    service = RecommendationService(
+      api: api,
+      onWarning: api.warnings.add,
+      vectorEngine: VectorEngine(
+        api: api,
+        store: VectorStore(directory: () async => directory),
+        listening: ListeningStore(directory: () async => directory),
+      ),
+    );
   });
+  tearDown(() async => directory.delete(recursive: true));
 
   Future<List<Recommendation>> generate({
     CancelToken? token,
-    bool listening = false,
+    Set<String> excluded = const {},
   }) => service.generate(
-    config: testConfig.withConsent(listening),
-    consent: AiConsent(
-      destination: testConfig.destination,
-      listening: listening,
-    ),
-    apiKey: 'SESSION_SECRET',
-    mood: 'quiet night',
-    useListening: listening,
+    listeningIdentity: '1',
     cancelToken: token ?? CancelToken(),
     currentTrack: realTrack('current'),
+    excludedTrackIds: excluded,
   );
 
-  test(
-    'two genuine model stages rank only real deduplicated search results',
-    () async {
-      final result = await generate();
-      expect(api.searches, ['ambient', 'dream pop']);
-      expect(result.single.track, same(api.tracks[1]));
-      expect(result.single.reason, 'a possible fit');
-      expect(client.payloads.length, 2);
-      expect(api.likesCalls, 0);
-      expect(api.historyCalls, 0);
-      for (final data in client.payloads) {
-        for (final forbidden in [
-          'SESSION_SECRET',
-          'PRIVATE',
-          'STREAM_SECRET',
-          'description',
-          'permalink',
-          'streamCandidates',
-        ]) {
-          expect(data, isNot(contains(forbidden)));
-        }
-      }
-    },
-  );
-
-  test('listening is optional, bounded to 20 seed metadata entries', () async {
-    await generate(listening: true);
-    expect(api.likesCalls, 1);
-    expect(api.historyCalls, 1);
-    final seeds = (jsonDecode(client.payloads.first) as Map)['seeds'] as List;
-    expect(seeds.length, 20);
-    expect(seeds.first['id'], 'current');
-    expect(seeds.every((e) => (e as Map).length == 4), isTrue);
+  test('ranks only real related tracks', () async {
+    api.related['current'] = [realTrack('a'), realTrack('b')];
+    final result = await generate();
+    expect(result.map((r) => r.track.id), unorderedEquals(['a', 'b']));
   });
 
-  test(
-    'candidate cap is 40 and blocked tracks never enter rank prompt',
-    () async {
-      api.tracks = [
-        realTrack('blocked', blocked: true),
-        ...List.generate(70, (i) => realTrack('$i')),
-      ];
-      await generate();
-      final candidates = jsonDecode(client.payloads.last)['candidates'] as List;
-      expect(candidates.length, lessThanOrEqualTo(40));
-      expect(candidates.any((e) => e['id'] == 'blocked'), isFalse);
-    },
-  );
-
-  test(
-    'unapproved destination and listening never send a model request',
-    () async {
-      await expectLater(
-        service.generate(
-          config: testConfig,
-          consent: const AiConsent(
-            destination: 'https://other.invalid',
-            listening: false,
-          ),
-          apiKey: '',
-          mood: 'night',
-          useListening: false,
-          cancelToken: CancelToken(),
-        ),
-        throwsA(AiFailure.configuration),
-      );
-      await expectLater(
-        service.generate(
-          config: testConfig,
-          consent: testConsent,
-          apiKey: '',
-          mood: 'night',
-          useListening: true,
-          cancelToken: CancelToken(),
-        ),
-        throwsA(AiFailure.configuration),
-      );
-      expect(client.payloads, isEmpty);
-      expect(api.likesCalls, 0);
-    },
-  );
-
-  test('cancelled model generation cannot start SoundCloud search', () async {
-    final pending = client.pending = Completer<String>();
-    final token = CancelToken();
-    final future = generate(token: token);
-    await Future<void>.delayed(Duration.zero);
-    token.cancel();
-    pending.complete('{"queries":["ambient"]}');
-    await expectLater(future, throwsA(AiFailure.cancelled));
-    expect(api.searches, isEmpty);
+  test('blocked tracks never reach the wave', () async {
+    api.related['current'] = [realTrack('blocked', blocked: true)];
+    api.related['like0'] = [realTrack('ok')];
+    final result = await generate();
+    expect(result.map((r) => r.track.id), ['ok']);
   });
 
-  test(
-    'no candidates does not request ranking or manufacture results',
-    () async {
-      api.tracks = [];
-      await expectLater(generate(), throwsA(AiFailure.noTracks));
-      expect(client.payloads.length, 1);
-    },
-  );
+  test('liked, given and queued tracks are excluded', () async {
+    api.related['current'] = [
+      realTrack('like5'),
+      realTrack('queued'),
+      realTrack('fresh'),
+    ];
+    final result = await generate(excluded: {'queued'});
+    expect(result.map((r) => r.track.id), ['fresh']);
+  });
 
-  test(
-    'continuation excludes recommended ids before ranking without retries',
-    () async {
-      client.replies[1] =
-          '{"recommendations":[{"id":"1","reason":"another possible fit"}]}';
-      final result = await service.generate(
-        config: testConfig,
-        consent: testConsent,
-        apiKey: '',
-        mood: 'night',
-        useListening: false,
-        cancelToken: CancelToken(),
-        excludedTrackIds: {'2'},
-      );
-      expect(result.single.track.id, '1');
-      final candidates = jsonDecode(client.payloads.last)['candidates'] as List;
-      expect(candidates.map((dynamic item) => item['id']), ['1']);
-      expect(jsonDecode(client.payloads.first)['exclude_ids'], ['2']);
-      expect(api.searches.length, 2);
-    },
-  );
+  test('later like pages are drained for exclusion once per window', () async {
+    api.likesNext = 'next';
+    api.related['current'] = [realTrack('a')];
+    await generate();
+    final first = api.likesCalls2;
+    expect(first, 2);
+    // the cached set is reused; only the first page is fetched again
+    await generate().then((_) {}, onError: (_) {});
+    expect(api.likesCalls2, first + 1);
+  });
 
-  test(
-    'continuation stops when all search candidates were already recommended',
-    () async {
-      await expectLater(
-        service.generate(
-          config: testConfig,
-          consent: testConsent,
-          apiKey: '',
-          mood: 'night',
-          useListening: false,
-          cancelToken: CancelToken(),
-          excludedTrackIds: {'1', '2'},
-        ),
-        throwsA(AiFailure.noTracks),
-      );
-      expect(client.payloads.length, 1);
-      expect(api.searches.length, 2);
-    },
-  );
+  test('a cancelled token stops before any request', () async {
+    final token = CancelToken()..cancel();
+    await expectLater(generate(token: token), throwsA(WaveFailure.cancelled));
+    expect(api.likesCalls2, 0);
+  });
 
-  test('search errors are safe and never become a fake AI fallback', () async {
-    api.failSearch = true;
-    await expectLater(generate(), throwsA(AiFailure.source));
-    expect(client.payloads.length, 1);
+  test('source errors are safe', () async {
+    api.failLikes = true;
+    await expectLater(generate(), throwsA(WaveFailure.source));
+  });
+
+  test('an empty pool fails visibly', () async {
+    api.tracks = [];
+    await expectLater(generate(), throwsA(WaveFailure.noTracks));
   });
 }

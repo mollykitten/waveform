@@ -293,9 +293,8 @@ class SeenStore {
   }
 
   /// Delete one account's memory (file, `.bak` and `.tmp`) when that account
-  /// logs out, and ignore its writes until [reopen]. Other accounts keep theirs, so switching A to B and back loses
-  /// nothing. Disconnecting ChatGPT does not call this: the memory is local
-  /// and unrelated to the model connection.
+  /// logs out, and ignore its writes until [reopen]. Other accounts keep
+  /// theirs, so switching A to B and back loses nothing.
   Future<void> forget(String identity) {
     // Mark closed right away so a write queued after this call is ignored.
     if (validListeningIdentity(identity)) _closed.add(identity);

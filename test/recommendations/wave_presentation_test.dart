@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 import 'dart:convert';
@@ -20,8 +19,6 @@ import 'package:waveform_app/core/api/providers.dart';
 import 'package:waveform_app/core/api/soundcloud_auth.dart';
 import 'package:waveform_app/core/audio/audio_engine.dart';
 import 'package:waveform_app/core/log/talker.dart';
-import 'package:waveform_app/core/recommendations/ai_config.dart';
-import 'package:waveform_app/core/recommendations/chatgpt_auth.dart';
 import 'package:waveform_app/core/recommendations/providers.dart';
 import 'package:waveform_app/core/recommendations/models.dart';
 import 'package:waveform_app/features/player/player_controller.dart';
@@ -30,32 +27,15 @@ import 'package:waveform_app/shared/models/track.dart';
 import 'package:waveform_app/shared/providers/waveform_samples.dart';
 import 'package:waveform_app/features/recommendations/recommendations_screen.dart';
 import 'package:waveform_app/features/recommendations/widgets/wave_hero.dart';
-import 'package:waveform_app/shared/widgets/form_controls.dart';
 import 'package:waveform_app/shared/widgets/pressable.dart';
 import 'package:waveform_app/shared/widgets/track_row.dart';
 import 'package:waveform_app/shared/widgets/waveform_view.dart';
 
 import '../support/fake_audio_engine.dart';
 import '../support/stub_liked_tracks.dart';
+import 'pool_service.dart';
 import 'support.dart';
 import 'visual_test_fonts.dart';
-
-class NoChatGpt extends ChatGptAuth {
-  @override
-  Future<void> restore() async {}
-}
-
-class MemoryConfigStore extends AiConfigStore {
-  AiConfig config = const AiConfig();
-  Completer<void>? pending;
-  @override
-  Future<AiConfig> load() async => config;
-  @override
-  Future<void> save(AiConfig value) async {
-    if (pending != null) await pending!.future;
-    config = value;
-  }
-}
 
 class _PlaybackSpy extends PlayerController {
   _PlaybackSpy(this.current, {this.foreign = false});
@@ -135,30 +115,23 @@ class _TrackActionsApi extends TestSoundcloud {
 void main() {
   setUpAll(installVisualTestFonts);
   late ProviderContainer container;
-  late ScriptedAi client;
   late FakeAudioEngine engine;
-  late MemoryConfigStore store;
 
-  setUp(() async {
-    client = ScriptedAi();
+  setUp(() {
     engine = FakeAudioEngine();
-    store = MemoryConfigStore();
     container = ProviderContainer(
       overrides: [
         authControllerProvider.overrideWithBuild(
-          (ref, notifier) => const SoundcloudAuth(clientId: 'test'),
+          (ref, notifier) =>
+              const SoundcloudAuth(clientId: 'test', userToken: 'test-token'),
         ),
-        aiConfigStoreProvider.overrideWithValue(store),
-        chatGptAuthProvider.overrideWithValue(NoChatGpt()),
-        aiClientProvider.overrideWithValue(client),
+        listeningIdentityProvider.overrideWith((ref) async => 'test-profile'),
         soundcloudApiProvider.overrideWithValue(TestSoundcloud()),
         audioEngineProvider.overrideWithValue(engine),
         likedTracksProvider.overrideWith(StubLikedTracks.new),
         talkerProvider.overrideWithValue(Talker()),
       ],
     );
-    container.listen(aiSettingsProvider, (_, _) {});
-    await Future<void>.delayed(const Duration(milliseconds: 20));
   });
 
   tearDown(() async {
@@ -200,8 +173,7 @@ void main() {
     await tester.pump();
   }
 
-  Future<void> captureWave(WidgetTester tester, Size size, bool tune) async {
-    await container.read(aiSettingsProvider.notifier).save(testConfig);
+  Future<void> captureWave(WidgetTester tester, Size size) async {
     const capture = ValueKey('wave-capture');
     await show(
       tester,
@@ -218,14 +190,6 @@ void main() {
     expect(heroSize.height, inInclusiveRange(280, 400));
     expect(heroSize.width, lessThanOrEqualTo(880));
     expect(find.byType(TextField), findsNothing);
-    if (tune) {
-      await tester.tap(find.text('tune your wave'));
-      await tester.pumpAndSettle();
-      // Capture the real scroll position needed to expose the complete shelf.
-      await tester.ensureVisible(find.text('model connection'));
-      await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('wave-mood')), findsOneWidget);
-    }
     expect(tester.takeException(), isNull);
     final boundary = tester.renderObject<RenderRepaintBoundary>(
       find.byKey(capture),
@@ -239,7 +203,7 @@ void main() {
         'build/visual-review',
       ).create(recursive: true);
       await File(
-        '${folder.path}/wave-${tune ? 'tune-open' : 'idle'}-'
+        '${folder.path}/wave-idle-'
         '${size.width.toInt()}x${size.height.toInt()}.png',
       ).writeAsBytes(bytes!.buffer.asUint8List());
       image.dispose();
@@ -249,72 +213,12 @@ void main() {
 
   for (final size in [const Size(1280, 720), const Size(960, 640)]) {
     testWidgets(
-      'consent capture ${size.width.toInt()}x${size.height.toInt()}',
+      'wave capture ${size.width.toInt()}x${size.height.toInt()}',
       (tester) async {
-        await container.read(aiSettingsProvider.notifier).save(testConfig);
-        const capture = ValueKey('consent-capture');
-        await show(tester, size: size, captureKey: capture);
-        await tester.tap(find.byKey(const ValueKey('wave-primary')));
-        await tester.pumpAndSettle();
-        await tester.runAsync(() => GoogleFonts.pendingFonts());
-        await tester.pump();
-        expect(find.text('sent to ${testConfig.destination}'), findsOneWidget);
-        expect(find.text('allow and play').hitTestable(), findsOneWidget);
-        expect(client.payloads, isEmpty);
-        expect(tester.takeException(), isNull);
-        final boundary = tester.renderObject<RenderRepaintBoundary>(
-          find.byKey(capture),
-        );
-        await tester.runAsync(() async {
-          final image = await boundary.toImage();
-          final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-          await Directory('build/visual-review').create(recursive: true);
-          await File(
-            'build/visual-review/wave-consent-'
-            '${size.width.toInt()}x${size.height.toInt()}.png',
-          ).writeAsBytes(bytes!.buffer.asUint8List());
-          image.dispose();
-        });
-        await tester.tap(find.text('not now'));
-        await tester.pumpAndSettle();
-        expect(client.payloads, isEmpty);
-        await tester.pumpWidget(const SizedBox.shrink());
+        await captureWave(tester, size);
       },
       skip: !waveVisualCaptureEnabled,
     );
-    for (final tune in [false, true]) {
-      testWidgets('wave capture ${tune ? 'tune open' : 'idle'} '
-          '${size.width.toInt()}x${size.height.toInt()}', (tester) async {
-        await captureWave(tester, size, tune);
-      }, skip: !waveVisualCaptureEnabled);
-    }
-  }
-
-  for (final size in [const Size(960, 640), const Size(1280, 720)]) {
-    for (final scale in [1.0, 1.5]) {
-      testWidgets('discover tuning ${size.width} scale $scale', (tester) async {
-        await container.read(aiSettingsProvider.notifier).save(testConfig);
-        await show(tester, size: size, scale: scale);
-        await tester.pumpAndSettle();
-        expect(
-          tester.getSize(find.byType(WaveHero)).height,
-          lessThanOrEqualTo(400),
-        );
-        await tester.tap(find.text('tune your wave'));
-        await tester.pumpAndSettle();
-        await tester.ensureVisible(find.byKey(const ValueKey('wave-mood')));
-        await tester.enterText(
-          find.byKey(const ValueKey('wave-mood')),
-          'a long quiet evening with something new',
-        );
-        expect(
-          tester.getSize(find.byKey(const ValueKey('wave-mood'))).width,
-          lessThanOrEqualTo(584),
-        );
-        expect(tester.takeException(), isNull);
-        await tester.pumpWidget(const SizedBox.shrink());
-      });
-    }
   }
 
   for (final refill in [false, true]) {
@@ -326,10 +230,6 @@ void main() {
         container.dispose();
         container = ProviderContainer(
           overrides: [
-            aiSettingsProvider.overrideWithBuild(
-              (ref, notifier) =>
-                  const AiSettingsState(ready: true, config: testConfig),
-            ),
             recommendationsProvider.overrideWithBuild(
               (ref, notifier) => RecommendationState(
                 items: [
@@ -374,7 +274,6 @@ void main() {
               .map((item) => item.track.id),
           ['owned', 'next'],
         );
-        expect(client.payloads, isEmpty);
         await tester.tap(primary);
         await tester.pump();
         expect(player.toggles, 2);
@@ -421,10 +320,6 @@ void main() {
         overrides: [
           authControllerProvider.overrideWithBuild(
             (ref, notifier) => const SoundcloudAuth(clientId: 'test'),
-          ),
-          aiSettingsProvider.overrideWithBuild(
-            (ref, notifier) =>
-                const AiSettingsState(ready: true, config: testConfig),
           ),
           soundcloudApiProvider.overrideWithValue(TestSoundcloud()),
           audioEngineProvider.overrideWithValue(engine),
@@ -519,54 +414,51 @@ void main() {
     });
   }
 
-  testWidgets(
-    'foreign queue retains start and consent instead of toggling playback',
-    (tester) async {
-      final track = realTrack('owned');
-      final player = _PlaybackSpy(track, foreign: true);
-      container.dispose();
-      container = ProviderContainer(
-        overrides: [
-          aiSettingsProvider.overrideWithBuild(
-            (ref, notifier) =>
-                const AiSettingsState(ready: true, config: testConfig),
-          ),
-          recommendationsProvider.overrideWithBuild(
-            (ref, notifier) => RecommendationState(
-              items: [Recommendation(track, 'real reason')],
-            ),
-          ),
-          waveControllerProvider.overrideWithBuild(
-            (ref, notifier) => const WaveState(active: true),
-          ),
-          playerControllerProvider.overrideWith(() => player),
-          soundcloudApiProvider.overrideWithValue(TestSoundcloud()),
-          likedTracksProvider.overrideWith(StubLikedTracks.new),
-          authControllerProvider.overrideWithBuild(
-            (ref, notifier) => const SoundcloudAuth(clientId: 'test'),
-          ),
-        ],
-      );
-      await show(tester, size: const Size(960, 640));
-      final primary = find.byKey(const ValueKey('wave-primary'));
-      expect(
-        find.descendant(
-          of: primary,
-          matching: find.byIcon(Icons.play_arrow_rounded),
+  testWidgets('foreign queue starts a wave instead of toggling playback', (
+    tester,
+  ) async {
+    final track = realTrack('owned');
+    final player = _PlaybackSpy(track, foreign: true);
+    container.dispose();
+    container = ProviderContainer(
+      overrides: [
+        recommendationServiceProvider.overrideWithValue(
+          PoolService(TestSoundcloud())..scripted = [3],
         ),
-        findsOneWidget,
-      );
-      await tester.tap(primary);
-      await tester.pumpAndSettle();
-      expect(find.text('make my wave personal'), findsOneWidget);
-      expect(player.toggles, 0);
-      expect(client.payloads, isEmpty);
-      expect(find.text('picked for your wave'), findsOneWidget);
-      await tester.tap(find.text('not now'));
-      await tester.pumpAndSettle();
-      await tester.pumpWidget(const SizedBox.shrink());
-    },
-  );
+        listeningIdentityProvider.overrideWith((ref) async => 'test-profile'),
+        recommendationsProvider.overrideWithBuild(
+          (ref, notifier) => RecommendationState(
+            items: [Recommendation(track, 'real reason')],
+          ),
+        ),
+        waveControllerProvider.overrideWithBuild(
+          (ref, notifier) => const WaveState(active: true),
+        ),
+        playerControllerProvider.overrideWith(() => player),
+        soundcloudApiProvider.overrideWithValue(TestSoundcloud()),
+        likedTracksProvider.overrideWith(StubLikedTracks.new),
+        authControllerProvider.overrideWithBuild(
+          (ref, notifier) =>
+              const SoundcloudAuth(clientId: 'test', userToken: 'test-token'),
+        ),
+      ],
+    );
+    await show(tester, size: const Size(960, 640));
+    final primary = find.byKey(const ValueKey('wave-primary'));
+    expect(
+      find.descendant(
+        of: primary,
+        matching: find.byIcon(Icons.play_arrow_rounded),
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('picked for your wave'), findsOneWidget);
+    await tester.tap(primary);
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(player.toggles, 0);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 
   testWidgets('hidden hero stops energy and drift while playback advances', (
     tester,
@@ -777,7 +669,7 @@ void main() {
   for (final size in [const Size(960, 640), const Size(1280, 800)]) {
     for (final scale in [1.0, 1.5]) {
       for (final mode in ['idle', 'playing', 'error']) {
-        testWidgets('toolbar composition $mode at ${size.width} scale $scale', (
+        testWidgets('status composition $mode at ${size.width} scale $scale', (
           tester,
         ) async {
           final track = realTrack('owned');
@@ -785,84 +677,60 @@ void main() {
           container.dispose();
           container = ProviderContainer(
             overrides: [
-              aiSettingsProvider.overrideWithBuild(
-                (ref, notifier) =>
-                    const AiSettingsState(ready: true, config: testConfig),
-              ),
               recommendationsProvider.overrideWithBuild(
                 (ref, notifier) => RecommendationState(
-                  items: mode == 'idle'
-                      ? []
-                      : [
+                  items: mode == 'playing'
+                      ? [
                           Recommendation(track, 'real reason'),
                           Recommendation(realTrack('next'), 'real reason'),
-                        ],
-                  error: mode == 'error' ? AiFailure.network : null,
+                        ]
+                      : [],
+                  error: mode == 'error' ? WaveFailure.network : null,
                 ),
               ),
               waveControllerProvider.overrideWithBuild(
-                (ref, notifier) => WaveState(active: mode != 'idle'),
+                (ref, notifier) => WaveState(active: mode == 'playing'),
               ),
               playerControllerProvider.overrideWith(() => player),
               soundcloudApiProvider.overrideWithValue(TestSoundcloud()),
               likedTracksProvider.overrideWith(StubLikedTracks.new),
               authControllerProvider.overrideWithBuild(
-                (ref, notifier) => const SoundcloudAuth(clientId: 'test'),
+                (ref, notifier) => SoundcloudAuth(
+                  clientId: 'test',
+                  userToken: mode == 'idle' ? null : 'test-token',
+                ),
               ),
             ],
           );
           await show(tester, size: size, scale: scale);
           await tester.pumpAndSettle();
           final toolbar = find.byKey(const ValueKey('wave-toolbar'));
-          expect(
-            tester.getRect(toolbar).top,
-            greaterThanOrEqualTo(tester.getRect(find.byType(WaveHero)).bottom),
-          );
-          expect(
-            find.descendant(
-              of: find.byType(WaveHero),
-              matching: find.text('tune your wave'),
-            ),
-            findsNothing,
-          );
-          expect(
-            find.descendant(of: toolbar, matching: find.text('tune your wave')),
-            findsOneWidget,
-          );
-          await tester.ensureVisible(find.text('tune your wave'));
-          await tester.tap(find.text('tune your wave'));
-          await tester.pumpAndSettle();
-          final mood = find.byKey(const ValueKey('wave-mood'));
-          await tester.ensureVisible(mood);
-          await tester.pump();
-          expect(find.descendant(of: toolbar, matching: mood), findsOneWidget);
-          expect(
-            tester.getSize(mood).width,
-            closeTo(tester.getSize(toolbar).width - 32, 1.1),
-          );
-          final actions = find.byKey(const ValueKey('wave-toolbar-actions'));
-          final tune = tester.getRect(find.text('tune your wave'));
-          final model = tester.getRect(find.text('model connection'));
-          expect((tune.center.dy - model.center.dy).abs(), lessThan(1));
-          expect(
-            tester.getRect(actions).right,
-            lessThanOrEqualTo(tester.getRect(toolbar).right - 16),
-          );
-          if (mode != 'idle') {
-            expect(
-              find.descendant(of: toolbar, matching: find.text('stop my wave')),
-              findsNothing,
-            );
+          expect(find.byType(TextField), findsNothing);
+          if (mode == 'playing') {
+            // a healthy wave shows no status card, just the queue
+            expect(toolbar, findsNothing);
             expect(find.text('stop my wave'), findsOneWidget);
-            final apply = find.text('apply mood');
-            await tester.ensureVisible(apply);
+          } else {
             expect(
-              tester
-                  .getRect(
-                    find.ancestor(of: apply, matching: find.byType(FormAction)),
-                  )
-                  .right,
-              closeTo(tester.getRect(toolbar).right - 16, .6),
+              tester.getRect(toolbar).top,
+              greaterThanOrEqualTo(
+                tester.getRect(find.byType(WaveHero)).bottom,
+              ),
+            );
+            expect(
+              find.descendant(
+                of: toolbar,
+                matching: find.text(
+                  mode == 'idle'
+                      ? 'sign in to SoundCloud to personalise your wave.'
+                      : WaveFailure.network.message,
+                ),
+              ),
+              findsOneWidget,
+            );
+            expect(
+              find.descendant(of: toolbar, matching: find.text('try again')),
+              mode == 'error' ? findsOneWidget : findsNothing,
             );
           }
           expect(tester.takeException(), isNull);
@@ -881,10 +749,6 @@ void main() {
       container.dispose();
       container = ProviderContainer(
         overrides: [
-          aiSettingsProvider.overrideWithBuild(
-            (ref, notifier) =>
-                const AiSettingsState(ready: true, config: testConfig),
-          ),
           recommendationsProvider.overrideWithBuild(
             (ref, notifier) => RecommendationState(
               items: [
@@ -979,7 +843,6 @@ void main() {
         'next',
       ]);
       expect(container.read(playerControllerProvider).track!.id, 'next');
-      expect(client.payloads, isEmpty);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
     },

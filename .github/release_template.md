@@ -2,7 +2,7 @@
 
 ## waveform v0.4.0
 
-my wave recommendations with chatgpt or custom providers, continuous queue
+my wave recommendations that run entirely on your device, continuous queue
 refill, local listening graph vectors, macos output selection and a native
 airplay picker, plus keyboard accessibility and reduced-motion improvements.
 see the [changelog](https://github.com/mollykitten/waveform/blob/main/CHANGELOG.md)
@@ -36,16 +36,15 @@ the exact warning and available actions depend on the machine's policy.
 3. extract: `tar xzf waveform-linux-v0.4.0.tar.gz -C ~/waveform`.
 4. run `~/waveform/waveform_app`; keep the bundled libraries and data beside it.
 
-system GTK, webkit2gtk 4.1, libsoup 3 and libsecret runtimes are required;
+system GTK, webkit2gtk 4.1 and libsoup 3 runtimes are required;
 package names vary by distribution.
 
 ## known limitations
 
 - early software, primarily exercised on macos. windows and linux have less
   runtime coverage; OS media controls currently work on macos only.
-- chatgpt interactive OAuth, subscription access, keychain restart/refresh/logout,
-  live inference, native playback/refill and musical recommendation quality
-  still require manual validation. local structural vectors are not audio
+- native playback/refill of my wave and its recommendation quality still
+  require manual validation. local structural vectors are not audio
   embeddings; no backend service or model weights are included.
 - physical airplay receiver playback and switching outputs during playback
   still require hardware verification. airplay mode conservatively suspends

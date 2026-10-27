@@ -299,14 +299,13 @@ jobs:
 
       - name: Install linux build deps
         # webkit2gtk + libsoup are REQUIRED by the vendored
-        # desktop_webview_window CMake; libsecret is required for protected
-        # ChatGPT credentials. Without these, configure fails
+        # desktop_webview_window CMake. Without these, configure fails
         # within seconds.
         run: |
           sudo apt-get update -y
           sudo apt-get install -y \
             clang cmake ninja-build pkg-config libgtk-3-dev \
-            liblzma-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev libsecret-1-dev
+            liblzma-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev
 
       - name: Install pub dependencies
         run: flutter pub get
