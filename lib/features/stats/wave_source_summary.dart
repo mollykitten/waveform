@@ -54,7 +54,8 @@ class WaveSourceSummary extends ConsumerWidget {
         const SizedBox(height: AppTheme.headerGap),
         for (final entry in tally.entries)
           Text(
-            '${entry.key.name}  ${entry.value.listened} / ${entry.value.skipped}',
+            '${entry.key.name}  '
+            '${entry.value.listened} / ${entry.value.skipped}',
             style: AppTheme.mono(size: 11, color: AppColors.textHi),
           ),
       ],

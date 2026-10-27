@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -9,7 +10,7 @@ import 'package:waveform_app/shared/models/track.dart';
 
 import 'support.dart';
 
-typedef Like = ({Track track, DateTime? likedAt});
+typedef Like = ({String trackId, DateTime? likedAt});
 
 class CfApi extends TestSoundcloud {
   List<Track> own = [for (var i = 0; i < 4; i++) realTrack('s$i')];
@@ -20,6 +21,10 @@ class CfApi extends TestSoundcloud {
   int hydrateCalls = 0;
   int rateLimited = 0;
   bool failUserLikes = false;
+  bool failLikesPage = false;
+  Set<String> failLikersFor = {};
+  String? retryAfter;
+  Completer<void>? gateLikes;
   Set<String> omit = {};
   final hydrated = <String>[];
 
@@ -27,7 +32,12 @@ class CfApi extends TestSoundcloud {
   Future<({List<Track> tracks, String? nextHref})> likesPage({
     String? nextHref,
     int limit = 50,
-  }) async => (tracks: own, nextHref: null);
+  }) async {
+    if (failLikesPage) throw StateError('network');
+    final gate = gateLikes;
+    if (gate != null) await gate.future;
+    return (tracks: own, nextHref: null);
+  }
 
   @override
   Future<List<String>> trackLikers(String trackId, {int limit = 50}) async {
@@ -36,9 +46,16 @@ class CfApi extends TestSoundcloud {
       rateLimited--;
       throw DioException(
         requestOptions: RequestOptions(),
-        response: Response(requestOptions: RequestOptions(), statusCode: 429),
+        response: Response(
+          requestOptions: RequestOptions(),
+          statusCode: 429,
+          headers: Headers.fromMap({
+            if (retryAfter != null) 'retry-after': [retryAfter!],
+          }),
+        ),
       );
     }
+    if (failLikersFor.contains(trackId)) throw StateError('network');
     return likers[trackId] ?? const [];
   }
 
@@ -63,7 +80,7 @@ class CfApi extends TestSoundcloud {
 }
 
 Like like(String id, int epochSeconds) => (
-  track: realTrack(id),
+  trackId: id,
   likedAt: DateTime.fromMillisecondsSinceEpoch(
     epochSeconds * 1000,
     isUtc: true,
@@ -168,7 +185,7 @@ void main() {
     expect((await store.read('42'))!.candidates.length, lessThanOrEqualTo(300));
   });
 
-  test('a smaller budget cuts the run short but keeps what it found', () async {
+  test('a budget too small for the run leaves the cache unwritten', () async {
     api.own = [for (var i = 0; i < 50; i++) realTrack('s$i')];
     for (var i = 0; i < 50; i++) {
       api.likers['s$i'] = [
@@ -179,9 +196,12 @@ void main() {
       api.likes['${910000 + u}'] = [like('c${u % 40}', 1000)];
     }
     final run = source(maxRequests: 80);
-    await run.refresh('42', isCancelled: () => false);
+    expect(await run.refresh('42', isCancelled: () => false), isFalse);
     expect(api.requests, 80);
     expect(run.lastRunRequests, 80);
+    // a run that skipped most of its calls would be cached for a day as if
+    // it were complete
+    expect(await store.read('42'), isNull);
   });
 
   test('HTTP 429 backs off and retries, and retries are counted', () async {
@@ -264,7 +284,7 @@ void main() {
 
   test('a like without a timestamp still scores and loses ties', () async {
     smallNeighbourhood();
-    api.likes['900001']!.add((track: realTrack('undated'), likedAt: null));
+    api.likes['900001']!.add((trackId: 'undated', likedAt: null));
     expect(await source().refresh('42', isCancelled: () => false), isTrue);
     final ids = (await store.read(
       '42',
@@ -320,4 +340,128 @@ void main() {
     expect((await run.candidates('42', want: 5)).map((t) => t.id), ['ok']);
     expect(api.hydrated.where((id) => id == 'hidden-1'), hasLength(1));
   });
+
+  test('429 that never lifts aborts the run and writes nothing', () async {
+    smallNeighbourhood();
+    api.rateLimited = 1000;
+    final run = source();
+    expect(await run.refresh('42', isCancelled: () => false), isFalse);
+    // one call, retried the permitted number of times, then the run stops
+    expect(api.likersCalls, CoLikersSource.maxRetries + 1);
+    expect(api.userLikesCalls, 0);
+    expect(run.lastRunRequests, 1 + CoLikersSource.maxRetries + 1);
+    expect(await store.read('42'), isNull);
+  });
+
+  test('a Retry-After hint replaces the exponential wait', () async {
+    smallNeighbourhood();
+    api.rateLimited = 1;
+    api.retryAfter = '0';
+    final slow = CoLikersSource(
+      api: api,
+      store: store,
+      pause: Duration.zero,
+      backoff: const Duration(hours: 1),
+      now: () => now,
+    );
+    expect(await slow.refresh('42', isCancelled: () => false), isTrue);
+  });
+
+  test('too many failed calls: no cache, retried after a pause', () async {
+    smallNeighbourhood();
+    api.failLikersFor = {'s2', 's3'};
+    final run = source();
+    expect(await run.refresh('42', isCancelled: () => false), isFalse);
+    expect(await store.read('42'), isNull);
+    final calls = api.requests;
+    expect(await run.refresh('42', isCancelled: () => false), isFalse);
+    expect(api.requests, calls);
+    api.failLikersFor = {};
+    now = now.add(const Duration(minutes: 11));
+    expect(await run.refresh('42', isCancelled: () => false), isTrue);
+  });
+
+  test('a single failed call is tolerated', () async {
+    api.own = [for (var i = 0; i < 10; i++) realTrack('s$i')];
+    for (var i = 0; i < 10; i++) {
+      api.likers['s$i'] = ['900001', '900002'];
+    }
+    api.likes['900001'] = [like('x', 1)];
+    api.likes['900002'] = [like('x', 2)];
+    api.failLikersFor = {'s4'};
+    expect(await source().refresh('42', isCancelled: () => false), isTrue);
+    expect((await store.read('42'))!.candidates.single.trackId, 'x');
+  });
+
+  test('a like missing a timestamp on every neighbour still builds', () async {
+    api.own = [for (var i = 0; i < 3; i++) realTrack('s$i')];
+    for (var i = 0; i < 3; i++) {
+      api.likers['s$i'] = ['900001', '900002'];
+    }
+    api.likes['900001'] = [(trackId: 'q', likedAt: null)];
+    api.likes['900002'] = [(trackId: 'q', likedAt: null)];
+    expect(await source().refresh('42', isCancelled: () => false), isTrue);
+    final row = (await store.read('42'))!.candidates.single;
+    expect((row.trackId, row.score, row.likedAt), ('q', 6.0, 0));
+  });
+
+  test('cancelling once the write has begun removes the cache', () async {
+    smallNeighbourhood();
+    final late = _LateCancelStore(directory);
+    final run = CoLikersSource(
+      api: api,
+      store: late,
+      pause: Duration.zero,
+      backoff: Duration.zero,
+      now: () => now,
+    );
+    expect(await run.refresh('42', isCancelled: () => late.written), isFalse);
+    expect(late.written, isTrue);
+    expect(await store.read('42'), isNull);
+  });
+
+  test(
+    'switching account mid-run ends it without touching the new one',
+    () async {
+      smallNeighbourhood();
+      await store.write('43', now, [const CoLikerCandidate('mine', 4, 1)]);
+      final gate = api.gateLikes = Completer<void>();
+      final run = source();
+      final first = run.refresh('42', isCancelled: () => false);
+      await Future<void>.delayed(Duration.zero);
+      // the app moves to another account while the first run waits on a request
+      final other = await run.candidates('43', want: 5);
+      gate.complete();
+      expect(await first, isFalse);
+      expect(other.map((t) => t.id), ['mine']);
+      expect(await store.read('42'), isNull);
+      // nothing of account 42 leaked into 43's session memory
+      expect((await run.candidates('43', want: 5)).map((t) => t.id), ['mine']);
+      expect(api.likersCalls, lessThanOrEqualTo(1));
+    },
+  );
+
+  test('a failed first page ends the run quietly', () async {
+    smallNeighbourhood();
+    api.failLikesPage = true;
+    expect(await source().refresh('42', isCancelled: () => false), isFalse);
+    expect(await store.read('42'), isNull);
+  });
+}
+
+/// Reports the moment the cache write starts, to cancel right after it.
+class _LateCancelStore extends CoLikersStore {
+  _LateCancelStore(Directory directory)
+    : super(directory: () async => directory);
+  bool written = false;
+
+  @override
+  Future<void> write(
+    String identity,
+    DateTime builtAt,
+    List<CoLikerCandidate> candidates,
+  ) async {
+    await super.write(identity, builtAt, candidates);
+    written = true;
+  }
 }

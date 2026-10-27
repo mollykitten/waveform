@@ -56,7 +56,9 @@ final coLikersJobProvider = Provider<CoLikersJob>((ref) {
   final job = CoLikersJob(ref);
   ref.listen(authControllerProvider.select((s) => s.userToken), (_, token) {
     job.cancel();
-    if (token != null) job.start();
+    // Let providers that depend on the account rebuild first: the identity
+    // read by the run must be the new account's, not the previous one's.
+    if (token != null) scheduleMicrotask(job.start);
   });
   ref.onDispose(job.cancel);
   return job;

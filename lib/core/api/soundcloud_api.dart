@@ -114,17 +114,18 @@ abstract interface class SoundcloudApi {
   });
 
   /// Fresh track items of the signed-in user's home stream (uploads and
-  /// reposts of followed accounts), newest first. Requires a user token;
-  /// throws without one, so callers decide how to degrade.
+  /// reposts of followed accounts), newest first. Requires a user token and
+  /// throws a [StateError] without one, so callers decide how to degrade.
   Future<List<Track>> streamTracks({int limit = 40});
 
   /// Ids of users who liked [trackId] (one public page, newest first). Throws
   /// on transport errors, including HTTP 429, so callers can back off.
   Future<List<String>> trackLikers(String trackId, {int limit = 50});
 
-  /// A user's most recent public likes with the time each was liked, newest
-  /// first (one page). Throws on transport errors, including HTTP 429.
-  Future<List<({Track track, DateTime? likedAt})>> userTrackLikes(
+  /// A user's most recent public likes (track id and the time it was liked),
+  /// newest first (one page). Throws on transport errors, including HTTP 429.
+  /// Only ids are parsed: callers score likes, they do not display them.
+  Future<List<({String trackId, DateTime? likedAt})>> userTrackLikes(
     String userId, {
     int limit = 200,
   });

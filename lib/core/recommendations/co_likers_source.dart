@@ -55,6 +55,12 @@ class CoLikersSource {
   static const likesPerNeighbor = 200;
   static const maxRetries = 3;
 
+  /// Longest `Retry-After` honoured, in seconds.
+  static const maxRetryAfter = 30;
+
+  /// A run that loses more than this share of its calls is not cached.
+  static const maxFailedShare = .2;
+
   String? _memoryIdentity;
   final _likers = <String, List<String>>{};
   final _neighborLikes = <String, List<({String id, int at})>>{};
@@ -91,7 +97,10 @@ class CoLikersSource {
       return false;
     }
     _bind(identity);
-    final current = _snapshot ??= await store.read(identity);
+    final current = _snapshot ?? await store.read(identity);
+    // The account may have changed while the file was read.
+    if (_memoryIdentity != identity) return false;
+    _snapshot ??= current;
     if (current != null &&
         _now().difference(current.builtAt) < CoLikersStore.ttl) {
       return false;
@@ -105,10 +114,13 @@ class CoLikersSource {
     }
     final failed = _failedAt;
     if (failed != null && _now().difference(failed) < retryAfter) return false;
-    final run = _Run(this, identity, isCancelled);
+    // A switch to another account mid-run ends it like a cancellation, so it
+    // can never fill the new account's memory.
+    bool cancelled() => isCancelled() || _memoryIdentity != identity;
+    final run = _Run(this, identity, cancelled);
     final built = await run.execute();
     lastRunRequests = run.requests;
-    if (isCancelled()) return false;
+    if (cancelled()) return false;
     if (built == null) {
       _failedAt = _now();
       return false;
@@ -117,7 +129,7 @@ class CoLikersSource {
     _unusable.clear();
     final at = _now();
     await store.write(identity, at, built);
-    if (isCancelled()) {
+    if (cancelled()) {
       await store.forget(identity);
       return false;
     }
@@ -144,7 +156,9 @@ class CoLikersSource {
       return const [];
     }
     _bind(identity);
-    final snapshot = _snapshot ??= await store.read(identity);
+    final snapshot = _snapshot ?? await store.read(identity);
+    if (_memoryIdentity != identity) return const [];
+    _snapshot ??= snapshot;
     if (snapshot == null) return const [];
     final pool = [
       for (final c in snapshot.candidates)
@@ -193,9 +207,26 @@ class _Run {
   int requests = 0;
   bool _first = true;
 
-  /// One paced, counted request. Null means "skip": the budget is spent, the
-  /// run was cancelled, or the request failed for a reason other than 429.
+  /// Calls tried and calls that gave nothing back (a failure other than 429,
+  /// or a spent budget). A run that loses too many is not cached.
+  int attempted = 0;
+  int failed = 0;
+
+  /// Set when HTTP 429 outlasted every retry: the run ends at once instead of
+  /// spending the rest of its budget on waits.
+  bool rateLimited = false;
+
+  /// One logical request with its retries. Null means "skip".
   Future<T?> _call<T>(Future<T> Function() request) async {
+    attempted++;
+    final result = await _attempt(request);
+    if (result == null && !isCancelled() && !rateLimited) failed++;
+    return result;
+  }
+
+  /// One paced, counted request, retried with backoff on HTTP 429 (honouring
+  /// a short `Retry-After`). Null: spent budget, cancellation or a failure.
+  Future<T?> _attempt<T>(Future<T> Function() request) async {
     var wait = source.backoff;
     for (var attempt = 0; attempt <= CoLikersSource.maxRetries; attempt++) {
       if (isCancelled() || requests >= source.maxRequests) return null;
@@ -207,18 +238,28 @@ class _Run {
         return await request();
       } on DioException catch (error) {
         if (error.response?.statusCode != 429) return null;
-        await Future<void>.delayed(wait);
+        final hinted = int.tryParse(
+          error.response?.headers.value('retry-after') ?? '',
+        );
+        await Future<void>.delayed(
+          hinted == null
+              ? wait
+              : Duration(
+                  seconds: hinted.clamp(0, CoLikersSource.maxRetryAfter),
+                ),
+        );
         wait *= 2;
       } catch (_) {
         return null;
       }
     }
+    rateLimited = true;
     return null;
   }
 
   Future<List<CoLikerCandidate>?> execute() async {
     final likes = await _call(() => source.api.likesPage(limit: 50));
-    if (likes == null) return null;
+    if (likes == null || rateLimited) return null;
     final seeds = [
       for (final track in likes.tracks.take(CoLikersSource.seedCount)) track.id,
     ];
@@ -234,7 +275,7 @@ class _Run {
         source._likers[seed] = users;
         likersSeen++;
       }
-      if (isCancelled()) return null;
+      if (isCancelled() || rateLimited) return null;
     }
     final shared = <String, int>{};
     for (final seed in seeds) {
@@ -266,12 +307,12 @@ class _Run {
         source._neighborLikes[neighbor.key] = [
           for (final row in rows)
             (
-              id: row.track.id,
+              id: row.trackId,
               at: (row.likedAt?.millisecondsSinceEpoch ?? 0) ~/ 1000,
             ),
         ];
       }
-      if (isCancelled()) return null;
+      if (isCancelled() || rateLimited) return null;
     }
     if (source._neighborLikes.length > 600) {
       source._neighborLikes.removeWhere(
@@ -281,6 +322,8 @@ class _Run {
     // Neighbours were found but none of their likes could be read: keep the
     // previous cache rather than replace it with an empty one.
     if (chosen.isNotEmpty && neighbourData == 0) return null;
+    // A patchy run would be cached for a day as if it were complete.
+    if (failed > attempted * CoLikersSource.maxFailedShare) return null;
     return _score(chosen, seedSet);
   }
 

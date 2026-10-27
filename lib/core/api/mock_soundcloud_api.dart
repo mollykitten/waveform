@@ -131,7 +131,7 @@ class MockSoundcloudApi implements SoundcloudApi {
       const [];
 
   @override
-  Future<List<({Track track, DateTime? likedAt})>> userTrackLikes(
+  Future<List<({String trackId, DateTime? likedAt})>> userTrackLikes(
     String userId, {
     int limit = 200,
   }) async => const [];

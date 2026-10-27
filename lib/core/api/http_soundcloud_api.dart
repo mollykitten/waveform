@@ -151,6 +151,7 @@ class HttpSoundcloudApi implements SoundcloudApi {
   /// Личный стрим подписок (только треки) — требует userToken.
   @override
   Future<List<Track>> streamTracks({int limit = 40}) async {
+    if (!_authed) throw StateError('the home stream needs a signed-in user');
     final data = await _get('/stream', {'limit': limit}, true);
     return _page(data, StreamItemDto.fromJson).collection
         .where((e) => e.isTrack && e.track != null)
@@ -554,19 +555,26 @@ class HttpSoundcloudApi implements SoundcloudApi {
   }
 
   @override
-  Future<List<({Track track, DateTime? likedAt})>> userTrackLikes(
+  Future<List<({String trackId, DateTime? likedAt})>> userTrackLikes(
     String userId, {
     int limit = 200,
   }) async {
     final data = await _get('/users/$userId/track_likes', {'limit': limit});
-    return [
-      for (final item in asMapList(asMap(data)['collection']))
-        if (item['track'] is Map)
-          (
-            track: TrackDto.fromJson(asMap(item['track'])).toDomain(),
-            likedAt: DateTime.tryParse(asStr(item['created_at'])),
-          ),
-    ];
+    final likes = <({String trackId, DateTime? likedAt})>[];
+    for (final item in asMapList(asMap(data)['collection'])) {
+      // One malformed item must not cost the whole page.
+      try {
+        final id = asInt(asMap(item['track'])['id']);
+        if (id <= 0) continue;
+        likes.add((
+          trackId: '$id',
+          likedAt: DateTime.tryParse(asStr(item['created_at'])),
+        ));
+      } catch (_) {
+        continue;
+      }
+    }
+    return likes;
   }
 
   @override

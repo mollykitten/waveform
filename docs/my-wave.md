@@ -21,9 +21,18 @@ scale (a fixed blend hurt the stronger source in the pilots):
   of each, keeps neighbours who share at least two of those likes (at most
   150), reads each neighbour's latest 200 public likes and scores a track by
   the summed weight of the neighbours who liked it (weight = shared likes;
-  the newest neighbour like breaks ties). a run makes at most 250 requests,
-  paced at 150 ms with exponential backoff on HTTP 429, and is cancelled on
-  logout or account switch. it starts after sign-in and when my wave opens,
+  the newest neighbour like breaks ties; a like without a timestamp counts
+  as the oldest). a run makes at most 250 requests, paced at 150 ms, with
+  exponential backoff on HTTP 429 (a short `Retry-After` is honoured) and is
+  cancelled on logout or account switch. the 250 covers the run itself
+  (the likes page, likers, neighbour likes, retries); it does not include
+  hydrating cached candidates into full tracks with `tracksByIds` when the
+  wave refills (one to a few requests, only for ids not yet hydrated), nor
+  the single automatic retry the api client makes after a 401. a run that
+  gives up after repeated 429s, or loses more than a fifth of its calls to
+  other failures, writes nothing: the previous cache stays in place and the
+  next attempt waits ten minutes rather than the 24 hours of a finished run.
+  it starts after sign-in and when my wave opens,
   never blocks playback, and is cached for 24 hours in
   `co-likers-v1-<identity>.json` (our own track ids and scores only; other
   users' ids are never written to disk). until a cache exists, the wave runs

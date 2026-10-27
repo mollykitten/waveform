@@ -9,6 +9,7 @@ import 'package:talker_flutter/talker_flutter.dart';
 import 'package:waveform_app/core/api/providers.dart';
 import 'package:waveform_app/core/api/soundcloud_auth.dart';
 import 'package:waveform_app/core/log/talker.dart';
+import 'package:waveform_app/core/recommendations/co_likers_store.dart';
 import 'package:waveform_app/core/recommendations/listening_store.dart';
 import 'package:waveform_app/core/recommendations/listening_event.dart';
 import 'package:waveform_app/core/recommendations/listening_providers.dart';
@@ -250,6 +251,7 @@ void main() {
 
   test('logging out through the auth controller deletes that memory', () async {
     final seen = SeenStore(directory: () async => directory);
+    final coLikers = CoLikersStore(directory: () async => directory);
     final container = ProviderContainer(
       overrides: [
         listeningIdentityProvider.overrideWith((ref) async {
@@ -258,6 +260,7 @@ void main() {
           return auth.isAuthenticated ? '42' : 'anonymous';
         }),
         seenStoreProvider.overrideWithValue(seen),
+        coLikersStoreProvider.overrideWithValue(coLikers),
         listeningStoreProvider.overrideWithValue(
           ListeningStore(directory: () async => directory),
         ),
@@ -271,6 +274,11 @@ void main() {
     container.read(authControllerProvider.notifier).signIn('2-token');
     expect(await container.read(listeningPartitionProvider.future), '42');
     await seen.record('42', SeenKind.played, ['a'], DateTime.now());
+    await coLikers.write('42', DateTime.now(), [
+      const CoLikerCandidate('7', 1, 1),
+    ]);
+    final cache = File('${directory.path}/co-likers-v1-42.json');
+    expect(cache.existsSync(), isTrue);
     final base = '${directory.path}/seen-tracks-v1-42.json';
     File('$base.bak').writeAsStringSync('x');
     expect(File(base).existsSync(), isTrue);
@@ -284,6 +292,8 @@ void main() {
     await seen.read('42');
     expect(File(base).existsSync(), isFalse);
     expect(File('$base.bak').existsSync(), isFalse);
+    // the co-likers cache goes with the account
+    expect(cache.existsSync(), isFalse);
   });
 }
 
