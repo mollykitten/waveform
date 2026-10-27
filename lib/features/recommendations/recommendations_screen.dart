@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/colors.dart';
 import '../../core/api/soundcloud_auth.dart';
+import '../auth/login_dialog.dart';
 import '../../core/recommendations/ai_config.dart';
 import '../../core/recommendations/models.dart';
 import '../../core/recommendations/providers.dart';
@@ -151,6 +151,65 @@ class _RecommendationsScreenState extends ConsumerState<RecommendationsScreen> {
             )
         ? reasons[queue.first.id]
         : null;
+    final railBusy = result.busy || settings.connecting;
+    final reconnect =
+        settings.config.backend == AiBackend.chatGpt &&
+        result.error == AiFailure.credentials;
+    final errorText = result.error == null
+        ? ''
+        : reconnect
+        ? 'ChatGPT access expired or was denied. reconnect to continue your wave.'
+        : result.error!.message;
+    final tune = FormAction(
+      label: 'tune your wave',
+      icon: Icons.tune,
+      kind: FormActionKind.quiet,
+      selected: _tuning,
+      onTap: () => setState(() => _tuning = !_tuning),
+    );
+    final stopWave = queue.isEmpty && wave.active && !wave.discovering
+        ? FormAction(
+            label: 'stop my wave',
+            kind: FormActionKind.quiet,
+            onTap: _cancel,
+          )
+        : null;
+    final cancel = FormAction(
+      label: 'cancel',
+      kind: FormActionKind.quiet,
+      onTap: _cancel,
+    );
+    final List<Widget> actions;
+    if (railBusy) {
+      actions = [if (result.busy || _starting) cancel];
+    } else if (result.error != null && !busy) {
+      actions = [
+        if (reconnect)
+          FormAction(
+            label: 'reconnect ChatGPT',
+            onTap: () => ref.read(aiSettingsProvider.notifier).connectChatGpt(),
+          )
+        else
+          FormAction(
+            label: 'try again',
+            icon: Icons.refresh,
+            onTap: _available(settings) ? _startWave : null,
+          ),
+        tune,
+        ?stopWave,
+      ];
+    } else if (!authed && !busy) {
+      actions = [
+        FormAction(
+          label: 'sign in to SoundCloud',
+          onTap: () => showLoginDialog(context),
+        ),
+        tune,
+        ?stopWave,
+      ];
+    } else {
+      actions = [tune, ?stopWave, if (_starting) cancel];
+    }
     return ListView(
       controller: _scroll,
       padding: const EdgeInsets.fromLTRB(
@@ -170,10 +229,14 @@ class _RecommendationsScreenState extends ConsumerState<RecommendationsScreen> {
                   active: _heroVisible,
                   description: !settings.ready
                       ? 'getting your wave ready…'
-                      : !_available(settings)
-                      ? 'connect ChatGPT to start your wave.'
                       : busy
                       ? 'finding your next tracks…'
+                      : result.error != null
+                      ? errorText
+                      : !_available(settings)
+                      ? 'connect ChatGPT to start your wave.'
+                      : !authed
+                      ? 'sign in to SoundCloud to build your wave from your likes. a mood works without it.'
                       : wave.active
                       ? 'your wave keeps playing. follow where it goes.'
                       : 'a fresh queue from your likes and recent listening.',
@@ -188,94 +251,58 @@ class _RecommendationsScreenState extends ConsumerState<RecommendationsScreen> {
                   enabled: ownsPlayback || _available(settings) && !busy,
                   onPlay: ownsPlayback ? player.toggle : _startWave,
                 ),
-                Center(
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 584),
-                    child: Container(
-                      key: const ValueKey('wave-toolbar'),
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: AppColors.surface,
-                        borderRadius: AppTheme.borderRadius,
-                        border: AppTheme.border(),
-                      ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 584),
                       child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        key: const ValueKey('wave-toolbar'),
+                        crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
-                          WaveControlRow(
-                            information: Text(
-                              !settings.ready
-                                  ? 'getting your wave ready…'
-                                  : busy
-                                  ? 'finding your next tracks…'
-                                  : _available(settings)
-                                  ? settings.config.backend == AiBackend.chatGpt
-                                        ? 'connected to ChatGPT'
-                                        : 'using your custom provider'
-                                  : 'connect ChatGPT to start your wave.',
-                              style: formTextStyle,
+                          if (railBusy) ...[
+                            const SizedBox(
+                              width: 240,
+                              child: WaveProgressRail(),
                             ),
-                            actions: Wrap(
+                            const SizedBox(height: 8),
+                          ],
+                          if (actions.isNotEmpty)
+                            Wrap(
                               key: const ValueKey('wave-toolbar-actions'),
+                              alignment: WrapAlignment.center,
                               spacing: 8,
                               runSpacing: 8,
-                              children: [
-                                FormAction(
-                                  label: 'tune your wave',
-                                  icon: Icons.tune,
-                                  selected: _tuning,
-                                  onTap: () =>
-                                      setState(() => _tuning = !_tuning),
-                                ),
-                                FormAction(
-                                  label: 'model connection',
-                                  kind: FormActionKind.quiet,
-                                  onTap: () => context.push('/settings'),
-                                ),
-                                if (queue.isEmpty &&
-                                    wave.active &&
-                                    !wave.discovering)
-                                  FormAction(
-                                    label: 'stop my wave',
-                                    kind: FormActionKind.quiet,
-                                    onTap: _cancel,
-                                  ),
-                              ],
+                              children: actions,
                             ),
-                          ),
-                          if (!settings.ready) ...[
-                            const SizedBox(height: 12),
-                            const LinearProgressIndicator(),
-                          ],
                           if (settings.ready &&
                               settings.config.backend == AiBackend.chatGpt &&
                               !settings.chatGptConnected) ...[
-                            const SizedBox(height: 12),
-                            Align(
-                              alignment: Alignment.centerLeft,
-                              child: FormAction(
-                                label: 'continue with ChatGPT',
-                                kind: FormActionKind.primary,
-                                busy: settings.connecting,
-                                busyLabel: 'connecting…',
-                                onTap: () => ref
-                                    .read(aiSettingsProvider.notifier)
-                                    .connectChatGpt(),
-                              ),
+                            const SizedBox(height: 8),
+                            FormAction(
+                              label: 'continue with ChatGPT',
+                              busy: settings.connecting,
+                              busyLabel: 'connecting…',
+                              onTap: () => ref
+                                  .read(aiSettingsProvider.notifier)
+                                  .connectChatGpt(),
                             ),
                             const SizedBox(height: 8),
                             const Text(
                               'an eligible ChatGPT subscription is required; availability depends on your account.',
                               style: formTextStyle,
+                              textAlign: TextAlign.center,
                             ),
                           ],
-                          if (_tuning) ...[
+                          if (_tuning && !railBusy) ...[
                             const SizedBox(height: 12),
-                            WaveMoodField(
-                              controller: _mood,
-                              enabled: !busy,
-                              expanded: true,
+                            SizedBox(
+                              width: double.infinity,
+                              child: WaveMoodField(
+                                controller: _mood,
+                                enabled: !busy,
+                                expanded: true,
+                              ),
                             ),
                             if (wave.active) ...[
                               const SizedBox(height: 8),
@@ -292,93 +319,34 @@ class _RecommendationsScreenState extends ConsumerState<RecommendationsScreen> {
                           ],
                           if (_notice != null) ...[
                             const SizedBox(height: 8),
-                            Text(_notice!, style: formTextStyle),
-                          ],
-                          if (!authed) ...[
-                            const SizedBox(height: 12),
-                            const Text(
-                              'sign in to SoundCloud to personalise your wave. you can still explore with a mood.',
+                            Text(
+                              _notice!,
                               style: formTextStyle,
+                              textAlign: TextAlign.center,
                             ),
                           ],
                           if (settings.error != null &&
                               result.error == null) ...[
-                            const SizedBox(height: 12),
+                            const SizedBox(height: 8),
                             Text(
                               settings.chatGptConnected &&
                                       settings.error == AiFailure.credentials
                                   ? 'ChatGPT access expired or was denied. reconnect to continue your wave.'
                                   : settings.error!.message,
                               style: formTextStyle,
+                              textAlign: TextAlign.center,
                             ),
                             if (settings.chatGptConnected) ...[
                               const SizedBox(height: 8),
-                              Align(
-                                alignment: Alignment.centerRight,
-                                child: FormAction(
-                                  label: 'reconnect ChatGPT',
-                                  onTap: busy
-                                      ? null
-                                      : () => ref
-                                            .read(aiSettingsProvider.notifier)
-                                            .connectChatGpt(),
-                                ),
+                              FormAction(
+                                label: 'reconnect ChatGPT',
+                                onTap: busy
+                                    ? null
+                                    : () => ref
+                                          .read(aiSettingsProvider.notifier)
+                                          .connectChatGpt(),
                               ),
                             ],
-                          ],
-                          if (result.busy || settings.connecting) ...[
-                            const SizedBox(height: 12),
-                            const LinearProgressIndicator(),
-                            if (result.busy || _starting) ...[
-                              const SizedBox(height: 8),
-                              Align(
-                                alignment: Alignment.centerRight,
-                                child: FormAction(
-                                  label: 'cancel discovery',
-                                  kind: FormActionKind.quiet,
-                                  onTap: _cancel,
-                                ),
-                              ),
-                            ],
-                          ],
-                          if (result.error != null) ...[
-                            const SizedBox(height: 12),
-                            Text(
-                              settings.config.backend == AiBackend.chatGpt &&
-                                      result.error == AiFailure.credentials
-                                  ? 'ChatGPT access expired or was denied. reconnect to continue your wave.'
-                                  : result.error!.message,
-                              style: formTextStyle,
-                            ),
-                            const SizedBox(height: 8),
-                            Align(
-                              alignment: Alignment.centerRight,
-                              child: Wrap(
-                                spacing: 8,
-                                runSpacing: 8,
-                                children: [
-                                  if (settings.config.backend ==
-                                          AiBackend.chatGpt &&
-                                      result.error == AiFailure.credentials)
-                                    FormAction(
-                                      label: 'reconnect ChatGPT',
-                                      onTap: busy
-                                          ? null
-                                          : () => ref
-                                                .read(
-                                                  aiSettingsProvider.notifier,
-                                                )
-                                                .connectChatGpt(),
-                                    ),
-                                  FormAction(
-                                    label: 'try again',
-                                    onTap: !busy && _available(settings)
-                                        ? _startWave
-                                        : null,
-                                  ),
-                                ],
-                              ),
-                            ),
                           ],
                         ],
                       ),

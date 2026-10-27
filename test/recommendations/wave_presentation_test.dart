@@ -222,7 +222,7 @@ void main() {
       await tester.tap(find.text('tune your wave'));
       await tester.pumpAndSettle();
       // Capture the real scroll position needed to expose the complete shelf.
-      await tester.ensureVisible(find.text('model connection'));
+      await tester.ensureVisible(find.text('tune your wave'));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('wave-mood')), findsOneWidget);
     }
@@ -838,15 +838,18 @@ void main() {
           expect(find.descendant(of: toolbar, matching: mood), findsOneWidget);
           expect(
             tester.getSize(mood).width,
-            closeTo(tester.getSize(toolbar).width - 32, 1.1),
+            closeTo(tester.getSize(toolbar).width, 1.1),
           );
           final actions = find.byKey(const ValueKey('wave-toolbar-actions'));
           final tune = tester.getRect(find.text('tune your wave'));
-          final model = tester.getRect(find.text('model connection'));
-          expect((tune.center.dy - model.center.dy).abs(), lessThan(1));
+          expect(find.text('model connection'), findsNothing);
+          expect(
+            (tester.getRect(actions).center.dx - tune.center.dx).abs(),
+            lessThan(tester.getRect(actions).width),
+          );
           expect(
             tester.getRect(actions).right,
-            lessThanOrEqualTo(tester.getRect(toolbar).right - 16),
+            lessThanOrEqualTo(tester.getRect(toolbar).right),
           );
           if (mode != 'idle') {
             expect(
@@ -862,7 +865,7 @@ void main() {
                     find.ancestor(of: apply, matching: find.byType(FormAction)),
                   )
                   .right,
-              closeTo(tester.getRect(toolbar).right - 16, .6),
+              closeTo(tester.getRect(toolbar).right, .6),
             );
           }
           expect(tester.takeException(), isNull);

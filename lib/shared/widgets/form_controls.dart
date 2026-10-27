@@ -29,7 +29,7 @@ class FormAction extends StatelessWidget {
     this.kind = FormActionKind.secondary,
     this.icon,
     this.iconSize = 14,
-    this.padding = const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+    this.padding = const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
     this.busy = false,
     this.busyLabel,
     this.selected = false,
@@ -54,8 +54,8 @@ class FormAction extends StatelessWidget {
     final color = primary
         ? AppColors.bg
         : active || busy
-        ? AppColors.textHi
-        : AppColors.textMid;
+        ? (quiet ? AppColors.textMid : AppColors.textHi)
+        : AppColors.textLow;
     Widget content(String text, {bool loading = false}) => Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -97,12 +97,16 @@ class FormAction extends StatelessWidget {
                 ? AppColors.acid
                 : quiet
                 ? Colors.transparent
-                : AppColors.bg,
+                : AppColors.surface2,
             borderRadius: AppTheme.borderRadius,
             border: quiet
                 ? null
                 : AppTheme.border(
-                    selected || primary ? AppColors.acid : AppColors.border,
+                    selected || primary
+                        ? AppColors.acid
+                        : active
+                        ? AppColors.waveDim
+                        : AppColors.borderDim,
                   ),
           ),
           child: busy

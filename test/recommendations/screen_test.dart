@@ -145,7 +145,7 @@ void main() {
       const Duration(seconds: 2),
     );
     expect(settings.connections, 1);
-    expect(find.text('connected to ChatGPT'), findsOneWidget);
+    expect(find.text('connect ChatGPT to start your wave.'), findsNothing);
     expect(client.payloads, isEmpty);
     expect(find.text('continue with ChatGPT'), findsNothing);
     await tester.pumpWidget(const SizedBox.shrink());
