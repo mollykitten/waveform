@@ -5,11 +5,11 @@ import '../../app/theme/app_theme.dart';
 import '../../app/theme/colors.dart';
 import '../../core/api/soundcloud_auth.dart';
 import '../../core/recommendations/co_likers_job.dart';
-import '../../core/recommendations/models.dart';
 import '../../core/recommendations/providers.dart';
 import '../../shared/models/track.dart';
 import '../../shared/widgets/form_controls.dart';
 import '../../shared/widgets/track_row.dart';
+import '../auth/login_dialog.dart';
 import '../player/player_controller.dart';
 import 'wave_controller.dart';
 import 'wave_controls.dart';
@@ -101,11 +101,35 @@ class _RecommendationsScreenState extends ConsumerState<RecommendationsScreen> {
             )
         ? reasons[queue.first.id]
         : null;
-    final showStatus =
-        !authed ||
-        busy ||
-        result.error != null ||
-        (queue.isEmpty && wave.active);
+    final failure = busy ? null : result.error;
+    final stopWave = queue.isEmpty && wave.active && !busy
+        ? FormAction(
+            label: 'stop my wave',
+            kind: FormActionKind.quiet,
+            onTap: _cancel,
+          )
+        : null;
+    final actions = <Widget>[
+      if (busy) ...[
+        if (result.busy || _starting)
+          FormAction(
+            label: 'cancel',
+            kind: FormActionKind.quiet,
+            onTap: _cancel,
+          ),
+      ] else if (failure != null)
+        FormAction(
+          label: 'try again',
+          icon: Icons.refresh,
+          onTap: authed ? _startWave : null,
+        )
+      else if (!authed)
+        FormAction(
+          label: 'sign in to SoundCloud',
+          onTap: () => showLoginDialog(context),
+        ),
+      ?stopWave,
+    ];
     return ListView(
       controller: _scroll,
       padding: const EdgeInsets.fromLTRB(
@@ -125,6 +149,10 @@ class _RecommendationsScreenState extends ConsumerState<RecommendationsScreen> {
                   active: _heroVisible,
                   description: busy
                       ? 'finding your next tracks…'
+                      : failure != null
+                      ? failure.message
+                      : !authed
+                      ? 'sign in to SoundCloud to build your wave from your likes.'
                       : wave.active
                       ? 'your wave keeps playing. follow where it goes.'
                       : 'a fresh queue from your likes and recent listening.',
@@ -139,19 +167,32 @@ class _RecommendationsScreenState extends ConsumerState<RecommendationsScreen> {
                   enabled: ownsPlayback || authed && !busy,
                   onPlay: ownsPlayback ? player.toggle : _startWave,
                 ),
-                if (showStatus)
-                  Center(
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 584),
-                      child: _WaveStatus(
-                        key: const ValueKey('wave-toolbar'),
-                        authed: authed,
-                        busy: busy,
-                        failure: result.error,
-                        cancellable: result.busy || _starting,
-                        stoppable: queue.isEmpty && wave.active && !busy,
-                        onCancel: _cancel,
-                        onRetry: !busy && authed ? _startWave : null,
+                if (busy || actions.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 584),
+                        child: Column(
+                          key: const ValueKey('wave-toolbar'),
+                          children: [
+                            if (busy) ...[
+                              const SizedBox(
+                                width: 240,
+                                child: WaveProgressRail(),
+                              ),
+                              const SizedBox(height: 8),
+                            ],
+                            if (actions.isNotEmpty)
+                              Wrap(
+                                key: const ValueKey('wave-toolbar-actions'),
+                                alignment: WrapAlignment.center,
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: actions,
+                              ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -193,80 +234,6 @@ class _RecommendationsScreenState extends ConsumerState<RecommendationsScreen> {
   }
 }
 
-/// A quiet card shown only when there is something to say: a sign-in hint,
-/// progress, or a failure with a retry.
-class _WaveStatus extends StatelessWidget {
-  const _WaveStatus({
-    super.key,
-    required this.authed,
-    required this.busy,
-    required this.failure,
-    required this.cancellable,
-    required this.stoppable,
-    required this.onCancel,
-    required this.onRetry,
-  });
-  final bool authed;
-  final bool busy;
-  final WaveFailure? failure;
-  final bool cancellable;
-  final bool stoppable;
-  final VoidCallback onCancel;
-  final VoidCallback? onRetry;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    width: double.infinity,
-    padding: const EdgeInsets.all(16),
-    decoration: BoxDecoration(
-      color: AppColors.surface,
-      borderRadius: AppTheme.borderRadius,
-      border: AppTheme.border(),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        if (!authed)
-          const Text(
-            'sign in to SoundCloud to personalise your wave.',
-            style: formTextStyle,
-          ),
-        if (busy) ...[
-          const LinearProgressIndicator(),
-          if (cancellable) ...[
-            const SizedBox(height: 8),
-            Align(
-              alignment: Alignment.centerRight,
-              child: FormAction(
-                label: 'cancel discovery',
-                kind: FormActionKind.quiet,
-                onTap: onCancel,
-              ),
-            ),
-          ],
-        ],
-        if (failure != null) ...[
-          Text(failure!.message, style: formTextStyle),
-          const SizedBox(height: 8),
-          Align(
-            alignment: Alignment.centerRight,
-            child: FormAction(label: 'try again', onTap: onRetry),
-          ),
-        ],
-        if (stoppable && failure == null)
-          Align(
-            alignment: Alignment.centerRight,
-            child: FormAction(
-              label: 'stop my wave',
-              kind: FormActionKind.quiet,
-              onTap: onCancel,
-            ),
-          ),
-      ],
-    ),
-  );
-}
-
 /// Standard track controls with optional individual recommendation context.
 class WaveQueueRow extends StatelessWidget {
   const WaveQueueRow({
@@ -280,24 +247,18 @@ class WaveQueueRow extends StatelessWidget {
   final String? reason;
 
   @override
-  Widget build(BuildContext context) => Column(
-    key: ValueKey('wave-row-${track.id}'),
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [
-      TrackRow(track: track, queue: queue),
-      if (reason != null)
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-          child: Tooltip(
-            message: reason!,
-            child: Text(
-              reason!,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: formTextStyle,
+  Widget build(BuildContext context) {
+    final row = TrackRow(track: track, queue: queue);
+    // The reason stays one hover away so the list reads as plain tracks.
+    return KeyedSubtree(
+      key: ValueKey('wave-row-${track.id}'),
+      child: reason == null
+          ? row
+          : Tooltip(
+              message: reason!,
+              waitDuration: const Duration(milliseconds: 700),
+              child: row,
             ),
-          ),
-        ),
-    ],
-  );
+    );
+  }
 }

@@ -425,6 +425,7 @@ void main() {
         recommendationServiceProvider.overrideWithValue(
           PoolService(TestSoundcloud())..scripted = [3],
         ),
+        waveRetryDelayProvider.overrideWithValue(Duration.zero),
         listeningIdentityProvider.overrideWith((ref) async => 'test-profile'),
         recommendationsProvider.overrideWithBuild(
           (ref, notifier) => RecommendationState(
@@ -717,20 +718,26 @@ void main() {
                 tester.getRect(find.byType(WaveHero)).bottom,
               ),
             );
+            // the hero carries the status; the toolbar only holds actions
             expect(
               find.descendant(
-                of: toolbar,
+                of: find.byType(WaveHero),
                 matching: find.text(
                   mode == 'idle'
-                      ? 'sign in to SoundCloud to personalise your wave.'
+                      ? 'sign in to SoundCloud to build your wave from your likes.'
                       : WaveFailure.network.message,
                 ),
               ),
               findsOneWidget,
             );
             expect(
-              find.descendant(of: toolbar, matching: find.text('try again')),
-              mode == 'error' ? findsOneWidget : findsNothing,
+              find.descendant(
+                of: toolbar,
+                matching: find.text(
+                  mode == 'idle' ? 'sign in to SoundCloud' : 'try again',
+                ),
+              ),
+              findsOneWidget,
             );
           }
           expect(tester.takeException(), isNull);

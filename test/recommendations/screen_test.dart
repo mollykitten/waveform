@@ -102,7 +102,11 @@ void main() {
     await show(tester);
     expect(find.text('my wave'), findsOneWidget);
     expect(find.byType(WaveHero), findsOneWidget);
-    expect(find.textContaining('sign in to SoundCloud'), findsOneWidget);
+    expect(
+      find.text('sign in to SoundCloud to build your wave from your likes.'),
+      findsOneWidget,
+    );
+    expect(find.text('sign in to SoundCloud'), findsOneWidget);
     expect(
       tester
           .widget<Pressable>(find.byKey(const ValueKey('wave-primary')))
