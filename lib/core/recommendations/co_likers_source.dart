@@ -113,16 +113,27 @@ class CoLikersSource {
       _neighborLikes.clear();
     }
     final failed = _failedAt;
-    if (failed != null && _now().difference(failed) < retryAfter) return false;
+    if (failed != null && _now().difference(failed) < retryAfter) {
+      onLog?.call('co-likers: last run failed recently, not retried yet');
+      return false;
+    }
     // A switch to another account mid-run ends it like a cancellation, so it
     // can never fill the new account's memory.
     bool cancelled() => isCancelled() || _memoryIdentity != identity;
     final run = _Run(this, identity, cancelled);
     final built = await run.execute();
     lastRunRequests = run.requests;
-    if (cancelled()) return false;
+    if (cancelled()) {
+      onLog?.call('co-likers: run cancelled after ${run.requests} requests');
+      return false;
+    }
     if (built == null) {
       _failedAt = _now();
+      onLog?.call(
+        'co-likers: run skipped (${run.skipped}) after ${run.requests} '
+        'requests; previous cache kept, next try in '
+        '${retryAfter.inMinutes} min',
+      );
       return false;
     }
     _failedAt = null;
@@ -131,6 +142,7 @@ class CoLikersSource {
     await store.write(identity, at, built);
     if (cancelled()) {
       await store.forget(identity);
+      onLog?.call('co-likers: run cancelled after writing, cache removed');
       return false;
     }
     _snapshot = CoLikersSnapshot(at, built);
@@ -216,6 +228,17 @@ class _Run {
   /// spending the rest of its budget on waits.
   bool rateLimited = false;
 
+  /// Why the run produced nothing, for the log.
+  String skipped = 'cancelled';
+
+  List<CoLikerCandidate>? _skip(String why) {
+    skipped = why;
+    return null;
+  }
+
+  List<CoLikerCandidate>? _stop() =>
+      _skip(rateLimited ? 'rate limited' : 'cancelled');
+
   /// One logical request with its retries. Null means "skip".
   Future<T?> _call<T>(Future<T> Function() request) async {
     attempted++;
@@ -259,11 +282,15 @@ class _Run {
 
   Future<List<CoLikerCandidate>?> execute() async {
     final likes = await _call(() => source.api.likesPage(limit: 50));
-    if (likes == null || rateLimited) return null;
+    if (likes == null) {
+      return _skip(rateLimited ? 'rate limited' : 'likes unavailable');
+    }
     final seeds = [
       for (final track in likes.tracks.take(CoLikersSource.seedCount)) track.id,
     ];
-    if (seeds.length < CoLikersSource.minSharedSeeds) return null;
+    if (seeds.length < CoLikersSource.minSharedSeeds) {
+      return _skip('fewer than ${CoLikersSource.minSharedSeeds} seeds');
+    }
     final seedSet = seeds.toSet();
     var likersSeen = 0;
     for (final seed in seeds) {
@@ -275,7 +302,7 @@ class _Run {
         source._likers[seed] = users;
         likersSeen++;
       }
-      if (isCancelled() || rateLimited) return null;
+      if (isCancelled() || rateLimited) return _stop();
     }
     final shared = <String, int>{};
     for (final seed in seeds) {
@@ -289,7 +316,7 @@ class _Run {
         if (entry.value >= CoLikersSource.minSharedSeeds) entry,
     ]..sort((a, b) => b.value.compareTo(a.value));
     final chosen = neighbors.take(CoLikersSource.maxNeighbors).toList();
-    if (chosen.isEmpty && likersSeen == 0) return null;
+    if (chosen.isEmpty && likersSeen == 0) return _skip('no likers read');
     var neighbourData = 0;
     for (final neighbor in chosen) {
       if (source._neighborLikes.containsKey(neighbor.key)) {
@@ -312,7 +339,7 @@ class _Run {
             ),
         ];
       }
-      if (isCancelled() || rateLimited) return null;
+      if (isCancelled() || rateLimited) return _stop();
     }
     if (source._neighborLikes.length > 600) {
       source._neighborLikes.removeWhere(
@@ -321,9 +348,13 @@ class _Run {
     }
     // Neighbours were found but none of their likes could be read: keep the
     // previous cache rather than replace it with an empty one.
-    if (chosen.isNotEmpty && neighbourData == 0) return null;
+    if (chosen.isNotEmpty && neighbourData == 0) {
+      return _skip('no neighbour likes read');
+    }
     // A patchy run would be cached for a day as if it were complete.
-    if (failed > attempted * CoLikersSource.maxFailedShare) return null;
+    if (failed > attempted * CoLikersSource.maxFailedShare) {
+      return _skip('$failed of $attempted calls failed');
+    }
     return _score(chosen, seedSet);
   }
 
