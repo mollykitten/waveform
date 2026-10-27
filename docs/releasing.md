@@ -73,7 +73,6 @@ bundles the committed file as is.
    ```bash
    flutter analyze
    flutter test
-   python3 -m unittest discover -s test -p worker_notifier_test.py
    ```
 
    the #56 baseline reported 356 flutter tests passing (10 optional image
