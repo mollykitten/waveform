@@ -40,8 +40,11 @@ keep the changelog's `unreleased` status until publication is ready.
 3. notarizes the `.app` with the api key via `tool/notarize.sh` (bounded
    wait, apple log on failure), staples it and runs
    `spctl --assess --type execute`.
-4. builds the dmg from the stapled app with `ditto`, signs it, notarizes it,
-   staples it and runs `spctl --assess --type open --context
+4. builds the styled dmg from the stapled app with `tool/make_dmg.sh`
+   (`ditto` copy + `dmgbuild` for background, window size and icon layout;
+   the background is `assets/brand/dmg-background*.png` from
+   `tool/brand/make_icons.py`), checks the staple inside it, signs it,
+   notarizes it, staples it and runs `spctl --assess --type open --context
    context:primary-signature`.
 5. the api key lives in `$RUNNER_TEMP` (written with `umask 077`) and is
    removed in an `if: always()` step.
