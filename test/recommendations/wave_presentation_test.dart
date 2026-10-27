@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -15,8 +14,6 @@ import 'package:waveform_app/core/api/providers.dart';
 import 'package:waveform_app/core/api/soundcloud_auth.dart';
 import 'package:waveform_app/core/audio/audio_engine.dart';
 import 'package:waveform_app/core/log/talker.dart';
-import 'package:waveform_app/core/recommendations/ai_config.dart';
-import 'package:waveform_app/core/recommendations/chatgpt_auth.dart';
 import 'package:waveform_app/core/recommendations/providers.dart';
 import 'package:waveform_app/features/recommendations/recommendations_screen.dart';
 import 'package:waveform_app/features/recommendations/widgets/wave_hero.dart';
@@ -26,50 +23,26 @@ import '../support/stub_liked_tracks.dart';
 import 'support.dart';
 import 'visual_test_fonts.dart';
 
-class NoChatGpt extends ChatGptAuth {
-  @override
-  Future<void> restore() async {}
-}
-
-class MemoryConfigStore extends AiConfigStore {
-  AiConfig config = const AiConfig();
-  Completer<void>? pending;
-  @override
-  Future<AiConfig> load() async => config;
-  @override
-  Future<void> save(AiConfig value) async {
-    if (pending != null) await pending!.future;
-    config = value;
-  }
-}
-
 void main() {
   setUpAll(installVisualTestFonts);
   late ProviderContainer container;
-  late ScriptedAi client;
   late FakeAudioEngine engine;
-  late MemoryConfigStore store;
 
-  setUp(() async {
-    client = ScriptedAi();
+  setUp(() {
     engine = FakeAudioEngine();
-    store = MemoryConfigStore();
     container = ProviderContainer(
       overrides: [
         authControllerProvider.overrideWithBuild(
-          (ref, notifier) => const SoundcloudAuth(clientId: 'test'),
+          (ref, notifier) =>
+              const SoundcloudAuth(clientId: 'test', userToken: 'test-token'),
         ),
-        aiConfigStoreProvider.overrideWithValue(store),
-        chatGptAuthProvider.overrideWithValue(NoChatGpt()),
-        aiClientProvider.overrideWithValue(client),
+        listeningIdentityProvider.overrideWith((ref) async => 'test-profile'),
         soundcloudApiProvider.overrideWithValue(TestSoundcloud()),
         audioEngineProvider.overrideWithValue(engine),
         likedTracksProvider.overrideWith(StubLikedTracks.new),
         talkerProvider.overrideWithValue(Talker()),
       ],
     );
-    container.listen(aiSettingsProvider, (_, _) {});
-    await Future<void>.delayed(const Duration(milliseconds: 20));
   });
 
   tearDown(() async {
@@ -106,8 +79,7 @@ void main() {
     await tester.pump();
   }
 
-  Future<void> captureWave(WidgetTester tester, Size size, bool tune) async {
-    await container.read(aiSettingsProvider.notifier).save(testConfig);
+  Future<void> captureWave(WidgetTester tester, Size size) async {
     const capture = ValueKey('wave-capture');
     await show(
       tester,
@@ -124,14 +96,6 @@ void main() {
     expect(heroSize.height, 400);
     expect(heroSize.width, lessThanOrEqualTo(880));
     expect(find.byType(TextField), findsNothing);
-    if (tune) {
-      await tester.tap(find.text('tune your wave'));
-      await tester.pumpAndSettle();
-      // Capture the real scroll position needed to expose the complete shelf.
-      await tester.ensureVisible(find.text('model connection'));
-      await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('wave-mood')), findsOneWidget);
-    }
     expect(tester.takeException(), isNull);
     final boundary = tester.renderObject<RenderRepaintBoundary>(
       find.byKey(capture),
@@ -145,7 +109,7 @@ void main() {
         'build/visual-review',
       ).create(recursive: true);
       await File(
-        '${folder.path}/wave-${tune ? 'tune-open' : 'idle'}-'
+        '${folder.path}/wave-idle-'
         '${size.width.toInt()}x${size.height.toInt()}.png',
       ).writeAsBytes(bytes!.buffer.asUint8List());
       image.dispose();
@@ -155,45 +119,12 @@ void main() {
 
   for (final size in [const Size(1280, 720), const Size(960, 640)]) {
     testWidgets(
-      'consent capture ${size.width.toInt()}x${size.height.toInt()}',
+      'wave capture ${size.width.toInt()}x${size.height.toInt()}',
       (tester) async {
-        await container.read(aiSettingsProvider.notifier).save(testConfig);
-        const capture = ValueKey('consent-capture');
-        await show(tester, size: size, captureKey: capture);
-        await tester.tap(find.byKey(const ValueKey('wave-primary')));
-        await tester.pumpAndSettle();
-        await tester.runAsync(() => GoogleFonts.pendingFonts());
-        await tester.pump();
-        expect(find.text('sent to ${testConfig.destination}'), findsOneWidget);
-        expect(find.text('allow and play').hitTestable(), findsOneWidget);
-        expect(client.payloads, isEmpty);
-        expect(tester.takeException(), isNull);
-        final boundary = tester.renderObject<RenderRepaintBoundary>(
-          find.byKey(capture),
-        );
-        await tester.runAsync(() async {
-          final image = await boundary.toImage();
-          final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-          await Directory('build/visual-review').create(recursive: true);
-          await File(
-            'build/visual-review/wave-consent-'
-            '${size.width.toInt()}x${size.height.toInt()}.png',
-          ).writeAsBytes(bytes!.buffer.asUint8List());
-          image.dispose();
-        });
-        await tester.tap(find.text('not now'));
-        await tester.pumpAndSettle();
-        expect(client.payloads, isEmpty);
-        await tester.pumpWidget(const SizedBox.shrink());
+        await captureWave(tester, size);
       },
       skip: !waveVisualCaptureEnabled,
     );
-    for (final tune in [false, true]) {
-      testWidgets('wave capture ${tune ? 'tune open' : 'idle'} '
-          '${size.width.toInt()}x${size.height.toInt()}', (tester) async {
-        await captureWave(tester, size, tune);
-      }, skip: !waveVisualCaptureEnabled);
-    }
   }
 
   testWidgets('hero pauses hidden and responds to reduced motion dynamically', (
@@ -215,7 +146,6 @@ void main() {
                 description: 'test wave',
                 actionLabel: 'play',
                 onPlay: () {},
-                onTune: () {},
               ),
             ),
           );

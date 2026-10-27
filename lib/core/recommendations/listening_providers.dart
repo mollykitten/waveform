@@ -45,7 +45,7 @@ final listeningPartitionProvider = FutureProvider<String?>((ref) async {
     }
     return stored ? null : 'anonymous';
   }
-  final identity = await ref.watch(aiListeningIdentityProvider.future);
+  final identity = await ref.watch(listeningIdentityProvider.future);
   if (!ref.mounted ||
       identity == 'anonymous' ||
       !validListeningIdentity(identity)) {
@@ -112,7 +112,7 @@ final listeningFeedbackProvider = Provider<void>((ref) {
           ref.read(authControllerProvider).userToken != auth.userToken) {
         return;
       }
-      ref.invalidate(aiListeningIdentityProvider);
+      ref.invalidate(listeningIdentityProvider);
     });
     retrySeconds = (retrySeconds * 2).clamp(1, 30);
   }, fireImmediately: true);

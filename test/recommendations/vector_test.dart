@@ -5,7 +5,6 @@ import 'dart:math' as math;
 
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:waveform_app/core/recommendations/ai_client.dart';
 import 'package:waveform_app/core/recommendations/listening_event.dart';
 import 'package:waveform_app/core/recommendations/listening_store.dart';
 import 'package:waveform_app/core/recommendations/models.dart';
@@ -504,7 +503,7 @@ void main() {
         identity: '1',
         excludedTrackIds: {},
         check: () {
-          if (cancelled) throw AiFailure.cancelled;
+          if (cancelled) throw WaveFailure.cancelled;
         },
       );
       while (api.relatedCalls.isEmpty) {
@@ -512,7 +511,7 @@ void main() {
       }
       cancelled = true;
       api.pending!.complete([realTrack('candidate')]);
-      await expectLater(future, throwsA(AiFailure.cancelled));
+      await expectLater(future, throwsA(WaveFailure.cancelled));
       expect(await store.read('1'), isEmpty);
       expect(await store.read('2'), isEmpty);
     },
@@ -532,10 +531,10 @@ void main() {
             'new': VectorProvenance({'seed': 1}, now),
           },
           check: () {
-            if (++calls >= 3) throw AiFailure.cancelled;
+            if (++calls >= 3) throw WaveFailure.cancelled;
           },
         ),
-        throwsA(AiFailure.cancelled),
+        throwsA(WaveFailure.cancelled),
       );
       expect((await store.read('1')).keys, ['old']);
       expect(
@@ -545,99 +544,43 @@ void main() {
     },
   );
 
-  test(
-    'empty mood uses real graph without model; mood still uses model',
-    () async {
-      api.neighborhoods['seed'] = [realTrack('local')];
-      final client = ScriptedAi();
-      final service = RecommendationService(
-        api: api,
-        client: client,
-        vectorEngine: engine,
-      );
-      Future<List<Recommendation>> generate(String mood) => service.generate(
-        config: testConfig.withConsent(true),
-        consent: AiConsent(
-          destination: testConfig.destination,
-          listening: true,
-        ),
-        apiKey: '',
-        mood: mood,
-        useListening: true,
-        cancelToken: CancelToken(),
-        listeningIdentity: '1',
-        currentTrack: realTrack('seed'),
-      );
-      final local = await generate('');
-      expect(local.first.track.id, 'local');
-      expect(client.payloads, isEmpty);
-      api.relatedCalls.clear();
-      final mood = await generate('quiet evening');
-      expect(mood.single.track.id, '2');
-      expect(client.payloads.length, 2);
-      expect(api.relatedCalls, isEmpty);
-      expect(client.payloads.join(), isNot(contains('session_id')));
-    },
-  );
+  test('the service ranks the real graph of the current track', () async {
+    api.neighborhoods['seed'] = [realTrack('local')];
+    final service = RecommendationService(api: api, vectorEngine: engine);
+    final local = await service.generate(
+      cancelToken: CancelToken(),
+      listeningIdentity: '1',
+      currentTrack: realTrack('seed'),
+    );
+    expect(local.first.track.id, 'local');
+  });
 
-  test(
-    'graph failure widens by genre search and never calls the model',
-    () async {
-      api.failRelated = true;
-      final client = ScriptedAi();
-      final result =
-          await RecommendationService(
-            api: api,
-            client: client,
-            vectorEngine: engine,
-          ).generate(
-            config: testConfig.withConsent(true),
-            consent: AiConsent(
-              destination: testConfig.destination,
-              listening: true,
-            ),
-            apiKey: '',
-            mood: '',
-            useListening: true,
-            cancelToken: CancelToken(),
-            listeningIdentity: '1',
-            currentTrack: realTrack('seed'),
-          );
-      expect(result.map((r) => r.track.id), containsAll(['1', '2']));
-      expect(api.relatedCalls.length, 6);
-      expect(api.relatedCalls.toSet().length, 6);
-      expect(api.searches, ['ambient']);
-      expect(client.payloads, isEmpty);
-    },
-  );
+  test('graph failure widens by genre search', () async {
+    api.failRelated = true;
+    final result = await RecommendationService(api: api, vectorEngine: engine)
+        .generate(
+          cancelToken: CancelToken(),
+          listeningIdentity: '1',
+          currentTrack: realTrack('seed'),
+        );
+    expect(result.map((r) => r.track.id), containsAll(['1', '2']));
+    expect(api.relatedCalls.length, 6);
+    expect(api.relatedCalls.toSet().length, 6);
+    expect(api.searches, ['ambient']);
+  });
 
-  test('an empty local pool fails visibly without calling the model', () async {
+  test('an empty local pool fails visibly', () async {
     api.failRelated = true;
     api.tracks = [];
-    final client = ScriptedAi();
-    final service = RecommendationService(
-      api: api,
-      client: client,
-      vectorEngine: engine,
-    );
-    expect(
+    final service = RecommendationService(api: api, vectorEngine: engine);
+    await expectLater(
       service.generate(
-        config: testConfig.withConsent(true),
-        consent: AiConsent(
-          destination: testConfig.destination,
-          listening: true,
-        ),
-        apiKey: '',
-        mood: '',
-        useListening: true,
         cancelToken: CancelToken(),
         listeningIdentity: '1',
         currentTrack: realTrack('seed'),
       ),
-      throwsA(AiFailure.noTracks),
+      throwsA(WaveFailure.noTracks),
     );
-    await pumpEventQueueSafe();
-    expect(client.payloads, isEmpty);
   });
 
   group('seen memory and pool stages', () {
@@ -803,8 +746,8 @@ void main() {
       );
     });
 
-    test('mood mode drops heard and liked tracks after a restart', () async {
-      api.tracks = [
+    test('the wave drops heard and liked tracks after a restart', () async {
+      api.neighborhoods['seed'] = [
         for (var i = 0; i < 4; i++) realTrack('m$i', artist: 'm$i'),
       ];
       await facts.append(event('m0', session: 'a'));
@@ -816,36 +759,17 @@ void main() {
         seen: SeenStore(directory: () async => directory),
         now: () => now,
       );
-      final client = ScriptedAi()
-        ..replies.clear()
-        ..replies.addAll([
-          '{"queries":["ambient"]}',
-          '{"recommendations":[{"id":"m2","reason":"fit"}]}',
-        ]);
       final result =
           await RecommendationService(
             api: api,
-            client: client,
             vectorEngine: restarted,
           ).generate(
-            config: testConfig.withConsent(true),
-            consent: AiConsent(
-              destination: testConfig.destination,
-              listening: true,
-            ),
-            apiKey: '',
-            mood: 'quiet',
-            useListening: true,
             cancelToken: CancelToken(),
             listeningIdentity: '1',
+            currentTrack: realTrack('seed'),
             localExcludedTrackIds: {'m3'},
           );
-      expect(result.single.track.id, 'm2');
-      final sent = client.payloads.last;
-      for (final hidden in ['m0', 'm1', 'm3']) {
-        expect(sent, isNot(contains('"id":"$hidden"')));
-      }
-      expect(client.payloads.first, isNot(contains('m0')));
+      expect(result.map((r) => r.track.id), ['m2']);
     });
 
     group('dislikes', () {
@@ -940,42 +864,23 @@ void main() {
         expect(ids(await two(engine)), ['cB', 'cA']);
       });
 
-      test(
-        'mood mode drops disliked tracks and sends no dislike data',
-        () async {
-          api.tracks = [
-            for (var i = 0; i < 3; i++) realTrack('m$i', artist: 'bad'),
-          ];
-          await dislike('m0', artist: 'bad');
-          final client = ScriptedAi()
-            ..replies.clear()
-            ..replies.addAll([
-              '{"queries":["ambient"]}',
-              '{"recommendations":[{"id":"m1","reason":"fit"}]}',
-            ]);
-          final result =
-              await RecommendationService(
-                api: api,
-                client: client,
-                vectorEngine: engine,
-              ).generate(
-                config: testConfig.withConsent(true),
-                consent: AiConsent(
-                  destination: testConfig.destination,
-                  listening: true,
-                ),
-                apiKey: '',
-                mood: 'quiet',
-                useListening: true,
-                cancelToken: CancelToken(),
-                listeningIdentity: '1',
-              );
-          expect(result.single.track.id, 'm1');
-          final sent = client.payloads.join();
-          expect(sent, isNot(contains('"id":"m0"')));
-          expect(sent, isNot(contains('dislike')));
-        },
-      );
+      test('the wave drops disliked tracks', () async {
+        api.neighborhoods['seed'] = [
+          for (var i = 0; i < 3; i++) realTrack('m$i', artist: 'bad'),
+        ];
+        await dislike('m0', artist: 'bad');
+        final result =
+            await RecommendationService(
+              api: api,
+              vectorEngine: engine,
+            ).generate(
+              cancelToken: CancelToken(),
+              listeningIdentity: '1',
+              currentTrack: realTrack('seed'),
+            );
+        expect(result.map((r) => r.track.id), isNot(contains('m0')));
+        expect(result, isNotEmpty);
+      });
 
       test(
         'the dislike transition is neutral: no skip, no play, no double count',

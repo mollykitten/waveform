@@ -12,7 +12,6 @@ class WaveHero extends StatefulWidget {
     required this.description,
     required this.actionLabel,
     required this.onPlay,
-    required this.onTune,
     this.busy = false,
     this.enabled = true,
     this.active = true,
@@ -21,7 +20,6 @@ class WaveHero extends StatefulWidget {
   final String description;
   final String actionLabel;
   final VoidCallback onPlay;
-  final VoidCallback onTune;
   final bool busy;
   final bool enabled;
   final bool active;
@@ -146,74 +144,9 @@ class _WaveHeroState extends State<WaveHero>
                 ),
               ),
             ),
-            const SizedBox(height: 20),
-            WaveAction(
-              label: 'tune your wave',
-              icon: Icons.tune,
-              onTap: widget.onTune,
-            ),
           ],
         ),
       ],
-    ),
-  );
-}
-
-/// Compact keyboard-accessible control shared by the wave and its tuning shelf.
-class WaveAction extends StatelessWidget {
-  const WaveAction({
-    super.key,
-    required this.label,
-    required this.onTap,
-    this.icon,
-    this.selected = false,
-    this.enabled = true,
-  });
-  final String label;
-  final VoidCallback onTap;
-  final IconData? icon;
-  final bool selected;
-  final bool enabled;
-
-  @override
-  Widget build(BuildContext context) => Semantics(
-    selected: selected,
-    child: Pressable(
-      enabled: enabled,
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
-        decoration: BoxDecoration(
-          color: selected ? AppColors.surface2 : AppColors.surface,
-          borderRadius: BorderRadius.circular(3),
-          border: Border.all(
-            width: .5,
-            color: selected ? AppColors.acid : AppColors.border,
-          ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (icon != null) ...[
-              Icon(
-                icon,
-                size: 14,
-                color: enabled
-                    ? (selected ? AppColors.acid : AppColors.textMid)
-                    : AppColors.textLow,
-              ),
-              const SizedBox(width: 7),
-            ],
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 12,
-                color: enabled ? AppColors.textHi : AppColors.textLow,
-              ),
-            ),
-          ],
-        ),
-      ),
     ),
   );
 }

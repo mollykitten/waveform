@@ -3,8 +3,6 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api/soundcloud_auth.dart';
-import '../../core/recommendations/ai_client.dart';
-import '../../core/recommendations/ai_config.dart';
 import '../../core/recommendations/listening_event.dart';
 import '../../core/recommendations/models.dart';
 import '../../core/recommendations/providers.dart';
@@ -56,16 +54,11 @@ class WaveController extends Notifier<WaveState> {
   int _waveId = 0;
   bool _disposed = false;
   bool _mutatingQueue = false;
-  String _mood = '';
   String? _lastRefillTrack;
   int? _startingQueueVersion;
 
   @override
   WaveState build() {
-    ref.listen(
-      aiSettingsProvider.select((s) => s.revision),
-      (_, _) => cancel(),
-    );
     ref.listen(authControllerProvider, (_, _) => cancel());
     ref.listen(playerControllerProvider, (previous, next) {
       if (_mutatingQueue) return;
@@ -108,9 +101,8 @@ class WaveController extends Notifier<WaveState> {
           .upcomingTracks
           .every((track) => _ids.contains(track.id));
 
-  Future<void> start(String mood) async {
+  Future<void> start() async {
     if (state.discovering || ref.read(recommendationsProvider).busy) return;
-    _mood = mood;
     _waveId++;
     _ids.clear();
     _startingQueueVersion = ref.read(playerControllerProvider).queueVersion;
@@ -118,20 +110,14 @@ class WaveController extends Notifier<WaveState> {
   }
 
   Future<void> _generate({required bool append}) async {
-    final settings = ref.read(aiSettingsProvider);
-    if (!settings.ready ||
-        !settings.config.isValid ||
-        !settings.config.listeningConsent ||
-        (settings.config.backend == AiBackend.chatGpt &&
-            !settings.chatGptConnected)) {
+    if (!ref.read(authControllerProvider).isAuthenticated) {
       cancel();
       return;
     }
     final epoch = ++_epoch;
-    final revision = settings.revision;
     final trigger = ref.read(playerControllerProvider).track?.id;
     state = WaveState(active: append, discovering: true);
-    AiFailure? failure;
+    WaveFailure? failure;
     for (var attempt = 0; attempt <= maxRetries; attempt++) {
       if (attempt > 0) {
         await _pause(ref.read(waveRetryDelayProvider));
@@ -141,7 +127,7 @@ class WaveController extends Notifier<WaveState> {
       if (batch.length < refillThreshold) {
         await _search(append: append);
         if (_disposed || epoch != _epoch) return;
-        if (_stale(revision, append)) {
+        if (_stale(append)) {
           cancel();
           return;
         }
@@ -172,7 +158,7 @@ class WaveController extends Notifier<WaveState> {
     if (failure == null) {
       ref
           .read(recommendationsProvider.notifier)
-          .reportFailure(AiFailure.noTracks);
+          .reportFailure(WaveFailure.noTracks);
     }
   }
 
@@ -191,41 +177,23 @@ class WaveController extends Notifier<WaveState> {
     if (wait != null && !wait.isCompleted) wait.complete();
   }
 
-  Future<void> _search({required bool append}) {
-    final settings = ref.read(aiSettingsProvider);
-    final authed = ref.read(authControllerProvider).isAuthenticated;
-    final current = ref.read(playerControllerProvider).track;
-    final mood = _mood.trim().isEmpty && !authed && current == null
-        ? 'discover music on SoundCloud'
-        : _mood;
-    return ref
-        .read(recommendationsProvider.notifier)
-        .generate(
-          consent: AiConsent(
-            destination: settings.config.destination,
-            listening: authed,
-          ),
-          mood: mood,
-          useListening: authed,
-          currentTrack: current,
-          append: append,
-          limit: searchLimit,
-        );
-  }
+  Future<void> _search({required bool append}) => ref
+      .read(recommendationsProvider.notifier)
+      .generate(
+        currentTrack: ref.read(playerControllerProvider).track,
+        append: append,
+        limit: searchLimit,
+      );
 
-  bool _stale(int revision, bool append) =>
-      revision != ref.read(aiSettingsProvider).revision ||
+  bool _stale(bool append) =>
       (append && !_ownsQueue(ref.read(playerControllerProvider))) ||
       (!append &&
           ref.read(playerControllerProvider).queueVersion !=
               _startingQueueVersion);
 
   /// Errors a new attempt could plausibly fix; the rest need the user.
-  bool _retryable(AiFailure failure) => switch (failure) {
-    AiFailure.noTracks ||
-    AiFailure.network ||
-    AiFailure.source ||
-    AiFailure.timeout => true,
+  bool _retryable(WaveFailure failure) => switch (failure) {
+    WaveFailure.noTracks || WaveFailure.network || WaveFailure.source => true,
     _ => false,
   };
 
@@ -296,10 +264,10 @@ class WaveController extends Notifier<WaveState> {
   /// auth token is captured before the first await.
   Future<String?> _stableIdentity() async {
     final token = ref.read(authControllerProvider).userToken;
-    final provider = ref.read(aiListeningIdentityProvider);
+    final provider = ref.read(listeningIdentityProvider);
     final identity =
         provider.asData?.value ??
-        await ref.read(aiListeningIdentityProvider.future);
+        await ref.read(listeningIdentityProvider.future);
     if (_disposed ||
         ref.read(authControllerProvider).userToken != token ||
         identity == 'anonymous') {
@@ -397,7 +365,7 @@ final waveRetryDelayProvider = Provider<Duration>(
 /// account exists to remember a dislike under.
 final currentTrackInWaveProvider = Provider<bool>((ref) {
   ref.watch(waveControllerProvider);
-  final identity = ref.watch(aiListeningIdentityProvider).asData?.value;
+  final identity = ref.watch(listeningIdentityProvider).asData?.value;
   if (identity == null || identity == 'anonymous') return false;
   final id = ref.watch(playerControllerProvider.select((p) => p.track?.id));
   return id != null && ref.read(waveControllerProvider.notifier).ownsTrack(id);

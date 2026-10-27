@@ -1,9 +1,4 @@
-import 'dart:async';
-
-import 'package:dio/dio.dart';
 import 'package:waveform_app/core/api/soundcloud_api.dart';
-import 'package:waveform_app/core/recommendations/ai_client.dart';
-import 'package:waveform_app/core/recommendations/ai_config.dart';
 import 'package:waveform_app/shared/models/track.dart';
 
 Track realTrack(String id, {bool blocked = false, String artist = 'artist'}) =>
@@ -66,42 +61,3 @@ class TestSoundcloud implements SoundcloudApi {
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
-
-class ScriptedAi implements AiClient {
-  final payloads = <String>[];
-  final systems = <String>[];
-  final replies = <String>[
-    '{"queries":["ambient","dream pop"]}',
-    '{"recommendations":[{"id":"2","reason":"a possible fit"}]}',
-  ];
-  Completer<String>? pending;
-  AiFailureForTest? failure;
-
-  @override
-  Future<String> complete({
-    required AiConfig config,
-    required AiConsent consent,
-    required String apiKey,
-    required String system,
-    required String data,
-    required CancelToken cancelToken,
-  }) async {
-    payloads.add(data);
-    systems.add(system);
-    if (failure != null) throw StateError('PRIVATE KEY $apiKey');
-    if (pending != null) return pending!.future;
-    return replies.removeAt(0);
-  }
-}
-
-enum AiFailureForTest { transport }
-
-const testConfig = AiConfig(
-  endpoint: 'http://localhost:12345/v1',
-  model: 'test-model',
-);
-
-const testConsent = AiConsent(
-  destination: 'http://localhost:12345/v1/chat/completions',
-  listening: false,
-);
