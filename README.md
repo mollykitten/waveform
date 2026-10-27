@@ -22,9 +22,9 @@ web soundcloud is fine, tabs are not
 
 desktop clients for it either don't exist or they're electron wrapped around the website. so i made a real native one, closer to canonical soundcloud than other unofficial clients but darker and quieter, and you can run it for hours without touching the trackpad
 
-> **v0.4.0:** go+ tracks play on macos
+> **v0.4.0:** drm-protected tracks play on macos
 >
-> a small go core decrypts widevine streams over `dart:ffi`. the macos release bundles a device profile; from source you bring your own (see [limitations](docs/limitations.md)). also a new icon, reduced-motion fixes, and web3 bits are gone for good
+> tracks uploaded by distributors and labels that come with drm now play: a small go core decrypts widevine streams over `dart:ffi`. go+ tracks still need a go+ subscription, nothing changes there. the macos release bundles a device profile; from source you bring your own (see [limitations](docs/limitations.md)). also a new icon, reduced-motion fixes, and web3 bits are gone for good
 >
 > daily-driver loop works on macos, windows and linux build too but i test them less. the api is unofficial so rough edges stay. everything else in [`CHANGELOG.md`](CHANGELOG.md)
 

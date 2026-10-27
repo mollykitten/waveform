@@ -19,6 +19,7 @@ class Track {
     this.drmStreamCandidates = const [],
     this.permalinkUrl,
     this.blocked = false,
+    this.goPlus = false,
     this.genre = '',
     this.postedAt = '3 days ago',
     this.description = '',
@@ -77,6 +78,10 @@ class Track {
   /// The API blocks playback or only offers preview sources.
   final bool blocked;
 
+  /// Needs a GO+ subscription (preview-only or subscription-tier track).
+  /// Distributor DRM tracks that play for free are not GO+.
+  final bool goPlus;
+
   Duration get duration => Duration(milliseconds: durationMs);
 
   Track copyWith({List<double>? waveform}) => Track(
@@ -95,6 +100,7 @@ class Track {
     drmStreamCandidates: drmStreamCandidates,
     permalinkUrl: permalinkUrl,
     blocked: blocked,
+    goPlus: goPlus,
     genre: genre,
     postedAt: postedAt,
     description: description,

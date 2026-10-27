@@ -100,6 +100,23 @@ void main() {
       expect(dto.user.verified, true);
     });
 
+    test('regular ALLOW track is not GO+', () {
+      final dto = TrackDto.fromJson(
+        jsonDecode(_trackJson) as Map<String, dynamic>,
+      );
+      expect(dto.policy, 'ALLOW');
+      expect(dto.isGoPlus, isFalse);
+      expect(dto.toDomain().goPlus, isFalse);
+    });
+
+    test('monetization_model SUB_HIGH_TIER is parsed and GO+', () {
+      final json = jsonDecode(_trackJson) as Map<String, dynamic>
+        ..['monetization_model'] = 'SUB_HIGH_TIER';
+      final dto = TrackDto.fromJson(json);
+      expect(dto.monetizationModel, 'SUB_HIGH_TIER');
+      expect(dto.isGoPlus, isTrue);
+    });
+
     test('parses transcodings', () {
       expect(dto.transcodings.length, 2);
       expect(dto.transcodings.any((t) => t.isHls), true);

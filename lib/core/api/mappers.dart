@@ -60,6 +60,7 @@ extension TrackDtoMapper on TrackDto {
     // HLS-кандидаты сначала, progressive — как фолбэк (часть HLS-ссылок 404).
     // Зашифрованные (DRM) транскодинги исключаем — just_audio их не играет.
     blocked: isBlocked,
+    goPlus: isGoPlus,
     streamCandidates: isBlocked
         ? const []
         : [
