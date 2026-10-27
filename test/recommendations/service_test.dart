@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:waveform_app/core/recommendations/co_likers_source.dart';
 import 'package:waveform_app/core/recommendations/co_likers_store.dart';
+import 'package:waveform_app/core/recommendations/listening_event.dart';
 import 'package:waveform_app/core/recommendations/listening_store.dart';
 import 'package:waveform_app/core/recommendations/models.dart';
 import 'package:waveform_app/core/recommendations/recommendation_service.dart';
@@ -248,6 +249,43 @@ void main() {
       await batch();
       await batch();
       expect(api.streamCalls, 1);
+    });
+
+    test('obscure tracks: demoted a few places, never dropped', () {
+      Recommendation rec(String id, {int plays = 1000}) => Recommendation(
+        realTrack(id, plays: plays, likes: 0),
+        'r',
+        source: WaveSource.stream,
+      );
+      final ids = RecommendationService.demoteObscure([
+        rec('1', plays: 15),
+        rec('2'),
+        rec('3', plays: 40),
+        rec('4'),
+      ]).map((r) => r.track.id);
+      expect(ids, ['2', '4', '1', '3']);
+    });
+
+    test('obscure penalty grows with skipped obscure tracks only', () {
+      ListeningEvent event(String id, int heardMs, bool obscure) =>
+          ListeningEvent(
+            sessionId: 's$id',
+            identity: 'anonymous',
+            trackId: id,
+            durationMs: 200000,
+            heardMs: heardMs,
+            finalPositionMs: heardMs,
+            seekCount: 0,
+            startedAt: DateTime.utc(2026),
+            endedAt: DateTime.utc(2026),
+            cause: ListeningTransitionCause.manualNext,
+            obscure: obscure,
+          );
+      expect(VectorEngine.obscurePenalty(const []), closeTo(.85, 1e-9));
+      final skips = [for (var i = 0; i < 6; i++) event('$i', 8000, true)];
+      expect(VectorEngine.obscurePenalty(skips), lessThan(.55));
+      final ordinary = [for (var i = 0; i < 6; i++) event('$i', 8000, false)];
+      expect(VectorEngine.obscurePenalty(ordinary), closeTo(.85, 1e-9));
     });
 
     test('playability: only a playable, unblocked track is eligible', () {

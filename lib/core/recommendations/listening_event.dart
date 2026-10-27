@@ -38,6 +38,7 @@ class ListeningEvent {
     required this.endedAt,
     required this.cause,
     this.source,
+    this.obscure = false,
   });
 
   final String sessionId;
@@ -54,6 +55,10 @@ class ListeningEvent {
   /// The wave source that supplied the track; null outside my wave and for
   /// facts written before sources were recorded.
   final WaveSource? source;
+
+  /// The track had almost no audience when it played (see
+  /// `VectorEngine.isObscure`); lets skips of such tracks teach the ranking.
+  final bool obscure;
 
   /// A conservative, replaceable interpretation; the persisted facts are primary.
   ListeningEvidence get evidence {
@@ -87,6 +92,7 @@ class ListeningEvent {
     'ended_at': endedAt.toUtc().toIso8601String(),
     'cause': cause.name,
     if (source != null) 'source': source!.name,
+    if (obscure) 'obscure': true,
   };
 
   factory ListeningEvent.fromJson(Map<String, dynamic> json) {
@@ -102,6 +108,7 @@ class ListeningEvent {
       endedAt: DateTime.parse(json['ended_at'] as String),
       cause: ListeningTransitionCause.values.byName(json['cause'] as String),
       source: WaveSource.tryParse(json['source']),
+      obscure: json['obscure'] == true,
     );
     if (!event.isValid) throw const FormatException('invalid listening event');
     return event;

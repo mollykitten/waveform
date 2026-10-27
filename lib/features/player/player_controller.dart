@@ -14,6 +14,7 @@ import '../../core/log/talker.dart';
 import '../../core/recommendations/listening_event.dart';
 import '../../core/recommendations/listening_providers.dart';
 import '../../core/recommendations/listening_tracker.dart';
+import '../../core/recommendations/vector_engine.dart';
 import '../../core/recommendations/wave_sources.dart';
 import '../../shared/models/track.dart';
 
@@ -902,6 +903,7 @@ class PlayerController extends Notifier<PlayerState> {
     durationMs: track.durationMs,
     positionMs: positionMs,
     source: ref.read(waveSourcesProvider)[track.id],
+    obscure: VectorEngine.isObscure(track),
   );
 
   void _restartListening(ListeningTransitionCause reason) {
