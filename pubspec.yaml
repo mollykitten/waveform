@@ -35,7 +35,7 @@ dependencies:
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
   flutter_riverpod: ^3.3.2
-  go_router: ^17.3.0
+  go_router: ^18.1.1
   google_fonts: ^8.1.0
   cached_network_image: ^3.4.1
   flutter_cache_manager: ^3.4.1
