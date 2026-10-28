@@ -26,6 +26,53 @@ keep the changelog's `unreleased` status until publication is ready.
    the binary; keeping them out of git does not make a client binary a secret
    store. never commit credential values.
 
+## update signing key (sparkle / winsparkle)
+
+macos (sparkle) and windows (winsparkle) verify updates with one ed25519 key
+pair. the public half is committed; the private half is only a github secret.
+
+1. download the sparkle release matching the pod (`Sparkle-2.9.6.tar.xz` from
+   github.com/sparkle-project/Sparkle/releases), unpack it somewhere outside
+   the repo and run `bin/generate_keys`. it stores the private key in your
+   login keychain and prints the public key.
+2. put the public key into `macos/Runner/Info.plist` (`SUPublicEDKey`) and
+   `windows/runner/Runner.rc` (`EdDSAPub EDDSA "…"`), replacing
+   `REPLACE_WITH_SPARKLE_PUBLIC_ED_KEY`. tag builds refuse to run while the
+   placeholder is still there.
+3. export the private key with `bin/generate_keys -x sparkle_private.key`,
+   store the file's contents as the github secret **`SPARKLE_ED_PRIVATE_KEY`**
+   and delete the file. never commit it, paste it in a pr or keep a copy in
+   the repo. losing it means shipping a new public key in a manual release:
+   existing installs cannot verify updates signed by another key.
+
+## updates: how they reach users
+
+the `appcast` job runs after the dmg is notarized and stapled and after the
+windows installer is built. `tool/appcast.py` signs the final bytes with the
+private key and writes the feeds, which the publish job attaches to the
+release next to the installers:
+
+- `appcast-macos.xml` (the dmg; `sparkle:version` = build number from
+  `version: x.y.z+N`, `shortVersionString` = `x.y.z`). the app reads it from
+  `SUFeedURL`:
+  `https://github.com/mollykitten/waveform/releases/latest/download/appcast-macos.xml`.
+- `appcast-windows.xml` (the `-setup.exe`). winsparkle compares the exe's
+  `ProductVersion`, which is the whole pubspec version, so here
+  `sparkle:version` is `x.y.z+N` verbatim. the setup is run with `/SILENT`.
+- linux: no feed. the app asks the github releases api for the latest tag. an
+  appimage started with `appimageupdatetool` in `PATH` updates in place
+  (delta via the embedded `gh-releases-zsync` info and the published
+  `.zsync`); everything else shows "vX available" and opens the release page.
+
+`releases/latest` skips prereleases and drafts, so a `-rc` tag never reaches
+users through the feeds. a dry run (`workflow_dispatch`) signs with a
+throwaway key, so the whole path runs without the secret.
+
+checking an update locally (macos): build a release app, serve an appcast on
+`localhost` signed with a scratch key pair made in a temp directory, point
+`SUFeedURL`/`SUPublicEDKey` of that scratch build at it, give the feed a
+higher build number and run "check for updates" in settings → about.
+
 ## what the macos job does
 
 1. writes the widevine device profile from the `WIDEVINE_DEVICE_WVD_BASE64`
@@ -38,7 +85,13 @@ keep the changelog's `unreleased` status until publication is ready.
 2. signs inside out, without `--deep`: every nested bundle (`.framework`, `.app`,
    `.xpc`, `.appex`) and every mach-o except the main executable, deepest path
    first (hardened runtime, timestamp), then the `.app` with
-   `macos/Runner/Release.entitlements`. prints the effective entitlements.
+   `macos/Runner/Release.entitlements`. sparkle's helpers (`Autoupdate`,
+   `Updater.app`, `Installer.xpc`, `Downloader.xpc`) are covered by that loop
+   and verified afterwards; `Downloader.xpc` keeps its own entitlements
+   (`--preserve-metadata=entitlements`). the sandbox mach-lookup names
+   `$(PRODUCT_BUNDLE_IDENTIFIER)-spks`/`-spki` are resolved to the real bundle
+   id before signing, because `codesign` does not expand build settings.
+   prints the effective entitlements.
 3. notarizes the `.app` with the api key via `tool/notarize.sh` (bounded
    wait, apple log on failure), staples it and runs
    `spctl --assess --type execute`.
