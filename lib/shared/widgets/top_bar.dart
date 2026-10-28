@@ -15,6 +15,7 @@ import '../../features/queue/queue_visibility.dart';
 import 'cover_art.dart';
 import 'pressable.dart';
 import 'wave_logo.dart';
+import 'window_controls.dart';
 
 /// Верхняя панель оболочки: лого, навигация Home/Feed/Library, поиск,
 /// аккаунт (логин/логаут). Активный пункт — по маршруту.
@@ -37,9 +38,15 @@ class TopBar extends ConsumerWidget {
     // на macOS разворачивал окно (zoom), а сама draggable-зона была слишком
     // большой. На Windows/Linux это единственный способ двигать окно
     // (titleBarStyle: hidden).
-    return Container(
+    final controls = needsWindowControls;
+    final bar = Container(
       height: AppTheme.topBarHeight,
-      padding: const EdgeInsets.fromLTRB(leftPad, topPad, 16, 0),
+      padding: EdgeInsets.fromLTRB(
+        leftPad,
+        topPad,
+        controls ? 16 + windowControlsWidth : 16,
+        0,
+      ),
       decoration: BoxDecoration(
         color: AppColors.surface.withValues(alpha: 0.72),
         border: const Border(bottom: AppTheme.borderSideStatic),
@@ -125,6 +132,14 @@ class TopBar extends ConsumerWidget {
           const _Account(),
         ],
       ),
+    );
+    if (!controls) return bar;
+    // Кнопки окна — в правом верхнем углу, в зоне над контентом бара.
+    return Stack(
+      children: [
+        bar,
+        const Positioned(top: 0, right: 0, child: WindowControls()),
+      ],
     );
   }
 }
