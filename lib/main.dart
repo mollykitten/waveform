@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:audio_service/audio_service.dart';
@@ -11,6 +12,7 @@ import 'package:window_manager/window_manager.dart';
 import 'app/app.dart';
 import 'core/audio/waveform_audio_handler.dart';
 import 'core/log/talker.dart';
+import 'core/update/update_controller.dart';
 import 'features/onboarding/onboarding_gate.dart';
 
 Future<void> main(List<String> args) async {
@@ -80,4 +82,8 @@ Future<void> main(List<String> args) async {
   runApp(
     UncontrolledProviderScope(container: container, child: const WaveformApp()),
   );
+
+  // Раз в сутки, не дожидаясь онбординга и AppShell; в тестах и под MOCK —
+  // no-op.
+  unawaited(container.read(updateControllerProvider.notifier).autoCheck());
 }

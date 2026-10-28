@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:io';
 import 'dart:ui';
 
@@ -16,7 +15,6 @@ import '../core/deeplinks/deep_links.dart';
 import '../core/lastfm/scrobbler.dart';
 import '../core/log/talker.dart';
 import '../core/recommendations/co_likers_job.dart';
-import '../core/update/update_controller.dart';
 import '../core/recommendations/listening_providers.dart';
 import '../features/omnibox/omnibox_dropdown.dart';
 import '../features/omnibox/omnibox_providers.dart';
@@ -68,11 +66,6 @@ class _AppShellState extends ConsumerState<AppShell> {
   void initState() {
     super.initState();
     FocusManager.instance.addListener(_onFocusChange);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        unawaited(ref.read(updateControllerProvider.notifier).autoCheck());
-      }
-    });
   }
 
   void _onFocusChange() {

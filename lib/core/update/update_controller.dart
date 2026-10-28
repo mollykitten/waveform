@@ -35,7 +35,10 @@ final updateBackendProvider = Provider<UpdateBackend>((ref) {
       Platform.environment.containsKey('FLUTTER_TEST')) {
     return const NoopUpdateBackend();
   }
-  if (Platform.isMacOS || Platform.isWindows) return SparkleUpdateBackend();
+  if (Platform.isMacOS || Platform.isWindows) {
+    final talker = ref.watch(talkerProvider);
+    return SparkleUpdateBackend(log: (m) => talker.info('update: $m'));
+  }
   if (Platform.isLinux) return GithubUpdateBackend();
   return const NoopUpdateBackend();
 });

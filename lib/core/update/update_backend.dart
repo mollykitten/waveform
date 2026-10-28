@@ -36,7 +36,17 @@ class NoopUpdateBackend implements UpdateBackend {
 
 /// macOS (Sparkle) и Windows (WinSparkle) через `auto_updater`. Фид на macOS
 /// задан в Info.plist (`SUFeedURL`), на Windows — тут.
-class SparkleUpdateBackend implements UpdateBackend {
+class SparkleUpdateBackend with UpdaterListener implements UpdateBackend {
+  SparkleUpdateBackend({this.log});
+
+  /// Пишет события апдейтера в лог приложения (Sparkle сам глотает ошибки
+  /// старта).
+  final void Function(String message)? log;
+
+  /// Подмена фида на время локальной проверки:
+  /// `--dart-define=UPDATE_FEED_URL=http://127.0.0.1:8765/appcast-macos.xml`.
+  static const _feedOverride = String.fromEnvironment('UPDATE_FEED_URL');
+
   static const _feedBase =
       'https://github.com/mollykitten/waveform/releases/latest/download/';
   static const windowsFeedUrl = '${_feedBase}appcast-windows.xml';
@@ -46,13 +56,34 @@ class SparkleUpdateBackend implements UpdateBackend {
 
   Future<void> _init() async {
     if (_ready) return;
+    autoUpdater.addListener(this);
     await autoUpdater.setFeedURL(
-      Platform.isWindows ? windowsFeedUrl : macosFeedUrl,
+      _feedOverride.isNotEmpty
+          ? _feedOverride
+          : (Platform.isWindows ? windowsFeedUrl : macosFeedUrl),
     );
     // собственный суточный гейт живёт в UpdateController
     await autoUpdater.setScheduledCheckInterval(0);
     _ready = true;
   }
+
+  @override
+  void onUpdaterError(UpdaterError? error) => log?.call('error: $error');
+  @override
+  void onUpdaterCheckingForUpdate(Appcast? appcast) =>
+      log?.call('checking for update');
+  @override
+  void onUpdaterUpdateAvailable(AppcastItem? appcastItem) =>
+      log?.call('update available: ${appcastItem?.displayVersionString}');
+  @override
+  void onUpdaterUpdateNotAvailable(UpdaterError? error) =>
+      log?.call('no update available');
+  @override
+  void onUpdaterUpdateDownloaded(AppcastItem? appcastItem) =>
+      log?.call('update downloaded');
+  @override
+  void onUpdaterBeforeQuitForUpdate(AppcastItem? appcastItem) =>
+      log?.call('quitting to install the update');
 
   @override
   Future<UpdateOutcome> checkInBackground() async {
