@@ -264,6 +264,7 @@ jobs:
 
       - name: Check tag matches pubspec and kAppVersion
         if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
         run: tool/check_version.sh "$GITHUB_REF_NAME"
 
       - name: Setup Flutter

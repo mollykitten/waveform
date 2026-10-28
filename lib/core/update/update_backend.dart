@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:auto_updater/auto_updater.dart';
@@ -162,7 +163,14 @@ class GithubUpdateBackend implements UpdateBackend {
   Future<bool> installAvailable() async {
     final appImage = _env['APPIMAGE'];
     if (appImage != null && appImage.isNotEmpty && _hasAppImageUpdateTool()) {
-      await run('appimageupdatetool', [appImage]);
+      final process = await run('appimageupdatetool', [
+        '--overwrite',
+        appImage,
+      ]);
+      // выводы надо вычитывать, иначе долгая загрузка забьёт пайп и встанет
+      unawaited(process.stdout.drain<void>());
+      unawaited(process.stderr.drain<void>());
+      unawaited(process.exitCode);
       return true;
     }
     await open(kReleasesPageUrl);

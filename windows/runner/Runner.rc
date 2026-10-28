@@ -113,7 +113,7 @@ END
 // Same key pair as macOS (see docs/releasing.md). Placeholder until the
 // owner generates the key; release.yml refuses to tag-build with it.
 //
-EdDSAPub EDDSA "REPLACE_WITH_SPARKLE_PUBLIC_ED_KEY"
+EdDSAPub EDDSA {"REPLACE_WITH_SPARKLE_PUBLIC_ED_KEY"}
 /////////////////////////////////////////////////////////////////////////////
 
 
