@@ -408,7 +408,7 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y \
             clang cmake ninja-build pkg-config libgtk-3-dev \
-            liblzma-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev
+            liblzma-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev zsync
 
       - name: Install pub dependencies
         run: flutter pub get
@@ -442,11 +442,24 @@ jobs:
           fi
           ls -lh "$TAR"
 
+      - name: Package AppImage (+ zsync)
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: tool/make_appimage.sh build/linux/x64/release/bundle "$REF_NAME"
+
       - name: Upload Linux artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: linux-tar
           path: waveform-linux-${{ github.ref_name }}.tar.gz
+
+      - name: Upload Linux AppImage
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: linux-appimage
+          path: |
+            waveform-${{ github.ref_name }}-x86_64.AppImage
+            waveform-${{ github.ref_name }}-x86_64.AppImage.zsync
 
   # ── Appcasts: sign the final installers with the sparkle ed25519 key ──
   # Runs after the macOS DMG is notarized and stapled (the signed bytes must
@@ -555,7 +568,8 @@ jobs:
         run: |
           mkdir -p release
           find dist -type f \( -name '*.dmg' -o -name '*.zip' -o -name '*.tar.gz' \
-          -o -name '*.exe' -o -name '*.xml' \) \
+          -o -name '*.exe' -o -name '*.xml' \
+          -o -name '*.AppImage' -o -name '*.zsync' \) \
             -exec cp -v {} release/ \; || true
           ls -lh release/
 
@@ -572,5 +586,7 @@ jobs:
             release/*.dmg
             release/*.zip
             release/*.exe
+            release/*.AppImage
+            release/*.zsync
             release/*.tar.gz
             release/appcast-*.xml

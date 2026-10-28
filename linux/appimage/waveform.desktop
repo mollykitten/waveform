@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Waveform
+Comment=minimal soundcloud client
+Exec=waveform_app
+Icon=waveform
+Categories=AudioVideo;Audio;Player;
+Terminal=false
