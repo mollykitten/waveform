@@ -38,9 +38,13 @@ class PlaylistDto {
     user: UserDto.fromJson(asMap(j['user'])),
     isAlbum: asBool(j['is_album']),
     setType: j['set_type'] as String?,
-    trackCount: asInt(j['track_count']),
+    // У системных плейлистов нет `track_count` — считаем по `tracks[]`.
+    trackCount: j['track_count'] == null
+        ? asMapList(j['tracks']).length
+        : asInt(j['track_count']),
     durationMs: asInt(j['duration']),
-    artworkUrl: j['artwork_url'] as String?,
+    // У системных плейлистов обложка только в `calculated_artwork_url`.
+    artworkUrl: (j['artwork_url'] ?? j['calculated_artwork_url']) as String?,
     permalinkUrl: j['permalink_url'] as String?,
     likesCount: asInt(j['likes_count']),
     genre: j['genre'] as String?,

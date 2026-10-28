@@ -180,7 +180,8 @@ class HttpSoundcloudApi implements SoundcloudApi {
           .map((m) {
             final p = PlaylistDto.fromJson(m);
             return Collection(
-              id: '${p.id}',
+              // У системных плейлистов (trending by genre) id — строковый urn.
+              id: '${m['id'] ?? p.id}',
               title: p.title,
               subtitle: p.user.username.isEmpty
                   ? 'SoundCloud'
@@ -658,12 +659,24 @@ class HttpSoundcloudApi implements SoundcloudApi {
     );
   }
 
+  /// Путь ручки плейлиста: системные (подборки по жанрам и т.п.) имеют
+  /// строковый urn-id и живут в `/system-playlists/`, а не в `/playlists/`.
+  String _playlistPath(String id) =>
+      id.startsWith('soundcloud:system-playlists:')
+      ? '/system-playlists/$id'
+      : '/playlists/$id';
+
   /// Hydrate-весь плейлист: оставляем порядок из `tracks[]` ответа, для огрызков
   /// (без `title`) батчами тянем `/tracks?ids=…` (api-v2 принимает CSV id).
   @override
   Future<List<Track>> allPlaylistTracks(String id) async {
-    final raw = asMap(await _get('/playlists/$id'));
-    final tracksJson = asMapList(raw['tracks']);
+    final raw = asMap(await _get(_playlistPath(id)));
+    return _hydrateTracks(asMapList(raw['tracks']));
+  }
+
+  Future<List<Track>> _hydrateTracks(
+    List<Map<String, dynamic>> tracksJson,
+  ) async {
     // Восстановим порядок плейлиста через map trackId → index.
     final order = <int, int>{};
     final hydrated = <Track>[];
@@ -708,11 +721,13 @@ class HttpSoundcloudApi implements SoundcloudApi {
 
   @override
   Future<PlaylistDetail> playlist(String id) async {
-    final dto = PlaylistDto.fromJson(asMap(await _get('/playlists/$id')));
-    return (
-      playlist: dto.toDomain(),
-      tracks: [for (final t in dto.tracks) t.toDomain()],
-    );
+    final raw = asMap(await _get(_playlistPath(id)));
+    final dto = PlaylistDto.fromJson(raw);
+    // У системных плейлистов все треки — огрызки (только id): гидрируем.
+    final tracks = id.startsWith('soundcloud:system-playlists:')
+        ? await _hydrateTracks(asMapList(raw['tracks']))
+        : [for (final t in dto.tracks) t.toDomain()];
+    return (playlist: dto.toDomain(), tracks: tracks);
   }
 
   /// Транскодинг api-v2 — это указатель: GET по нему (с client_id) возвращает
