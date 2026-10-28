@@ -11,7 +11,7 @@ changes against the pub.dev release:
   (headers, `x64/Release/WinSparkle.dll` and `.lib`, licenses; no pdb, no
   win32/arm64 builds: flutter windows builds here are x64 only)
 - `windows/CMakeLists.txt` and `windows/auto_updater.cpp` point at the new dir
-- the plugin's `test/` is dropped
+- the plugin's `test/` and `analysis_options.yaml` are dropped
 
 winsparkle binaries come only from the official release
 https://github.com/vslavik/winsparkle/releases/tag/v0.9.4

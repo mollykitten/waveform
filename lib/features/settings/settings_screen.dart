@@ -735,6 +735,20 @@ class _UpdateRow extends ConsumerWidget {
         '${two(at.hour)}:${two(at.minute)}';
   }
 
+  Future<void> _install(
+    BuildContext context,
+    UpdateController controller,
+  ) async {
+    final result = await controller.installAvailable();
+    if (!context.mounted || result == null) return;
+    showToast(
+      context,
+      result == UpdateInstall.started
+          ? 'updating in the background, restart waveform when it finishes'
+          : 'opened the release page',
+    );
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final controller = ref.read(updateControllerProvider.notifier);
@@ -757,7 +771,7 @@ class _UpdateRow extends ConsumerWidget {
         _Button(
           label: canInstall ? 'update ↗' : 'check for updates',
           onTap: () => canInstall
-              ? controller.installAvailable()
+              ? _install(context, controller)
               : controller.checkNow(),
         ),
       ],

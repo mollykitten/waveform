@@ -39,12 +39,20 @@ final updateBackendProvider = Provider<UpdateBackend>((ref) {
     final talker = ref.watch(talkerProvider);
     return SparkleUpdateBackend(log: (m) => talker.info('update: $m'));
   }
-  if (Platform.isLinux) return GithubUpdateBackend();
+  if (Platform.isLinux) {
+    final talker = ref.watch(talkerProvider);
+    return GithubUpdateBackend(log: (m) => talker.warning('update: $m'));
+  }
   return const NoopUpdateBackend();
 });
 
+/// Где живёт время последней проверки; в тестах подменяется каталогом.
+final updatePrefsStoreProvider = Provider<PrefsStore>(
+  (ref) => const PrefsStore(),
+);
+
 class UpdateController extends Notifier<UpdateState> {
-  static const _store = PrefsStore();
+  PrefsStore get _store => ref.read(updatePrefsStoreProvider);
   static const prefsKey = 'updateLastCheck';
   static const interval = Duration(hours: 24);
 
@@ -72,15 +80,21 @@ class UpdateController extends Notifier<UpdateState> {
   }
 
   /// Linux: поставить найденное обновление.
-  Future<void> installAvailable() async {
+  Future<UpdateInstall?> installAvailable() async {
     final backend = ref.read(updateBackendProvider);
-    if (backend is GithubUpdateBackend) await backend.installAvailable();
+    if (backend is! GithubUpdateBackend) return null;
+    return backend.installAvailable();
   }
 
   Future<void> _run(Future<UpdateOutcome> Function() op, DateTime at) async {
     state = state.copyWith(checking: true);
     try {
-      await op();
+      final outcome = await op();
+      if (outcome == UpdateOutcome.failed) {
+        // сбой сети не считается проверкой: следующий запуск попробует снова
+        state = state.copyWith(checking: false);
+        return;
+      }
       final backend = ref.read(updateBackendProvider);
       state = state.copyWith(
         checking: false,

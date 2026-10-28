@@ -152,6 +152,8 @@ jobs:
           sed "s|\$(PRODUCT_BUNDLE_IDENTIFIER)|$BUNDLE_ID|g" \
             macos/Runner/Release.entitlements > "$ENTITLEMENTS"
           grep -q "$BUNDLE_ID-spks" "$ENTITLEMENTS"
+          grep -q "$BUNDLE_ID-spki" "$ENTITLEMENTS"
+          ! grep -q '\$(' "$ENTITLEMENTS"
 
           # inside out, no --deep: every nested bundle and every Mach-O
           # except the main executable, deepest path first (hardened
@@ -169,13 +171,19 @@ jobs:
               done
           } | awk '{ print gsub("/", "/") "\t" $0 }' | sort -rn | cut -f2- |
             while IFS= read -r target; do
-              echo "signing: $target"
               case "$target" in
-                # sparkle's downloader.xpc carries its own network
-                # entitlement; re-signing must keep it
+                # the executable inside sparkle's downloader.xpc is signed
+                # with the bundle below: signing it on its own first would
+                # strip the entitlements the bundle signature preserves
+                */Downloader.xpc/Contents/MacOS/*) continue ;;
+                # downloader.xpc carries its own network entitlement:
+                # keep what sparkle shipped
                 */Downloader.xpc)
+                  echo "signing (keeping entitlements): $target"
                   sign --preserve-metadata=entitlements "$target" || exit 1 ;;
-                *) sign "$target" || exit 1 ;;
+                *)
+                  echo "signing: $target"
+                  sign "$target" || exit 1 ;;
               esac
             done
           sign --entitlements "$ENTITLEMENTS" "$APP"
@@ -187,6 +195,10 @@ jobs:
             Versions/B/XPCServices/Downloader.xpc; do
             test -e "$SPK/$part" || { echo "::error::missing $part"; exit 1; }
             codesign --verify --strict --verbose=2 "$SPK/$part"
+          done
+          for xpc in Installer Downloader; do
+            echo "--- $xpc.xpc entitlements ---"
+            codesign -d --entitlements :- "$SPK/Versions/B/XPCServices/$xpc.xpc" 2>&1
           done
 
           codesign --verify --strict --deep --verbose=2 "$APP"
@@ -234,7 +246,16 @@ jobs:
           hdiutil attach -readonly -nobrowse -mountpoint "$MNT" "$DMG"
           xcrun stapler validate "$MNT/Waveform.app" \
             || { hdiutil detach "$MNT"; exit 1; }
+          # the appcast advertises pubspec's version: the dmg must carry it
+          WANT_VER=$(sed -nE 's/^version:[[:space:]]*([0-9.]+)\+([0-9]+).*/\1/p' pubspec.yaml)
+          WANT_BUILD=$(sed -nE 's/^version:[[:space:]]*([0-9.]+)\+([0-9]+).*/\2/p' pubspec.yaml)
+          GOT_VER=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$MNT/Waveform.app/Contents/Info.plist")
+          GOT_BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$MNT/Waveform.app/Contents/Info.plist")
           hdiutil detach "$MNT"
+          if [ "$GOT_VER" != "$WANT_VER" ] || [ "$GOT_BUILD" != "$WANT_BUILD" ]; then
+            echo "::error::dmg is $GOT_VER ($GOT_BUILD), pubspec is $WANT_VER ($WANT_BUILD)"
+            exit 1
+          fi
           codesign --force --timestamp \
             --sign "$SIGN_IDENTITY" --keychain "$SIGN_KEYCHAIN" "$DMG"
           codesign --verify --verbose=2 "$DMG"
@@ -509,16 +530,24 @@ jobs:
       - name: Generate appcast-macos.xml
         env:
           SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
-          TAG: ${{ github.ref_name }}
+          REF_NAME: ${{ github.ref_name }}
+          IS_TAG: ${{ startsWith(github.ref, 'refs/tags/') }}
         run: |
           [ -z "${DRY_KEY_FILE:-}" ] || export SPARKLE_ED_PRIVATE_KEY="$(cat "$DRY_KEY_FILE")"
-          # a dry run has a branch name instead of a tag: sign against the
-          # pubspec version so the format is still checked
-          VERSION=$(sed -nE 's/^version:[[:space:]]*([0-9.]+)\+.*/\1/p' pubspec.yaml)
+          # tags sign against the real tag (so -rc urls are right) and must
+          # match the committed public keys; a dry run has a branch name, so
+          # it uses the pubspec version just to exercise the format
+          if [ "$IS_TAG" = true ]; then
+            TAG="$REF_NAME"; CHECK=--check-public-keys
+          else
+            TAG="v$(sed -nE 's/^version:[[:space:]]*([0-9.]+)\+.*/\1/p' pubspec.yaml)"; CHECK=
+          fi
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          echo "CHECK=$CHECK" >> "$GITHUB_ENV"
           DMG=$(ls dist/macos-dmg/*.dmg)
           mkdir -p appcasts
           python3 tool/appcast.py --platform macos --file "$DMG" \
-            --tag "v$VERSION" --out appcasts/appcast-macos.xml
+            --tag "$TAG" --out appcasts/appcast-macos.xml $CHECK
           cat appcasts/appcast-macos.xml
 
       - name: Generate appcast-windows.xml
@@ -531,9 +560,8 @@ jobs:
             echo "::warning::no windows installer: skipping appcast-windows.xml"
             exit 0
           fi
-          VERSION=$(sed -nE 's/^version:[[:space:]]*([0-9.]+)\+.*/\1/p' pubspec.yaml)
           python3 tool/appcast.py --platform windows --file "$SETUP" \
-            --tag "v$VERSION" --out appcasts/appcast-windows.xml
+            --tag "$TAG" --out appcasts/appcast-windows.xml $CHECK
           cat appcasts/appcast-windows.xml
 
       - name: Upload appcasts

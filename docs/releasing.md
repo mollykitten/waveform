@@ -41,13 +41,17 @@ pair. the public half is committed; the private half is only a github secret.
    placeholder is still there.
 3. export the private key with `bin/generate_keys -x sparkle_private.key`,
    store the file's contents as the github secret **`SPARKLE_ED_PRIVATE_KEY`**
-   and delete the file. never commit it, paste it in a pr or keep a copy in
+   and delete the file. sparkle 2.x exports the 32-byte ed25519 seed (base64);
+   `tool/appcast.py` rejects anything else. on tags it also derives the public
+   key from the secret and fails unless it equals `SUPublicEDKey` and
+   `EdDSAPub`, and it verifies every signature it makes. never commit it, paste it in a pr or keep a copy in
    the repo. losing it means shipping a new public key in a manual release:
    existing installs cannot verify updates signed by another key.
 
 ## updates: how they reach users
 
-the `appcast` job runs after the dmg is notarized and stapled and after the
+on tags the appcast `--tag` is the real tag (so `-rc` urls are right); a dry
+run falls back to `v<pubspec version>`. the `appcast` job runs after the dmg is notarized and stapled and after the
 windows installer is built. `tool/appcast.py` signs the final bytes with the
 private key and writes the feeds, which the publish job attaches to the
 release next to the installers:
@@ -63,6 +67,12 @@ release next to the installers:
   appimage started with `appimageupdatetool` in `PATH` updates in place
   (delta via the embedded `gh-releases-zsync` info and the published
   `.zsync`); everything else shows "vX available" and opens the release page.
+
+windows uses winsparkle 0.9.4, vendored in `third_party/auto_updater_windows`
+(see its `VENDORED.md` for hashes): the pub.dev plugin bundles 0.8.1, which
+cannot verify ed25519 and accepts unsigned installers. 0.9.4 rejects a missing
+or wrong signature once a valid `EdDSAPub` is compiled in, so the placeholder
+must be replaced before any tag.
 
 `releases/latest` skips prereleases and drafts, so a `-rc` tag never reaches
 users through the feeds. a dry run (`workflow_dispatch`) signs with a
@@ -117,7 +127,7 @@ bundles the committed file as is.
 ## candidate checks
 
 1. review the exact candidate diff and confirm `pubspec.yaml` stays at
-   `0.4.0+33` and `_kAppVersion` in `lib/features/settings/settings_screen.dart`
+   `0.4.0+33` and `kAppVersion` in `lib/core/update/app_version.dart`
    stays at `0.4.0` so the about screen matches the release. confirm release
    notes describe the merged scope and outstanding manual checks honestly.
 2. require a clean analyzer, passing flutter tests, and passing worker notifier

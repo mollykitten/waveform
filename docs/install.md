@@ -31,6 +31,11 @@ check for updates) and installs them through sparkle.
 2. tarball: grab `waveform-linux-vX.Y.Z.tar.gz`, `tar xzf` and run `./waveform_app`
    (update checks only point you to the release page)
 
+linux update checks are not signed: they rely on tls and github alone (the
+releases api tells waveform a newer tag exists; `appimageupdatetool` downloads
+the appimage from the same release). macos and windows verify an ed25519
+signature before installing.
+
 first launch: sign in via settings → account, go back home, your stream, likes and playlists show up
 
 want to build it yourself? see [development](development.md)

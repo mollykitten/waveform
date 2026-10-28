@@ -8,7 +8,10 @@ import '../../shared/url_share.dart';
 import 'app_version.dart';
 
 /// Результат ручной проверки.
-enum UpdateOutcome { upToDate, available, unknown }
+enum UpdateOutcome { upToDate, available, unknown, failed }
+
+/// Что случилось после «update» на Linux.
+enum UpdateInstall { started, openedReleasePage }
 
 /// Один способ проверять и ставить обновления на своей платформе.
 abstract class UpdateBackend {
@@ -114,6 +117,7 @@ class GithubUpdateBackend implements UpdateBackend {
     Map<String, String>? environment,
     this.run = Process.start,
     this.open = openExternalUrl,
+    this.log,
   }) : _dio = dio ?? Dio(),
        _env = environment ?? Platform.environment;
 
@@ -125,6 +129,7 @@ class GithubUpdateBackend implements UpdateBackend {
   final Map<String, String> _env;
   final Future<Process> Function(String, List<String>) run;
   final Future<void> Function(String) open;
+  final void Function(String message)? log;
   String? _available;
 
   @override
@@ -153,14 +158,15 @@ class GithubUpdateBackend implements UpdateBackend {
       }
       _available = tag.startsWith('v') ? tag.substring(1) : tag;
       return UpdateOutcome.available;
-    } on DioException {
-      return UpdateOutcome.unknown;
+    } on DioException catch (e) {
+      log?.call('release check failed: ${e.message ?? e.type}');
+      return UpdateOutcome.failed;
     }
   }
 
   /// Ставит найденное обновление: на месте для AppImage, иначе страница
-  /// релиза. `true`, если запущен апдейтер.
-  Future<bool> installAvailable() async {
+  /// релиза.
+  Future<UpdateInstall> installAvailable() async {
     final appImage = _env['APPIMAGE'];
     if (appImage != null && appImage.isNotEmpty && _hasAppImageUpdateTool()) {
       final process = await run('appimageupdatetool', [
@@ -171,10 +177,10 @@ class GithubUpdateBackend implements UpdateBackend {
       unawaited(process.stdout.drain<void>());
       unawaited(process.stderr.drain<void>());
       unawaited(process.exitCode);
-      return true;
+      return UpdateInstall.started;
     }
     await open(kReleasesPageUrl);
-    return false;
+    return UpdateInstall.openedReleasePage;
   }
 
   bool _hasAppImageUpdateTool() {

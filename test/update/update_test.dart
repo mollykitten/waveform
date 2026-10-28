@@ -58,10 +58,13 @@ void main() {
     expect(b.availableVersion, isNull);
   });
 
-  test('github backend: network failure is unknown, not a crash', () async {
-    final b = GithubUpdateBackend(dio: _dio('{}', status: 500));
-    expect(await b.checkNow(), UpdateOutcome.unknown);
-  });
+  test(
+    'github backend: network failure is reported as failed, not a crash',
+    () async {
+      final b = GithubUpdateBackend(dio: _dio('{}', status: 500));
+      expect(await b.checkNow(), UpdateOutcome.failed);
+    },
+  );
 
   test('without an appimage the release page opens', () async {
     String? opened;
@@ -70,7 +73,7 @@ void main() {
       environment: const {},
       open: (u) async => opened = u,
     );
-    expect(await b.installAvailable(), isFalse);
+    expect(await b.installAvailable(), UpdateInstall.openedReleasePage);
     expect(opened, kReleasesPageUrl);
   });
 
