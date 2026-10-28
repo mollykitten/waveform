@@ -70,26 +70,50 @@ class SchemeRegistrar {
       'Categories=AudioVideo;Audio;Player;\n'
       'MimeType=x-scheme-handler/$scheme;\n';
 
+  /// `$XDG_DATA_HOME/applications` (или `~/.local/share/applications`, если
+  /// переменная пуста или не абсолютный путь — так велит XDG basedir).
+  @visibleForTesting
+  static String? linuxApplicationsDir(Map<String, String> env) {
+    final data = env['XDG_DATA_HOME'];
+    if (data != null && data.startsWith('/')) return '$data/applications';
+    final home = env['HOME'];
+    if (home == null || home.isEmpty) return null;
+    return '$home/.local/share/applications';
+  }
+
   Future<void> _registerLinux() async {
-    final home = Platform.environment['HOME'];
-    if (home == null || home.isEmpty) return;
-    final dir = Directory('$home/.local/share/applications');
-    final file = File('${dir.path}/$desktopFileName');
-    if (await file.exists() && await file.readAsString() == desktopEntry) {
-      return;
+    final dirPath = linuxApplicationsDir(Platform.environment);
+    if (dirPath == null) return;
+    final mime = 'x-scheme-handler/$scheme';
+    final file = File('$dirPath/$desktopFileName');
+    final fileOk =
+        await file.exists() && await file.readAsString() == desktopEntry;
+    // Файл совпадает ещё не значит, что хэндлер назначен: xdg-mime мог
+    // отсутствовать или упасть, поэтому спрашиваем систему.
+    if (fileOk && await _linuxDefaultHandler(mime) == desktopFileName) return;
+
+    if (!fileOk) {
+      await Directory(dirPath).create(recursive: true);
+      await file.writeAsString(desktopEntry);
     }
-    await dir.create(recursive: true);
-    await file.writeAsString(desktopEntry);
-    await Process.run('xdg-mime', [
-      'default',
-      desktopFileName,
-      'x-scheme-handler/$scheme',
-    ]);
+    final r = await Process.run('xdg-mime', ['default', desktopFileName, mime]);
+    if (r.exitCode != 0) {
+      throw ProcessException('xdg-mime', [mime], '${r.stderr}', r.exitCode);
+    }
     // Не везде есть: без него кэш обновится при следующем логине.
     try {
-      await Process.run('update-desktop-database', [dir.path]);
+      await Process.run('update-desktop-database', [dirPath]);
     } on ProcessException {
       return;
+    }
+  }
+
+  Future<String?> _linuxDefaultHandler(String mime) async {
+    try {
+      final r = await Process.run('xdg-mime', ['query', 'default', mime]);
+      return r.exitCode == 0 ? (r.stdout as String).trim() : null;
+    } on ProcessException {
+      return null;
     }
   }
 }
