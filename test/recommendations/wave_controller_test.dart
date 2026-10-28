@@ -328,6 +328,14 @@ void main() {
       expect(current(), 't2');
     });
 
+    test('previous after a dislike never replays the disliked track', () async {
+      await setUpWave();
+      await controller.dislikeCurrent();
+      expect(current(), 't2');
+      player.previous();
+      expect(current(), 't2');
+    });
+
     test('the skip carries the neutral dislike cause', () async {
       await setUpWave();
       await controller.dislikeCurrent();

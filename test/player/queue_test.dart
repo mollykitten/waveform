@@ -84,4 +84,117 @@ void main() {
     // Regardless of shuffle permutation, track '9' must be the very next heard
     expect(pc.upcomingTracks.first.id, '9');
   });
+
+  group('forget', () {
+    String? cur(ProviderContainer c) =>
+        c.read(playerControllerProvider).track?.id;
+
+    PlayerController setup(ProviderContainer c, String start) {
+      final pc = c.read(playerControllerProvider.notifier);
+      pc.play(t(start), queue: [t('1'), t('2'), t('3'), t('4')]);
+      return pc;
+    }
+
+    test('prev after forgetting an earlier track skips it', () {
+      final c = harness(FakeAudioEngine());
+      addTearDown(c.dispose);
+      final pc = setup(c, '1');
+      pc.next();
+      pc.next();
+      expect(cur(c), '3');
+      pc.forget('2');
+      pc.previous();
+      expect(cur(c), '1');
+    });
+
+    test('prev right after forgetting the one before stays on current', () {
+      final c = harness(FakeAudioEngine());
+      addTearDown(c.dispose);
+      final pc = setup(c, '2');
+      pc.next();
+      pc.forget('2');
+      pc.previous();
+      expect(cur(c), '3');
+    });
+
+    test('forgetting the playing track drops it once playback moves on', () {
+      final c = harness(FakeAudioEngine());
+      addTearDown(c.dispose);
+      final pc = setup(c, '1');
+      pc.next();
+      pc.forget('2');
+      expect(cur(c), '2');
+      pc.next();
+      expect(cur(c), '3');
+      pc.previous();
+      expect(cur(c), '1');
+      expect(pc.upcomingTracks.map((x) => x.id), isNot(contains('2')));
+    });
+
+    test('stepping back from a forgotten playing track drops it', () {
+      final c = harness(FakeAudioEngine());
+      addTearDown(c.dispose);
+      final pc = setup(c, '1');
+      pc.next();
+      pc.forget('2');
+      expect(cur(c), '2');
+      pc.previous();
+      expect(cur(c), '1');
+      pc.next();
+      expect(cur(c), isNot('2'));
+    });
+
+    test('a queue passed to play skips already forgotten tracks', () {
+      final c = harness(FakeAudioEngine());
+      addTearDown(c.dispose);
+      final pc = setup(c, '1');
+      pc.forget('3');
+      pc.play(t('2'), queue: [t('1'), t('2'), t('3'), t('4')]);
+      expect(pc.upcomingTracks.map((x) => x.id), ['4']);
+      pc.next();
+      expect(cur(c), '4');
+    });
+
+    test('unforget and explicit play make the track normal again', () {
+      final c = harness(FakeAudioEngine());
+      addTearDown(c.dispose);
+      final pc = setup(c, '1');
+      pc.next();
+      pc.forget('2');
+      pc.next();
+      pc.unforget('2');
+      pc.play(t('2'), queue: [t('1'), t('2'), t('3')]);
+      pc.next();
+      expect(cur(c), '3');
+      pc.previous();
+      expect(cur(c), '2');
+
+      pc.forget('3');
+      pc.play(t('3'), queue: [t('1'), t('2'), t('3')]);
+      pc.next();
+      pc.previous();
+      expect(cur(c), '3');
+    });
+
+    test('history index stays consistent walking back and forward', () {
+      final c = harness(FakeAudioEngine());
+      addTearDown(c.dispose);
+      final pc = setup(c, '1');
+      pc.next();
+      pc.next();
+      pc.next();
+      expect(cur(c), '4');
+      pc.forget('2');
+      pc.previous();
+      expect(cur(c), '3');
+      pc.previous();
+      expect(cur(c), '1');
+      pc.previous();
+      expect(cur(c), '1');
+      pc.next();
+      expect(cur(c), '3');
+      pc.next();
+      expect(cur(c), '4');
+    });
+  });
 }
