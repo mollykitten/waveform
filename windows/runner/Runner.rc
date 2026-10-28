@@ -106,6 +106,14 @@ BEGIN
 END
 
 #endif    // English (United States) resources
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// WinSparkle: ed25519 public key that verifies appcast-windows.xml updates.
+// Same key pair as macOS (see docs/releasing.md). Placeholder until the
+// owner generates the key; release.yml refuses to tag-build with it.
+//
+EdDSAPub EDDSA "REPLACE_WITH_SPARKLE_PUBLIC_ED_KEY"
 /////////////////////////////////////////////////////////////////////////////
 
 

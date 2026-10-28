@@ -66,7 +66,8 @@ def build_appcast(platform, tag, filename, length, signature, version, build):
         # is the whole pubspec version ("0.4.0+33"), so use it verbatim
         sparkle_version = f"{version}+{build}"
         extra = ""
-        os_attr = ' sparkle:os="windows"'
+        os_attr = (' sparkle:os="windows"'
+                   ' sparkle:installerArguments="/SILENT /SP-"')
     pub = format_datetime(datetime.now(timezone.utc))
     return f"""<?xml version="1.0" encoding="utf-8"?>
 <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
