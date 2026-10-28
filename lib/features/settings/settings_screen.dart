@@ -14,6 +14,9 @@ import '../../core/deeplinks/clipboard_watcher.dart';
 import '../../core/lastfm/lastfm_constants.dart';
 import '../../core/lastfm/lastfm_session.dart';
 import '../../core/log/talker.dart';
+import '../../core/update/app_version.dart';
+import '../../core/update/update_controller.dart';
+import '../../core/update/update_backend.dart';
 import '../../shared/url_share.dart';
 import '../../shared/widgets/cover_art.dart';
 import '../../shared/widgets/pressable.dart';
@@ -24,9 +27,6 @@ import '../../shared/widgets/view_toggle.dart';
 import '../auth/login_dialog.dart';
 import '../onboarding/onboarding_gate.dart';
 
-/// Версия отображается в секции About; обновлять руками синхронно с pubspec.yaml.
-// Bumped on every tagged release. Matches `version:` in pubspec.yaml.
-const _kAppVersion = '0.4.0';
 const _kRepoUrl = 'https://github.com/mollykitten/waveform';
 
 /// Экран настроек. Сейчас покрывает то, что реально реализовано: аккаунт,
@@ -679,10 +679,12 @@ class _OnboardingSection extends ConsumerWidget {
   }
 }
 
-class _AboutSection extends StatelessWidget {
+class _AboutSection extends ConsumerWidget {
   const _AboutSection();
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final update = ref.watch(updateControllerProvider);
+    final supported = ref.watch(updateBackendProvider) is! NoopUpdateBackend;
     return _Section(
       title: 'about',
       child: Column(
@@ -692,7 +694,7 @@ class _AboutSection extends StatelessWidget {
             children: [
               Expanded(child: Text('version', style: formTextStyle)),
               Text(
-                _kAppVersion,
+                kAppVersion,
                 style: AppTheme.mono(
                   size: 12,
                   color: AppColors.textHi,
@@ -701,6 +703,10 @@ class _AboutSection extends StatelessWidget {
               ),
             ],
           ),
+          if (supported) ...[
+            const SizedBox(height: 14),
+            _UpdateRow(state: update),
+          ],
           const SizedBox(height: 14),
           Row(
             children: [
@@ -710,6 +716,51 @@ class _AboutSection extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _UpdateRow extends ConsumerWidget {
+  const _UpdateRow({required this.state});
+  final UpdateState state;
+
+  String get _caption {
+    if (state.checking) return 'checking…';
+    final available = state.available;
+    if (available != null) return 'v$available available';
+    final at = state.lastCheck?.toLocal();
+    if (at == null) return 'never checked';
+    String two(int n) => n.toString().padLeft(2, '0');
+    return 'checked ${at.year}-${two(at.month)}-${two(at.day)} '
+        '${two(at.hour)}:${two(at.minute)}';
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final controller = ref.read(updateControllerProvider.notifier);
+    final canInstall = state.available != null;
+    return Row(
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('updates', style: formTextStyle),
+              const SizedBox(height: 2),
+              Text(
+                _caption,
+                style: AppTheme.mono(size: 11, color: AppColors.textMid),
+              ),
+            ],
+          ),
+        ),
+        _Button(
+          label: canInstall ? 'update ↗' : 'check for updates',
+          onTap: () => canInstall
+              ? controller.installAvailable()
+              : controller.checkNow(),
+        ),
+      ],
     );
   }
 }
