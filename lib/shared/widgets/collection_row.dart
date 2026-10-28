@@ -20,7 +20,7 @@ class CollectionRow extends StatelessWidget {
       case CollectionTarget.track:
         context.push('/track/${item.id}');
       case CollectionTarget.playlist:
-        context.push('/playlist/${item.id}');
+        context.push('/playlist/${Uri.encodeComponent(item.id)}');
       case CollectionTarget.artist:
         context.push(
           '/artist/${Uri.encodeComponent(item.handle ?? item.title)}',
