@@ -5,6 +5,7 @@
 list(APPEND FLUTTER_PLUGIN_LIST
   app_links
   desktop_webview_window
+  media_kit_libs_windows_audio
   screen_retriever_windows
   share_plus
   url_launcher_windows
