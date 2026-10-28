@@ -110,7 +110,7 @@ lib/
 **Горизонт 1 — платформенный паритет** (тезис «кроссплатформенность как условие»):
 - медиа-клавиши и now-playing на Windows (SMTC) и Linux (MPRIS) — сейчас только macOS;
 - нормальный логин на Windows (сейчас ручная вставка oauth_token);
-- deep-link `waveform://` на Windows/Linux;
+- deep-link `waveform://` на Windows/Linux — в коде, ждёт проверки на машинах;
 - Windows code-signing.
 
 **Горизонт 2 — фичи, по одной на релиз** (порядок — ценность к усилию):
@@ -399,11 +399,15 @@ CF по весу соседа и давности его лайка, без фи
   + CustomPainter сетки 7×24).
 - **Audio_service: configurable mini-window mode** (always-on-top
   компактное 300×120 окно «just the player»).
-- **Deep-link схема на Windows/Linux.** На macOS `waveform://`
-  зарегистрирована (Info.plist CFBundleURLTypes). На Windows нужна запись
-  в реестр, на Linux — `.desktop` с `x-scheme-handler/waveform` (уровень
-  инсталлятора). Кроссплатформенно уже работает вставка `soundcloud.com`
-  ссылки в omnibox → resolve → навигация.
+- **Deep-link схема `waveform://`.** macOS — Info.plist CFBundleURLTypes.
+  Windows/Linux — `SchemeRegistrar` (`lib/core/deeplinks/`) при старте
+  релизной сборки пишет `HKCU\Software\Classes\waveform` / 
+  `~/.local/share/applications/com.waveform.waveform_app.desktop` +
+  `xdg-mime`. Второй запуск пересылает ссылку в живой экземпляр
+  (`SendAppLinkToInstance` в `windows/runner/main.cpp`, GApplication без
+  NON_UNIQUE в `my_application.cc`). Нативная часть на Windows/Linux не
+  проверена на живой машине. Клик по https://soundcloud.com ОС нам не
+  отдаёт: остаются omnibox и тост из буфера.
 - **Windows webview-логин лагает — вероятная причина исправлена, ждёт
   проверки на Windows.** Плагин рисует тулбар webview-окна вторым
   Flutter-движком, который снова зовёт `main(args)` с

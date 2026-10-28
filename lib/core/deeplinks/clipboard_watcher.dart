@@ -59,6 +59,14 @@ final clipboardLinkProvider =
       ClipboardLinkNotifier.new,
     );
 
+/// Короткая подпись ссылки для тоста: путь без домена и параметров
+/// (`artist/track`). Для нераспознаваемого URL — он сам.
+String scLinkLabel(String url) {
+  final uri = Uri.tryParse(url.trim());
+  if (uri == null || uri.pathSegments.isEmpty) return url.trim();
+  return uri.pathSegments.where((s) => s.isNotEmpty).join('/');
+}
+
 /// Следит за буфером обмена: пока включён тоггл — опрашивает clipboard и при
 /// появлении НОВОЙ ссылки soundcloud.com кидает событие в [clipboardLinkProvider]
 /// (AppShell показывает тост «открыть в Waveform»). Это обход того, что ОС не
