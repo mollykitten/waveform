@@ -80,6 +80,13 @@ class ListeningEvent {
     return ListeningEvidence.neutral;
   }
 
+  /// How many full plays the session holds: `heardMs / durationMs` clamped to
+  /// [1, 2]. Seeking back and replaying counts (heard time can exceed the
+  /// duration), but one session never weighs more than two plays. Meant for
+  /// positive evidence only; without a known duration it is 1.
+  double get plays =>
+      durationMs <= 0 ? 1 : (heardMs / durationMs).clamp(1.0, 2.0);
+
   Map<String, Object> toJson() => {
     'session_id': sessionId,
     'identity': identity,
