@@ -7,8 +7,8 @@ import 'package:window_manager/window_manager.dart';
 /// убирает системные, на macOS «светофор» остаётся нативным.
 bool get needsWindowControls => Platform.isWindows || Platform.isLinux;
 
-/// Ширина блока кнопок (3 × 46).
-const windowControlsWidth = 138.0;
+/// Высота кнопок окна: верхняя зона панели не должна быть ниже.
+const windowControlsHeight = 32.0;
 
 /// Свернуть / развернуть / закрыть для окна без системной рамки.
 class WindowControls extends StatefulWidget {

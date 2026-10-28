@@ -31,22 +31,19 @@ class TopBar extends ConsumerWidget {
     // lights висят поверх контента в верхней-левой зоне. Резервируем 28px
     // сверху на эту зону через `padding`, влево контент идёт от 16px.
     const leftPad = 16.0;
-    const topPad = 28.0;
     // Перетаскивание окна — ТОЛЬКО за лого/заголовок и центральную пустую зону.
     // Интерактивные кнопки (поиск, очередь, настройки, аккаунт) вынесены из
     // DragToMoveArea: раньше весь бар был draggable, и двойной клик по кнопкам
     // на macOS разворачивал окно (zoom), а сама draggable-зона была слишком
     // большой. На Windows/Linux это единственный способ двигать окно
     // (titleBarStyle: hidden).
+    // На Windows/Linux в этой верхней зоне живут кнопки окна, поэтому она
+    // чуть выше, зато контенту не нужен горизонтальный отступ справа.
     final controls = needsWindowControls;
+    final topPad = controls ? windowControlsHeight : 28.0;
     final bar = Container(
       height: AppTheme.topBarHeight,
-      padding: EdgeInsets.fromLTRB(
-        leftPad,
-        topPad,
-        controls ? 16 + windowControlsWidth : 16,
-        0,
-      ),
+      padding: EdgeInsets.fromLTRB(leftPad, topPad, 16, 0),
       decoration: BoxDecoration(
         color: AppColors.surface.withValues(alpha: 0.72),
         border: const Border(bottom: AppTheme.borderSideStatic),
