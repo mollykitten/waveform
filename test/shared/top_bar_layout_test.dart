@@ -8,6 +8,7 @@ import 'package:waveform_app/core/audio/audio_engine.dart';
 import 'package:waveform_app/core/log/talker.dart';
 import 'package:waveform_app/features/omnibox/omnibox_providers.dart';
 import 'package:waveform_app/shared/widgets/top_bar.dart';
+import 'package:waveform_app/shared/widgets/window_controls.dart';
 
 import '../support/fake_audio_engine.dart';
 
@@ -38,6 +39,8 @@ void main() {
       tester.element(find.byType(TopBar)),
     );
 
+    // On windows/linux the caption buttons reserve extra room on the right.
+    final inset = needsWindowControls ? 16 + windowControlsWidth : 16.0;
     final account = find
         .ancestor(of: find.text('log in'), matching: find.byType(Container))
         .first;
@@ -54,7 +57,7 @@ void main() {
       expect(find.byTooltip('queue'), findsOneWidget);
       expect(find.byTooltip('settings'), findsOneWidget);
       expect(find.text('log in'), findsOneWidget);
-      expect(tester.getRect(account).right, closeTo(width - 16, 0.5));
+      expect(tester.getRect(account).right, closeTo(width - inset, 0.5));
       expect(tester.takeException(), isNull);
     }
     await tester.tap(find.text('search tracks, artists, playlists…'));

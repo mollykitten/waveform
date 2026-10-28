@@ -25,7 +25,7 @@ class _WindowControlsState extends State<WindowControls> with WindowListener {
   void initState() {
     super.initState();
     windowManager.addListener(this);
-    windowManager.isMaximized().then(_setMaximized);
+    windowManager.isMaximized().then(_setMaximized).catchError((_) {});
   }
 
   @override
