@@ -94,6 +94,12 @@ flutter_launcher_icons:
 # following page: https://dart.dev/tools/pub/pubspec
 
 # The following section is specific to Flutter packages.
+dependency_overrides:
+  # vendored: upstream bundles winsparkle 0.8.1, which cannot verify ed25519
+  # signatures. see third_party/auto_updater_windows/VENDORED.md
+  auto_updater_windows:
+    path: third_party/auto_updater_windows
+
 flutter:
 
   # The following line ensures that the Material Icons font is
