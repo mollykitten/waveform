@@ -46,7 +46,7 @@ void main() {
       await tester.pump();
 
       expect(find.text('home'), findsOneWidget);
-      expect(find.text('discover'), findsOneWidget);
+      expect(find.text('my wave'), findsOneWidget);
       final search = find.text('search tracks, artists, playlists…');
       expect(search, findsOneWidget);
       expect(tester.getRect(search).width, greaterThan(0));

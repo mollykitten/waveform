@@ -15,6 +15,7 @@ import '../../features/queue/queue_visibility.dart';
 import 'cover_art.dart';
 import 'pressable.dart';
 import 'wave_logo.dart';
+import 'window_controls.dart';
 
 /// Верхняя панель оболочки: лого, навигация Home/Feed/Library, поиск,
 /// аккаунт (логин/логаут). Активный пункт — по маршруту.
@@ -30,16 +31,19 @@ class TopBar extends ConsumerWidget {
     // lights висят поверх контента в верхней-левой зоне. Резервируем 28px
     // сверху на эту зону через `padding`, влево контент идёт от 16px.
     const leftPad = 16.0;
-    const topPad = 28.0;
     // Перетаскивание окна — ТОЛЬКО за лого/заголовок и центральную пустую зону.
     // Интерактивные кнопки (поиск, очередь, настройки, аккаунт) вынесены из
     // DragToMoveArea: раньше весь бар был draggable, и двойной клик по кнопкам
     // на macOS разворачивал окно (zoom), а сама draggable-зона была слишком
     // большой. На Windows/Linux это единственный способ двигать окно
     // (titleBarStyle: hidden).
-    return Container(
+    // На Windows/Linux в этой верхней зоне живут кнопки окна, поэтому она
+    // чуть выше, зато контенту не нужен горизонтальный отступ справа.
+    final controls = needsWindowControls;
+    final topPad = controls ? windowControlsHeight : 28.0;
+    final bar = Container(
       height: AppTheme.topBarHeight,
-      padding: const EdgeInsets.fromLTRB(leftPad, topPad, 16, 0),
+      padding: EdgeInsets.fromLTRB(leftPad, topPad, 16, 0),
       decoration: BoxDecoration(
         color: AppColors.surface.withValues(alpha: 0.72),
         border: const Border(bottom: AppTheme.borderSideStatic),
@@ -68,7 +72,7 @@ class TopBar extends ConsumerWidget {
           _NavLink('home', '/', location),
           _NavLink('feed', '/feed', location),
           _NavLink('library', '/library', location),
-          _NavLink('discover', '/recommendations', location),
+          _NavLink('my wave', '/recommendations', location),
           // Гибкая пустая зона — тоже draggable (но НЕ кнопки справа).
           Expanded(child: DragToMoveArea(child: const SizedBox.expand())),
           const SizedBox(width: 16),
@@ -125,6 +129,14 @@ class TopBar extends ConsumerWidget {
           const _Account(),
         ],
       ),
+    );
+    if (!controls) return bar;
+    // Кнопки окна — в правом верхнем углу, в зоне над контентом бара.
+    return Stack(
+      children: [
+        bar,
+        const Positioned(top: 0, right: 0, child: WindowControls()),
+      ],
     );
   }
 }

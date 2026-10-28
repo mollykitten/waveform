@@ -58,6 +58,9 @@ dependencies:
   window_manager: ^0.5.2
   app_links: ^6.3.2
   auto_updater: ^1.0.0
+  just_audio_media_kit: ^2.1.0
+  media_kit_libs_windows_audio: ^1.0.9
+  media_kit_libs_linux: ^1.2.1
 
 dev_dependencies:
   flutter_test:

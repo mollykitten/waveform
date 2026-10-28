@@ -23,6 +23,13 @@ All notable changes to Waveform are documented here. Format follows
   listening facts record which source supplied each track, and stats shows a
   listened/skipped tally per source.
 
+### fixed
+- **every track was "unavailable" on windows (and linux).** just_audio has no
+  native implementation there, so loading any stream threw
+  `MissingPluginException`. windows and linux now play through the media_kit
+  (libmpv) backend; linux builds need `libmpv-dev`. not yet verified on a real
+  windows machine.
+
 ### removed
 - **the model-assisted route of my wave.** the chatgpt connection, custom
   openai-compatible and ollama providers, the mood field and the listening

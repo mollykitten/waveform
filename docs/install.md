@@ -24,7 +24,7 @@ check for updates) and installs them through sparkle.
 
 **linux.**
 1. appimage: grab `waveform-vX.Y.Z-x86_64.AppImage`, `chmod +x` it and run it.
-   it needs the system gtk 3 and webkit2gtk 4.1 libraries (same as the tar.gz).
+   it needs the system gtk 3, webkit2gtk 4.1 and libmpv libraries (same as the tar.gz).
    to update in place install [appimageupdatetool](https://github.com/AppImage/AppImageUpdate)
    and put it in `PATH`; without it waveform tells you a new version exists and
    opens the release page
