@@ -75,11 +75,14 @@ class DrmStreamService {
         final base = '${track.id}-${_hash(candidate)}';
         // Уже декодировано ранее — переиспользуем (переустановка приложения
         // не чистит Application Support).
-        for (final ext in const ['mp3', 'm4a']) {
-          final cached = File('${dir.path}/$base.$ext');
-          if (cached.existsSync() && cached.lengthSync() > 0) {
-            return cached.uri.toString();
-          }
+        // Старые `.mp3` — результат транскода со всплесками/NaN (трески);
+        // выкидываем и декодируем заново в m4a.
+        try {
+          File('${dir.path}/$base.mp3').deleteSync();
+        } catch (_) {}
+        final cached = File('${dir.path}/$base.m4a');
+        if (cached.existsSync() && cached.lengthSync() > 0) {
+          return cached.uri.toString();
         }
         final tmp = '${dir.path}/$base.part';
         // Декодируем в isolate: Go-ядро блокирует поток до конца (сеть +

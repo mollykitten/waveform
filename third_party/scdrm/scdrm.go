@@ -14,8 +14,7 @@ const DefaultWidevineLicenseURL = "https://license.media-streaming.soundcloud.cl
 // DecryptTrack расшифровывает ctr-encrypted-hls (CENC/Widevine) трек целиком
 // в память и пишет результат в outPath. Вход — transcoding URL из
 // media.transcodings[] api-v2 (в нём уже сидит track_authorization).
-// Формат выхода — MP3 (AAC→MP3 транскод в RAM, как у апстрима решения);
-// если транскод не удался — расшифрованный M4A.
+// Формат выхода — расшифрованный M4A (AAC без пересжатия).
 //
 // httpClient может быть nil — тогда используется обычный net/http без куки.
 func DecryptTrack(ctx context.Context, httpClient *http.Client, transcodingURL, clientID, wvdPath, outPath, licenseURL string) (string, error) {
@@ -66,11 +65,12 @@ func DecryptTrack(ctx context.Context, httpClient *http.Client, transcodingURL, 
 		return "", fmt.Errorf("decrypt: %w", err)
 	}
 
+	// Отдаём расшифрованный AAC как есть. Транскод в MP3 (TranscodeM4AToMP3)
+	// не используем: чисто-Go декодер go-aac местами отдаёт NaN и выбросы
+	// амплитуды, из-за чего в звуке трески; AVFoundation/just_audio играют
+	// fMP4 напрямую без потерь.
 	format := "m4a"
 	out := decrypted
-	if mp3Data, terr := TranscodeM4AToMP3(decrypted); terr == nil && len(mp3Data) > 0 {
-		out, format = mp3Data, "mp3"
-	}
 
 	tmp := outPath + ".tmp"
 	if err := os.WriteFile(tmp, out, 0644); err != nil {
