@@ -13,6 +13,10 @@ class LikedTracksController extends Notifier<Set<String>> {
   /// сменился до завершения пагинации).
   int _loadToken = 0;
 
+  /// Правки (id → liked), сделанные во время тихого [reload]: накладываются
+  /// на результат, иначе оптимистичный лайк потерялся бы при финальной записи.
+  Map<String, bool>? _overlay;
+
   @override
   Set<String> build() {
     ref.watch(authControllerProvider); // перезагрузка при login/logout
@@ -29,6 +33,7 @@ class LikedTracksController extends Notifier<Set<String>> {
   /// reload: сердца не мигают).
   Future<void> _load({bool silent = false}) async {
     final token = ++_loadToken;
+    _overlay = silent ? {} : null;
     final api = ref.read(soundcloudApiProvider);
     final acc = <String>{};
     String? cursor;
@@ -46,12 +51,24 @@ class LikedTracksController extends Notifier<Set<String>> {
       cursor = res.nextHref;
       if (cursor == null) break;
     }
-    if (silent) state = {...acc};
+    if (silent) {
+      final overlay = _overlay ?? const <String, bool>{};
+      _overlay = null;
+      overlay.forEach((id, liked) => liked ? acc.add(id) : acc.remove(id));
+      state = {...acc};
+    }
   }
 
   /// Полная тихая перезагрузка множества лайков (кнопка refresh): подхватывает
   /// и лайки, и анлайки, сделанные вне приложения.
-  Future<void> reload() => _load(silent: true);
+  Future<void> reload() async {
+    try {
+      await _load(silent: true);
+    } catch (_) {
+      _overlay = null;
+      rethrow;
+    }
+  }
 
   /// Дешёвая синхронизация (фокус окна, открытие library): добавляет в
   /// множество ID из первой страницы лайков, ничего не убирая.
@@ -78,11 +95,13 @@ class LikedTracksController extends Notifier<Set<String>> {
   /// похода в сеть.
   Future<LikeOutcome> toggle(String trackId, {Track? track}) async {
     final like = !state.contains(trackId);
+    _overlay?[trackId] = like;
     state = like ? {...state, trackId} : ({...state}..remove(trackId));
     final outcome = await ref
         .read(soundcloudApiProvider)
         .setLiked(trackId, like);
     if (outcome != LikeOutcome.ok) {
+      _overlay?[trackId] = !like;
       state = like ? ({...state}..remove(trackId)) : {...state, trackId};
     } else if (ref.exists(meLikesPagedProvider)) {
       // Список library > likes держит свою копию страниц — правим её локально

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -157,10 +159,6 @@ void main() {
 
   test('syncRecent adds ids liked elsewhere to likedTracksProvider', () async {
     final api = _FakeApi([_t(1), _t(2)]);
-    final c = ProviderContainer(
-      overrides: [soundcloudApiProvider.overrideWithValue(api)],
-    );
-    addTearDown(c.dispose);
     // Реальный контроллер без auth: подменяем только build().
     final liked = _SyncLiked();
     final c2 = ProviderContainer(
@@ -174,6 +172,26 @@ void main() {
 
     await c2.read(likedTracksProvider.notifier).syncRecent();
     expect(c2.read(likedTracksProvider), {'old', 't1', 't2'});
+  });
+
+  test('like made during a silent reload survives its final write', () async {
+    final api = _SlowApi([_t(1)]);
+    final c = ProviderContainer(
+      overrides: [
+        soundcloudApiProvider.overrideWithValue(api),
+        likedTracksProvider.overrideWith(() => _SyncLiked()),
+      ],
+    );
+    addTearDown(c.dispose);
+    final n = c.read(likedTracksProvider.notifier);
+
+    final reload = n.reload();
+    await n.toggle('t9');
+    expect(c.read(likedTracksProvider), contains('t9'));
+    api.gate.complete();
+    await reload;
+
+    expect(c.read(likedTracksProvider), {'t1', 't9'});
   });
 
   group('feed card', () {
@@ -235,4 +253,18 @@ void main() {
 class _SyncLiked extends LikedTracksController {
   @override
   Set<String> build() => {'old'};
+}
+
+class _SlowApi extends _FakeApi {
+  _SlowApi(super.server);
+  final gate = Completer<void>();
+
+  @override
+  Future<({List<Track> tracks, String? nextHref})> likesPage({
+    String? nextHref,
+    int limit = 50,
+  }) async {
+    await gate.future;
+    return super.likesPage(nextHref: nextHref, limit: limit);
+  }
 }

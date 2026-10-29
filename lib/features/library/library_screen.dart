@@ -305,8 +305,7 @@ class _PaginatedLikesTabState extends ConsumerState<_PaginatedLikesTab>
     }
   }
 
-  void _loadAllForSearch() =>
-      ref.read(meLikesPagedProvider.notifier).loadAll();
+  void _loadAllForSearch() => ref.read(meLikesPagedProvider.notifier).loadAll();
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
@@ -317,11 +316,10 @@ class _PaginatedLikesTabState extends ConsumerState<_PaginatedLikesTab>
   /// [full] — явное обновление: перечитывает и множество лайков целиком.
   void _refresh({bool full = false}) {
     final liked = ref.read(likedTracksProvider.notifier);
-    if (full) {
-      liked.reload();
-    } else {
-      liked.syncRecent();
-    }
+    final sync = full ? liked.reload() : liked.syncRecent();
+    sync.catchError((Object e, StackTrace st) {
+      ref.read(talkerProvider).warning('likes sync failed', e, st);
+    });
     ref.read(meLikesPagedProvider.notifier).refresh();
   }
 
