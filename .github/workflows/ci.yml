@@ -65,7 +65,9 @@ jobs:
   # are not bit-reproducible across toolchains here.
   scdrm-macos:
     name: Build scdrm (macOS)
-    runs-on: macos-latest
+    # github-hosted by default; repo variable MACOS_RUNNER=self-hosted moves
+    # it to our own mac. pull requests from forks always stay on github-hosted.
+    runs-on: ${{ (vars.MACOS_RUNNER == 'self-hosted' && !github.event.pull_request.head.repo.fork) && fromJSON('["self-hosted", "macOS", "ARM64", "waveform"]') || 'macos-latest' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
