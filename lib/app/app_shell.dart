@@ -14,6 +14,8 @@ import '../core/deeplinks/clipboard_watcher.dart';
 import '../core/deeplinks/deep_links.dart';
 import '../core/lastfm/scrobbler.dart';
 import '../core/log/talker.dart';
+import '../core/recommendations/co_likers_job.dart';
+import '../core/recommendations/listening_providers.dart';
 import '../features/omnibox/omnibox_dropdown.dart';
 import '../features/omnibox/omnibox_providers.dart';
 import '../features/player/player_controller.dart';
@@ -105,6 +107,8 @@ class _AppShellState extends ConsumerState<AppShell> {
     // Lazy-bootstrap скробблера: provider создаст Notifier, который подпишется
     // на playerController.
     ref.watch(lastfmScrobblerProvider);
+    ref.watch(listeningFeedbackProvider);
+    ref.watch(coLikersJobProvider);
     // Lazy-bootstrap deep-link сервиса (waveform:// + soundcloud.com ссылки).
     ref.watch(deepLinkServiceProvider);
     // Lazy-bootstrap слежения за буфером (ссылки soundcloud.com → тост «открыть»).
@@ -157,7 +161,9 @@ class _AppShellState extends ConsumerState<AppShell> {
       next,
     ) {
       if (next == null || next.seq == prev?.seq) return;
-      final msg = '“${next.title}” is unavailable — skipped';
+      final msg = next.goPlus
+          ? '“${next.title}” is GO+ only — can’t play without a subscription'
+          : '“${next.title}” is unavailable — skipped';
       showToast(context, msg, duration: const Duration(seconds: 3));
     });
 
@@ -199,6 +205,10 @@ class _AppShellState extends ConsumerState<AppShell> {
       body: Focus(
         canRequestFocus: false,
         onKeyEvent: (_, event) {
+          // MaterialApp owns Tab/Shift+Tab focus traversal above this shell.
+          if (event.logicalKey == LogicalKeyboardKey.tab) {
+            return KeyEventResult.ignored;
+          }
           if (event.character != null && event.character!.isNotEmpty) {
             return KeyEventResult.ignored;
           }

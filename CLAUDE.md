@@ -2,11 +2,7 @@
 
 ## Что это
 Кроссплатформенный десктопный SoundCloud-клиент на Flutter для macOS, Windows, Linux.
-Эстетика: минимализм + лёгкие web3-акценты, ближе к каноничному SoundCloud, но темнее и тише.
-
-Философия проекта (почему десктоп, почему премиум, почему Flutter) и бэклог идей —
-в `IDEA.md`. Точка входа для Hermes Agent и Codex — `AGENTS.md` (короткая выжимка,
-ссылается сюда). Этот файл остаётся каноническим: правишь контракт здесь — сверь выжимку.
+Эстетика: минимализм, ближе к каноничному SoundCloud, но темнее и тише.
 
 ## Дизайн-контракт
 
@@ -17,11 +13,11 @@
 - border `#2A2A2A`, borderDim `#1A1A1A`, waveDim `#3A3A3A`
 - textHi `#F5F5F5`, textMid `#888888`, textLow `#555555`
 - acid `#FF5500` (SoundCloud orange — только активные элементы)
-- lime `#C6FF00` (web3-маркеры: minted, owned)
+- lime `#C6FF00` (второй акцент: метки и маркеры)
 
 **Типографика:**
 - Inter — основной текст, заголовки
-- JetBrains Mono — все числа, тайм-коды, адреса кошельков, технические метки
+- JetBrains Mono — все числа, тайм-коды, технические метки
 
 **Структура канона SoundCloud:**
 - Обложка трека 160×160 слева
@@ -32,7 +28,7 @@
 
 **Лого:** 5 вертикальных оранжевых баров разной высоты (стилизованная waveform).
 Геометрия = `WaveLogo`. В иконке приложения первые 3 бара acid, последние 2 waveDim
-(«прослушано наполовину»). Все PNG (иконка, фавиконки, OG) генерит
+(«прослушано наполовину»). Все PNG (иконка, фавиконки, OG, фон DMG) генерит
 `python3 tool/brand/make_icons.py` → `assets/brand/`, `assets/icon/icon.png`,
 `site/assets/`; потом `dart run flutter_launcher_icons`. SVG-лого — `assets/brand/`.
 Лендинг — статический `site/index.html` без сборки.
@@ -80,10 +76,6 @@ lib/
 - Стримы отдаются как HLS — `just_audio` поддерживает
 - На время разработки используем моки
 
-## Web3
-- Пока только визуальные элементы: адрес кошелька в шапке, бейдж `◆ minted` (lime) на трек-картах
-- Реальное подключение кошелька через WalletConnect v2 — позже, опционально
-
 ## Дорожная карта
 1. ✅ Дизайн-направление и название
 2. ✅ Дизайн-система в Dart (colors, theme, mono helper, токены отступов)
@@ -92,22 +84,92 @@ lib/
    - Feed: лента waveform-постов с баром действий
    - Library: вкладки overview/likes/playlists/albums/stations/following/history
    - Плеер: shuffle/prev/play/next/repeat, like, скраб по waveform (мок-тикер)
-   - Экран трека (/track/:id): hero + waveform с маркерами комментариев, web3-панель владельца, комментарии с таймкодами, related tracks
-   - Экран артиста (/artist/:handle): шапка (аватар + моно-счётчики + follow + кошелёк), вкладки, popular tracks + albums/playlists
+   - Экран трека (/track/:id): hero + waveform с маркерами комментариев, комментарии с таймкодами, related tracks
+   - Экран артиста (/artist/:handle): шапка (аватар + моно-счётчики + follow), вкладки, popular tracks + albums/playlists
    - Apple-touch: Pressable (spring press), frosted chrome (BackdropFilter TopBar/Player, контент скроллится под баром), мягкие переходы экранов
-4. 🔄 Аудио-плеер:
+4. ✅ Аудио-плеер:
    - ✅ just_audio: реальное воспроизведение HLS (lib/core/audio/audio_engine.dart за провайдером, PlayerController резолвит transcoding→m3u8 и играет; мок-тикер убран)
-   - ⏳ audio_service: медиа-контролы ОС (now-playing, медиа-клавиши)
+   - ✅ audio_service: медиа-контролы ОС (now-playing, медиа-клавиши) — пока только macOS: в pubspec только `audio_service`, бэкендов MPRIS/SMTC нет
 5. 🔄 Замена моков на реальный API:
    - ✅ api-v2 живой по умолчанию (client_id-скрейп + DTO + мапперы); моки только под `--dart-define=MOCK=true`/тесты
    - ✅ Логин per-user через WebView (oauth_token), персональные ручки и рейл под auth-гейтом
    - ⏳ Официальный OAuth 2.1 + PKCE (если откроют регистрацию)
 6. ✅ Поиск: экран `/search?q=` с вкладками tracks/people/playlists (search/tracks|users|playlists), поле в шапке submit→навигация
-7. Web3-интеграция (опционально; визуальные плейсхолдеры кошелька убраны до реального WalletConnect)
+
+### Путь развития (с 2026-10)
+**Горизонт 0 — выпустить то, что есть.** Код на 0.4.0 (следующий тег — `v0.4.0`), опубликованных релизов пока нет.
+Сухой прогон [40156324361](https://github.com/mollykitten/waveform/actions/runs/40156324361)
+от 2026-10-25 на SHA `4e4f87463f77f7e077724a1d73ffd7be9836edcc`: macOS собрался
+и подписался; notarization вернул HTTP 403 — обязательное соглашение Apple
+не подписано или истекло. Staple и DMG пропущены, Windows и Linux прошли.
+Это старый SHA: он не подтверждает сборку текущего main после #56. Нужно
+урегулировать соглашение Apple, прогнать финальный main без тега и проверить
+артефакты/нотаризацию на чистой macOS; процесс — [docs/releasing.md](docs/releasing.md).
+До публикации текущего кода новые фичи не берём.
+
+**Горизонт 1 — платформенный паритет** (тезис «кроссплатформенность как условие»):
+- медиа-клавиши и now-playing на Windows (SMTC) и Linux (MPRIS) — сейчас только macOS;
+- нормальный логин на Windows (сейчас ручная вставка oauth_token);
+- deep-link `waveform://` на Windows/Linux;
+- Windows code-signing.
+
+**Горизонт 2 — фичи, по одной на релиз** (порядок — ценность к усилию):
+1. Shuffle всех лайков — реализовано (`loadAll()` и shuffle полной коллекции).
+2. Light theme + следование системному appearance.
+3. Reduced-motion и клавиатурная навигация — реализованы; полный VoiceOver-проход впереди.
+4. Heatmap прослушиваний 7×24.
+5. Lyrics — последним: у SoundCloud нет эндпоинта, нужен сторонний источник.
+
+**Рекомендации и источники кандидатов (статус 2026-10-27).** В исходном коде
+реализованы рекомендации по реальным трекам SoundCloud, визуальная «Моя волна»
+(одна кнопка, без настроек), непрерывное пополнение очереди и локальные
+структурные векторы по ограниченному related-графу (до 6 seed-интересов × 12
+соседей) с локальными фактами прослушивания, дизлайком и seen-памятью. LLM-слой
+(ChatGPT-подключение, custom providers, поле настроения, согласие на отправку
+метаданных) удалён по итогам пилотов ниже. Векторы — не нейронные
+аудиоэмбеддинги и не глобальный каталог. Качество рекомендаций и нативный
+playback/refill ещё требуют проверки; тесты не доказывают эти сценарии.
+
+Офлайн-пилоты 2026-10-27 на публичных лайках четырёх пользователей (тест — 100
+новых лайков каждого) решили развилку: аудио-эмбеддинги как профиль вкуса (CLAP)
+не лучше случайного — **no-go**, бэкенд с векторным индексом ради них не строим.
+Related-граф точен там, куда достаёт, но достаёт 14 / 7 / 25 / 17 из 100 новых
+лайков; co-likers CF (лайкеры сидов → соседи с ≥2 общими сидами → их свежие лайки)
+достаёт 44 / 52 / 76 / 39 и почти включает граф, но в топ-50 собственного списка
+ранжирует не лучше графа. 16–30% CF-кандидатов не играются. Около половины новых
+лайков владельца недостижимы ни графом, ни CF; ближайший незадействованный
+источник — домашний стрим под oauth. Model-assisted маршрут (модель планирует
+поиск → `search/tracks` → модель ранжирует), воспроизведённый с промптами
+приложения на локальной Qwen3-1.7B, достал 0 из 100 новых лайков у всех; потолок
+самого поискового канала без модели — 3 / 9 / 13 / 3, ниже графа у трёх из
+четырёх и ниже CF у всех, так что вывод от размера модели не зависит. Модель
+как источник рекомендаций не нужна, весь LLM-слой убран. Побочный дефект
+пилота — `mappers.dart` подставлял жанр `electronic` при пустом, и он попадал в
+промпт как настоящий — исправлен (пустой жанр больше не подменяется), самого
+промпта уже нет.
+Офлайн-оценка на лайках исчерпана.
+
+Статус: этапы 1–2 ниже уже в коде (не выпущены) — CF, домашний стрим, фильтр
+проигрываемости и поле `source` в фактах; сравнение источников на живых сессиях
+ещё впереди. План после v0.4.0 (горизонт 0 — сначала релиз): CF и домашний стрим как
+дополнительные источники кандидатов рядом с графом фоновой задачей с кэшем
+(≈350 запросов и 3–4 мин на пользователя); фильтр проигрываемости; ранжирование
+CF по весу соседа и давности его лайка, без фиксированной склейки 0.5; локальная
+телеметрия лайк/скип по источнику для сравнения на живых сессиях. Бэкенд — только
+если бюджет запросов на клиенте не выдержит, с прежними требованиями: изоляция
+аккаунтов, удаление, отдельное согласие на sync, локальный fallback, пороги
+качества, latency и стоимости, наблюдаемость и rollback. Полный статус и этапы —
+[docs/roadmap.md](docs/roadmap.md); детали реализованного core и сводка пилотов —
+[docs/my-wave.md](docs/my-wave.md).
+
+**Не планируем:** web3 (снят решением владельца 2026-10); «когда откроют API» —
+не в нашей власти.
 
 Сделано вне нумерации: экран плейлиста `/playlist/:id` (карусели главной ведут на него), громкость в плеере, логи Talker.
+- **Shuffle all likes.** Кнопка в library/likes догружает страницы лайков через
+  `loadAll()`, перемешивает полную коллекцию и запускает её с shuffle.
 - **Правый рейл переосмыслен (UX):** убрана подставная секция «artists you should follow»
-  и фейковая web3-карточка «7 minted tracks». Вместо них — профиль-карточка (тап → свой
+  и фейковая карточка-счётчик. Вместо них — профиль-карточка (тап → свой
   `/artist`, лёгкий ◆ lime-акцент), три тайла-шортката с реальными счётчиками
   (likes/playlists/following → `/library?tab=…`), превью последних лайков (`see all` →
   likes) и история. Только реальные данные.
@@ -118,11 +180,34 @@ lib/
   на живом аккаунте — при провале деградирует до session-local + лог.
 - **Progressive-фолбэк стрима.** `Track.streamCandidates` несёт все
   транскодинги (HLS → progressive); плеер перебирает их, пока один не
-  заиграет. Зашифрованные (`cbc-/ctr-encrypted-hls`) транскодинги отсеиваются
-  (just_audio их не играет). Любая неудачная загрузка триггерит видимое
-  уведомление (AppShell `ref.listen`), не silent skip. **GO+-детекция и бейдж
-  `🔒 GO+` убраны (решение владельца 2026-10):** такие треки ничем не
-  выделяются в UI — общий «unavailable — skipped».
+  заиграет. Зашифрованные (`cbc-/ctr-encrypted-hls`) транскодинги из
+  обычных кандидатов отсеиваются (just_audio их не играет). Любая неудачная
+  загрузка триггерит видимое уведомление (AppShell `ref.listen`), не silent
+  skip.
+- **Бейдж GO+ (возвращён 2026-10-28, детекция новая).** `Track.goPlus` =
+  `TrackDto.isGoPlus`: `policy == 'SNIP'`, или `monetization_model ==
+  'SUB_HIGH_TIER'`, или все транскодинги — превью (`snipped`). Наличие
+  зашифрованного транскодинга GO+ НЕ означает: DRM-треки дистрибьюторов
+  (`policy: ALLOW`) играют без подписки и бейджа не получают. Бейдж
+  `GoPlusBadge` — в `TrackRow`, BottomPlayer и шапке трека; кнопка play не
+  блокируется. Если GO+ трек не проигрался, тост «GO+ only — can’t play
+  without a subscription» (`Unplayable.goPlus`), иначе общий «unavailable —
+  skipped». `policy`/`monetization_model` могут не приходить в search/stream/
+  likes — тогда срабатывает только признак «все превью»; на живом аккаунте
+  не проверено.
+- **DRM через Widevine (решение владельца 2026-10, правило переписано).**
+  Играть треки с `ctr-encrypted-hls` (Widevine CENC) — допустимо: это DRM
+  дистрибьюторов/лейблов (играют без подписки) и GO+ у подписчика (без
+  подписки сервис отдаёт только превью). Go-ядро
+  `third_party/scdrm` → `libscdrm.dylib` по `dart:ffi`
+  (`lib/core/drm/`), фолбэк после обычных кандидатов: лицензия → расшифровка
+  → mp3 в кэш. Только macOS. Профиль устройства `assets/widevine/device.wvd`
+  при локальной сборке кладёт сам пользователь; **в git он не попадает
+  никогда** (`.gitignore`). Решение владельца 2026-10-28: macOS-релиз
+  бандлит профиль — release.yml пишет его из секрета
+  `WIDEVINE_DEVICE_WVD_BASE64` на время сборки. Windows/Linux-джобы по-
+  прежнему падают на любом `*.wvd`. Без профиля DRM выключен и трек —
+  общий «unavailable — skipped».
 - **Tiles ↔ list переключатель.** `viewModeProvider` + `ViewToggle` + новый
   `CollectionRow` — в library + search/playlists. Персистится в `prefs.json`.
 - **Экран /settings.** Account (avatar + sign in/out), view (тогл), cache
@@ -144,9 +229,10 @@ lib/
   push/PR (pinned Flutter 3.41.0 — match local; иначе onReorder
   deprecation warn на свежем stable). Release: на `v*` тег — 3 OS
   параллельно, macOS sign (Developer ID Application) + notarize
-  (`xcrun notarytool`) + staple + `.dmg`. Required secrets:
-  APPLE_TEAM_ID, APPLE_CERT_P12_BASE64, APPLE_CERT_PASSWORD, APPLE_ID,
-  APPLE_APP_PASSWORD, KEYCHAIN_PASSWORD.
+  (`xcrun notarytool`, ключ API) + staple + `.dmg`. Required secrets:
+  APPLE_CERT_P12_BASE64, APPLE_CERT_PASSWORD, KEYCHAIN_PASSWORD,
+  APPLE_API_KEY_P8_BASE64, APPLE_API_KEY_ID, APPLE_API_ISSUER_ID
+  (нотаризация по ключу App Store Connect API; см. docs/releasing.md).
 - **Phase 1 — Visual.** Hero cover→detail (`Hero(tag: 'cover-track-{id}'
   / 'cover-playlist-{id}')`, `CachedNetworkImage.fadeInDuration: zero`
   чтобы не конкурировать с Hero). `EmptyState` (icon+title+sub+CTA)
@@ -275,8 +361,10 @@ lib/
   `dart run flutter_launcher_icons` → macOS .icns + Windows .ico.
 
 ### Pre-release дел user'у
-1. **Apple-секреты в GitHub** (Settings → Secrets → Actions): см.
-   список выше (Phase 0). Без них release.yml упадёт на codesign step.
+1. **Apple-подготовка**: секреты перечислены выше (Phase 0). В сухом
+   прогоне 2026-10-25 импорт сертификата и подпись прошли; текущий
+   наблюдавшийся блокер — обязательное соглашение Apple, HTTP 403 при
+   notarization. Нужен успешный прогон финального main после его принятия.
 2. **Last.fm** (опционально): зарегистрировать Waveform на
    last.fm/api/account/create → положить `LASTFM_API_KEY` и
    `LASTFM_SHARED_SECRET` ещё двумя GitHub Actions secrets (рядом
@@ -289,20 +377,19 @@ lib/
 3. **Иконка приложения**: положить квадратный PNG в
    `assets/icon/icon.png` → `dart run flutter_launcher_icons` →
    `flutter clean && flutter build macos`.
-4. **Тег**: `git tag v0.1.0 && git push --tags` → release.yml
-   соберёт + опубликует.
+4. **Тег `v0.4.0`** (решено 2026-10). Сначала CI и сухой прогон финального
+   main без публикации: `gh workflow run release.yml --ref main`
+   (publish-джоб гейтится на тег). Проверить совпадение SHA и результаты
+   платформ; macOS обязателен, Windows/Linux best effort. Дату в CHANGELOG
+   ставить только при готовности публикации, затем проверить итоговый SHA
+   повторно и пушить только `v0.4.0`: см. [docs/releasing.md](docs/releasing.md).
 
 ## Идеи / бэклог
-- **True-shuffle по всей коллекции (likes).** Для плейлиста сделано
-  (`allPlaylistTracks` + `_ShuffleAll`); остаётся «shuffle all likes» —
-  пагинация `/users/{id}/track_likes?next_href=…`, UI-точка входа на library/
-  likes (кнопка над сеткой).
 - **Light theme** + system-appearance follow.
-- **Real WalletConnect v2** (визуальные web3-плейсхолдеры пока убраны).
 - **Official OAuth 2.1 + PKCE** (если SoundCloud откроет регистрацию).
 - **Drag tracks между плейлистами** (web-SC этого почти не даёт).
 - **Lyrics view** на странице трека.
-- **Reduced-motion + полный VoiceOver-pass** (accessibility-аудит).
+- **Полный VoiceOver-pass** (accessibility-аудит); reduced-motion уже реализован.
 - **Windows code-signing** (EV cert) — сейчас .zip без подписи,
   SmartScreen ругается.
 - **Notarization-проверка на чистой macOS-машине** после первого
@@ -317,10 +404,15 @@ lib/
   в реестр, на Linux — `.desktop` с `x-scheme-handler/waveform` (уровень
   инсталлятора). Кроссплатформенно уже работает вставка `soundcloud.com`
   ссылки в omnibox → resolve → навигация.
-- **Windows webview-логин лагает** (`desktop_webview_window`/WebView2 на
-  тяжёлой странице SC). Сейчас основной путь на Windows — ручная вставка
-  oauth_token (в login-диалоге есть гайд + «open soundcloud.com»). Чинить:
-  либо лёгкий signin-flow, либо другой webview-бэкенд.
+- **Windows webview-логин лагает — вероятная причина исправлена, ждёт
+  проверки на Windows.** Плагин рисует тулбар webview-окна вторым
+  Flutter-движком, который снова зовёт `main(args)` с
+  `['web_view_title_bar', id]`; без `runWebViewTitleBarWidget(args)` в main
+  там поднималось всё приложение (audio_service, API, свой sync-webview).
+  Плюс натив Windows перехватывал каждую навигацию (cancel → Dart → re-Navigate)
+  даже при `triggerOnUrlRequestEvent: false` — пропатчено в
+  `third_party/.../windows/web_view.cc`. Если после этого всё ещё лагает —
+  смотреть в сторону лёгкого signin-flow или другого webview-бэкенда.
 - **Запись play-history / лайки комментов** — api-v2 их не поддерживает
   (проверено курлом: POST/PUT play-history и `/comments/{id}/likes` → 404,
   пер-юзерного поля лайка на треке/комменте нет). Появятся — ревайвить
@@ -332,7 +424,8 @@ lib/
 - Все цифры/тайм-коды/адреса — через `AppTheme.mono()` helper
 - Acid orange используется скупо: только активные элементы
 - **Авторство коммитов.** Автор и коммиттер всех коммитов — `alina
-  <hi@alina.sh>` (публичный verified-email профиля, прописан в local
+  <hi@kitten.ac>` (публичный verified-email профиля с 2026-10, прежний
+  `hi@alina.sh` не использовать; прописан в local
   `.git/config` этого репо; глобалку НЕ трогать — там рабочий внутренний
   git). НЕ добавлять трейлер `Co-Authored-By: Claude` и любые AI-co-author
   пометки по умолчанию — GitHub засчитывает соавторов в contributors и

@@ -1,10 +1,23 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:talker_flutter/talker_flutter.dart';
 
 import '../log/talker.dart';
+import 'audio_output.dart';
+
+/// A swap failed after selecting the incoming source. Its metadata must be
+/// retained: the outgoing source may already have been replaced for AirPlay.
+class AudioSwapCommittedException implements Exception {
+  const AudioSwapCommittedException(this.cause);
+
+  final Object cause;
+
+  @override
+  String toString() => 'audio swap failed after source commit: $cause';
+}
 
 /// Абстракция звукового движка. PlayerController зависит только от неё —
 /// не от just_audio напрямую, поэтому тесты подменяют движок заглушкой.
@@ -23,6 +36,7 @@ abstract interface class AudioEngine {
   Stream<void> get completedStream;
 
   /// Загрузить источник по URL и начать воспроизведение.
+  /// Пауза во время загрузки сохраняет выбор источника без автозапуска.
   Future<void> load(String url);
   Future<void> pause();
   Future<void> resume();
@@ -55,14 +69,30 @@ abstract interface class AudioEngine {
 /// собственные broadcast-контроллеры — downstream-слушатель (PlayerController)
 /// не пересоздаёт подписки при swap'е.
 class JustAudioEngine implements AudioEngine {
-  JustAudioEngine(this._log, {AudioPlayer Function()? createPlayer})
-    : _a = (createPlayer ?? AudioPlayer.new)(),
-      _b = (createPlayer ?? AudioPlayer.new)() {
+  JustAudioEngine(
+    this._log, {
+    AudioPlayer Function()? createPlayer,
+    Future<void> Function(AudioPlayer)? preparePlayer,
+    Future<void> Function(AudioPlayer)? bindAudioOutput,
+    Future<void> Function(Future<void> Function())? routingTransaction,
+    bool Function()? preservePlayer,
+  }) : _preparePlayer = preparePlayer,
+       _bindAudioOutput = bindAudioOutput,
+       _routingTransaction = routingTransaction,
+       _preservePlayer = preservePlayer,
+       _a = (createPlayer ?? AudioPlayer.new)(),
+       _b = (createPlayer ?? AudioPlayer.new)() {
     _bindActive();
   }
 
   /// Talker для диагностики crossfade (виден в /logs).
   final Talker _log;
+  final Future<void> Function(AudioPlayer)? _preparePlayer;
+  final Future<void> Function(AudioPlayer)? _bindAudioOutput;
+  final Future<void> Function(Future<void> Function())? _routingTransaction;
+  final bool Function()? _preservePlayer;
+  bool get _preservingPlayer => _preservePlayer?.call() ?? false;
+  bool _disposed = false;
 
   final AudioPlayer _a;
   final AudioPlayer _b;
@@ -73,6 +103,8 @@ class JustAudioEngine implements AudioEngine {
   double _userVolume = 1.0;
 
   bool _preloadReady = false;
+  String? _preloadUrl;
+  int _preloadGen = 0;
 
   /// Поколение «переходных» операций (load/swap). Каждая новая операция
   /// инкрементит счётчик; долгая crossfade-рампа на каждой итерации сверяет
@@ -80,6 +112,50 @@ class JustAudioEngine implements AudioEngine {
   /// иначе `_active` мог 6с указывать на старый (паузный) плеер, и громкость/
   /// прогресс/play-pause рулили «не тем» плеером (главный баг десинка).
   int _swapGen = 0;
+
+  // Pause cancels the ramp, but must still commit an incoming source whose
+  // metadata the controller has already selected. Load/stop cancel both.
+  int _sourceGen = 0;
+  bool _wantsPlayback = false;
+  Future<void>? _pendingSwap;
+  Completer<bool>? _pendingLoad;
+
+  void _cancelPendingLoad() {
+    final pending = _pendingLoad;
+    _pendingLoad = null;
+    if (pending != null && !pending.isCompleted) pending.complete(false);
+  }
+
+  bool _isSourceCurrent(int generation) =>
+      !_disposed && generation == _sourceGen;
+
+  bool _isCurrent(int generation) => !_disposed && generation == _swapGen;
+
+  Future<void> _prepareOutput(AudioPlayer player) async {
+    await _preparePlayer?.call(player);
+  }
+
+  Future<void> _withRoutingTransaction(Future<void> Function() operation) =>
+      _routingTransaction?.call(operation) ?? operation();
+
+  Future<void> _restoreOutput() async {
+    if (_disposed) return;
+    try {
+      await _bindAudioOutput?.call(_active);
+    } catch (error, stack) {
+      _log.error('[engine] output binding recovery failed', error, stack);
+    }
+  }
+
+  Future<void> _bindOutput(AudioPlayer player) async {
+    try {
+      await _bindAudioOutput?.call(player);
+    } catch (error, stack) {
+      _log.error('[engine] output binding failed', error, stack);
+      await _restoreOutput();
+      rethrow;
+    }
+  }
 
   // Прокси-стримы.
   final _positionCtrl = StreamController<Duration>.broadcast();
@@ -134,42 +210,109 @@ class JustAudioEngine implements AudioEngine {
 
   @override
   Future<void> load(String url) async {
+    _cancelPendingLoad();
+    final done = Completer<bool>();
+    _pendingLoad = done;
+    var loaded = false;
+    try {
+      await _load(url);
+      loaded = true;
+    } finally {
+      if (identical(_pendingLoad, done)) _pendingLoad = null;
+      if (!done.isCompleted) done.complete(loaded);
+    }
+  }
+
+  Future<void> _load(
+    String url, {
+    bool autoplay = true,
+    void Function()? onSourceLoaded,
+  }) async {
+    if (_disposed) return;
+    final source = ++_sourceGen;
+    if (onSourceLoaded == null) _pendingSwap = null;
+    _wantsPlayback = autoplay;
     // Новая авторитетная загрузка отменяет любую идущую crossfade-рампу и
     // preload (он был под старый «следующий»).
     ++_swapGen;
+    // Pause changes transport intent, while load/stop/dispose change source.
+    // Installing the selected source must survive pause without autoplaying.
+    bool isCurrentLoad() => _isSourceCurrent(source);
+    ++_preloadGen;
     _log.debug('[engine] load → gen=$_swapGen');
     _preloadReady = false;
+    _preloadUrl = null;
+    final player = _active;
+    final inactive = _inactive;
     // Глушим теневой плеер — чтобы не остался «призрачный» звук от
     // прерванного crossfade'а.
     try {
-      await _inactive.pause();
-      await _inactive.setVolume(0);
-    } catch (_) {}
-    await _active.setUrl(url);
-    await _active.setVolume(_userVolume);
+      await inactive.pause();
+      if (!isCurrentLoad()) return;
+      await inactive.setVolume(0);
+    } catch (error, stack) {
+      _log.warning('[engine] inactive player cleanup failed', error, stack);
+    }
+    if (!isCurrentLoad()) return;
+    await player.setUrl(url);
+    if (!isCurrentLoad()) return;
+    onSourceLoaded?.call();
+    await _prepareOutput(player);
+    if (!isCurrentLoad()) return;
+    await _withRoutingTransaction(() async {
+      if (!isCurrentLoad()) return;
+      await _bindOutput(player);
+      if (!isCurrentLoad()) await _restoreOutput();
+    });
+    if (!isCurrentLoad()) return;
+    await player.setVolume(_userVolume);
+    if (!isCurrentLoad()) return;
     // Явный seek(0): setUrl обычно сбрасывает позицию, но защищаемся от
     // унаследованной позиции у переиспользуемого AudioPlayer'а.
-    await _active.seek(Duration.zero);
-    _play(_active);
+    await player.seek(Duration.zero);
+    if (isCurrentLoad() && _wantsPlayback) _play(player);
   }
 
   @override
   Future<void> pause() async {
     // Отменяем идущую crossfade-рампу — иначе она доиграет старый плеер и
     // докрутит громкости поверх нашей паузы.
-    ++_swapGen;
+    final gen = ++_swapGen;
+    _wantsPlayback = false;
     _log.debug('[engine] pause → gen=$_swapGen');
     // Глушим ОБА плеера: во время crossfade старый (`from`) ещё звучит, и
     // пауза только `_active` оставляла бы его играющим («поставил на паузу —
     // а играет»). Пауза второго плеера идемпотентна, когда он и так стоит.
-    await _a.pause();
-    await _b.pause();
+    (Object, StackTrace)? failure;
+    for (final player in [_a, _b]) {
+      try {
+        await player.pause();
+      } catch (error, stack) {
+        // Failure on one player must not leave the other playing. Keep the
+        // first error for the caller, with at most one log per player.
+        failure ??= (error, stack);
+        _log.warning('[engine] player pause failed', error, stack);
+      }
+      if (!_isCurrent(gen) || _wantsPlayback) return;
+    }
+    if (failure != null) {
+      Error.throwWithStackTrace(failure.$1, failure.$2);
+    }
     // Рампа могла оставить активный на промежуточной громкости — возвращаем.
     await _active.setVolume(_userVolume);
   }
 
   @override
-  Future<void> resume() => _active.play();
+  Future<void> resume() async {
+    final source = _sourceGen;
+    _wantsPlayback = true;
+    // The old source may still be active while load cleans up or sets its URL.
+    final load = _pendingLoad;
+    if (load != null && !await load.future) return;
+    // Until native binding commits, _active still owns the outgoing source.
+    await _pendingSwap;
+    if (_isSourceCurrent(source) && _wantsPlayback) _play(_active);
+  }
 
   @override
   Future<void> seek(Duration position) => _active.seek(position);
@@ -181,52 +324,149 @@ class JustAudioEngine implements AudioEngine {
   }
 
   @override
-  Future<void> stop() => _active.stop();
-
-  @override
-  Future<void> preloadNext(String? url) async {
-    if (url == null || url.isEmpty) {
-      _preloadReady = false;
-      try {
-        await _inactive.stop();
-      } catch (_) {}
-      return;
-    }
-    try {
-      await _inactive.setUrl(url);
-      await _inactive.setVolume(0); // crossfade-старт всегда от 0
-      _preloadReady = true;
-    } catch (_) {
-      _preloadReady = false;
+  Future<void> stop() async {
+    if (_disposed) return;
+    ++_sourceGen;
+    _cancelPendingLoad();
+    _pendingSwap = null;
+    _wantsPlayback = false;
+    final gen = ++_swapGen;
+    ++_preloadGen;
+    _preloadReady = false;
+    _preloadUrl = null;
+    final player = _active;
+    await _inactive.pause();
+    if (!_isCurrent(gen)) return;
+    if (_preservingPlayer) {
+      await player.pause();
+      if (_isCurrent(gen)) await player.seek(Duration.zero);
+    } else {
+      await player.stop();
     }
   }
 
   @override
-  bool get hasPreload => _preloadReady;
+  Future<void> preloadNext(String? url) async {
+    final gen = ++_preloadGen;
+    _preloadReady = false;
+    _preloadUrl = null;
+    if (_disposed) return;
+    final player = _inactive;
+    if (_preservingPlayer || url == null || url.isEmpty) {
+      try {
+        await player.pause();
+      } catch (error, stack) {
+        _log.warning('[engine] preload cancellation failed', error, stack);
+      }
+      return;
+    }
+    try {
+      await player.setUrl(url);
+      if (_disposed || gen != _preloadGen || _preservingPlayer) return;
+      await _prepareOutput(player);
+      if (_disposed || gen != _preloadGen || _preservingPlayer) return;
+      await player.setVolume(0);
+      if (_disposed || gen != _preloadGen || _preservingPlayer) return;
+      _preloadUrl = url;
+      _preloadReady = true;
+    } catch (error, stack) {
+      if (gen == _preloadGen) _preloadReady = false;
+      _log.warning('[engine] preload failed', error, stack);
+    }
+  }
+
+  @override
+  bool get hasPreload => !_disposed && !_preservingPlayer && _preloadReady;
 
   @override
   Future<void> swapToNext({Duration crossfade = Duration.zero}) async {
-    if (!_preloadReady) {
+    final done = Completer<void>();
+    _pendingSwap = done.future;
+    var committed = false;
+    try {
+      await _swapToNext(crossfade: crossfade, onCommit: () => committed = true);
+    } catch (error) {
+      if (committed) throw AudioSwapCommittedException(error);
+      rethrow;
+    } finally {
+      if (identical(_pendingSwap, done.future)) _pendingSwap = null;
+      done.complete();
+    }
+  }
+
+  Future<void> _swapToNext({
+    required Duration crossfade,
+    required void Function() onCommit,
+  }) async {
+    if (_disposed || !_preloadReady) {
       _log.warning('[swap] called but preload not ready — no-op');
       return;
     }
+    _cancelPendingLoad();
+    final preloadUrl = _preloadUrl;
+    if (_preservingPlayer) {
+      if (preloadUrl != null) {
+        await _load(preloadUrl, onSourceLoaded: onCommit);
+      }
+      return;
+    }
     final gen = ++_swapGen;
+    final source = ++_sourceGen;
+    _wantsPlayback = true;
+    ++_preloadGen;
     _log.debug('[swap] gen=$gen crossfade=${crossfade.inMilliseconds}ms');
     final from = _active;
     final to = _inactive;
     _preloadReady = false;
+    _preloadUrl = null;
 
-    // ИНВАРИАНТ: `_active` указывает на плеер «текущего трека» сразу, ещё до
-    // окончания рампы. Тогда громкость/позиция/play-pause всегда рулят новым
-    // треком, а старый просто гаснет в фоне — даже если нас прервут.
-    _active = to;
-    _bindActive();
+    // Picker presentation shares this transaction: it must observe either the
+    // committed incoming player or the restored player retained for AirPlay.
+    var keepPlayer = false;
+    await _withRoutingTransaction(() async {
+      if (!_isSourceCurrent(source)) return;
+      await _bindOutput(to);
+      if (!_isSourceCurrent(source)) {
+        await _restoreOutput();
+        return;
+      }
+      if (_preservingPlayer) {
+        keepPlayer = true;
+        await _bindOutput(from);
+        return;
+      }
+      _active = to;
+      onCommit();
+      _bindActive();
+    });
+    if (!_isSourceCurrent(source)) return;
+    if (keepPlayer) {
+      if (preloadUrl != null) {
+        await _load(
+          preloadUrl,
+          autoplay: _wantsPlayback,
+          onSourceLoaded: onCommit,
+        );
+      }
+      return;
+    }
+
+    if (!_isCurrent(gen)) {
+      // A pause during binding keeps the incoming source selected, silently.
+      // A queued resume waits for this commit before playing the new source.
+      await from.pause();
+      if (_isSourceCurrent(source)) await to.setVolume(_userVolume);
+      return;
+    }
+
     // Защита от унаследованной позиции у preload'ного плеера.
     await to.seek(Duration.zero);
+    if (!_isCurrent(gen)) return;
 
     if (crossfade <= Duration.zero) {
       // Gapless: мгновенный swap.
       await to.setVolume(_userVolume);
+      if (!_isCurrent(gen)) return;
       _play(to);
       await from.pause();
       return;
@@ -236,35 +476,47 @@ class JustAudioEngine implements AudioEngine {
     // передний (`to` = новый `_active`) набирает до _userVolume.
     const stepMs = 50;
     final steps = (crossfade.inMilliseconds / stepMs).clamp(1, 10000).toInt();
-    _log.debug(
-      '[crossfade] start gen=$gen steps=$steps userVol=$_userVolume',
-    );
+    _log.debug('[crossfade] start gen=$gen steps=$steps userVol=$_userVolume');
     await to.setVolume(0);
+    if (!_isCurrent(gen)) return;
     _play(to);
     for (var i = 1; i <= steps; i++) {
-      if (gen != _swapGen) {
+      if (!_isCurrent(gen)) {
         _log.warning(
           '[crossfade] ABORT mid-ramp step=$i/$steps gen=$gen now=$_swapGen '
           'toVol=${_userVolume * (i / steps)}',
         );
         return; // нас перебила новая load/swap — выходим
       }
+      if (_preservingPlayer) {
+        await from.pause();
+        if (_isCurrent(gen)) await to.setVolume(_userVolume);
+        return;
+      }
       final t = i / steps;
       await from.setVolume(_userVolume * (1 - t));
+      if (!_isCurrent(gen)) return;
       await to.setVolume(_userVolume * t);
       await Future<void>.delayed(const Duration(milliseconds: stepMs));
     }
-    if (gen != _swapGen) {
+    if (!_isCurrent(gen)) {
       _log.warning('[crossfade] ABORT post-loop gen=$gen now=$_swapGen');
       return;
     }
     await from.pause();
+    if (!_isCurrent(gen)) return;
     await to.setVolume(_userVolume);
     _log.debug('[crossfade] done → to=userVol=$_userVolume');
   }
 
   @override
   void dispose() {
+    if (_disposed) return;
+    _disposed = true;
+    ++_sourceGen;
+    _cancelPendingLoad();
+    ++_swapGen;
+    ++_preloadGen;
     _posSub?.cancel();
     _bufSub?.cancel();
     _playingSub?.cancel();
@@ -281,7 +533,19 @@ class JustAudioEngine implements AudioEngine {
 /// Единый звуковой движок на время жизни приложения.
 /// Тесты переопределяют провайдер заглушкой, чтобы не дёргать плагин.
 final audioEngineProvider = Provider<AudioEngine>((ref) {
-  final engine = JustAudioEngine(ref.read(talkerProvider));
+  final output = ref.read(audioOutputProvider.notifier);
+  final isMacOS = !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS;
+  final engine = JustAudioEngine(
+    ref.read(talkerProvider),
+    routingTransaction: (operation) => output.routingTransaction(operation),
+    preservePlayer: () => output.preservePlayer,
+    preparePlayer: isMacOS
+        ? (player) => player.setAllowsExternalPlayback(true)
+        : null,
+    bindAudioOutput: isMacOS
+        ? (player) => player.setAsAudioOutputPlayer()
+        : null,
+  );
   ref.onDispose(engine.dispose);
   return engine;
 });

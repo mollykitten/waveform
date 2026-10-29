@@ -20,9 +20,11 @@ class CollectionRow extends StatelessWidget {
       case CollectionTarget.track:
         context.push('/track/${item.id}');
       case CollectionTarget.playlist:
-        context.push('/playlist/${item.id}');
+        context.push('/playlist/${Uri.encodeComponent(item.id)}');
       case CollectionTarget.artist:
-        context.push('/artist/${Uri.encodeComponent(item.handle ?? item.title)}');
+        context.push(
+          '/artist/${Uri.encodeComponent(item.handle ?? item.title)}',
+        );
     }
   }
 
@@ -70,13 +72,6 @@ class CollectionRow extends StatelessWidget {
                           ),
                         ),
                       ),
-                      if (item.minted) ...[
-                        const SizedBox(width: 6),
-                        const Text(
-                          '◆',
-                          style: TextStyle(color: AppColors.lime, fontSize: 11),
-                        ),
-                      ],
                     ],
                   ),
                   const SizedBox(height: 2),

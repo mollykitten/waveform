@@ -7,7 +7,6 @@ import '../../../app/theme/colors.dart';
 import '../../../shared/format.dart';
 import '../../../shared/models/track.dart';
 import '../../../shared/widgets/cover_art.dart';
-import '../../../shared/widgets/minted_badge.dart';
 import '../../../shared/widgets/pressable.dart';
 import '../../../shared/widgets/live_waveform.dart';
 import '../../player/player_controller.dart';
@@ -161,7 +160,6 @@ class _Header extends StatelessWidget {
             ],
           ),
         ),
-        if (track.minted) const MintedBadge(),
       ],
     );
   }

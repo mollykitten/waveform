@@ -4,10 +4,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:talker_flutter/talker_flutter.dart';
+import 'package:waveform_app/app/app.dart';
+import 'package:waveform_app/app/router.dart';
+import 'package:waveform_app/core/api/mock_soundcloud_api.dart';
+import 'package:waveform_app/core/api/providers.dart';
 import 'package:waveform_app/core/api/liked_tracks.dart';
 import 'package:waveform_app/core/audio/audio_engine.dart';
 import 'package:waveform_app/core/audio/playback_prefs.dart';
 import 'package:waveform_app/core/deeplinks/clipboard_watcher.dart';
+import 'package:waveform_app/core/log/talker.dart';
 import 'package:waveform_app/features/player/player_controller.dart';
 import 'package:waveform_app/features/player/player_ui_state.dart';
 import 'package:waveform_app/features/player/widgets/bottom_player.dart';
@@ -16,7 +22,7 @@ import 'package:waveform_app/shared/models/track.dart';
 import '../support/fake_audio_engine.dart';
 import '../support/stub_liked_tracks.dart';
 
-Track track(String id, {String? url}) => Track(
+Track track(String id, {String? url, bool playable = false}) => Track(
   id: id,
   title: 'Track $id',
   artist: 'Artist',
@@ -26,7 +32,13 @@ Track track(String id, {String? url}) => Track(
   plays: 0,
   waveform: const [0.2, 0.6, 0.4],
   permalinkUrl: url,
+  streamCandidates: playable ? ['https://example.com/$id'] : const [],
 );
+
+class _PlayableApi extends MockSoundcloudApi {
+  @override
+  Future<String?> resolveStreamUrl(String url) async => url;
+}
 
 class _Watcher implements ClipboardWatcher {
   final seen = <String>[];
@@ -75,6 +87,7 @@ void main() {
       ProviderScope(
         overrides: [
           audioEngineProvider.overrideWithValue(engine),
+          soundcloudApiProvider.overrideWithValue(_PlayableApi()),
           likedTracksProvider.overrideWith(StubLikedTracks.new),
           clipboardWatcherProvider.overrideWith((ref) => watcher),
         ],
@@ -127,7 +140,68 @@ void main() {
   });
 
   for (final collapsed in [false, true]) {
-    for (final width in [960.0, 1280.0, 1600.0]) {
+    testWidgets('real app player button copies permalink without route or '
+        'playback changes: collapsed=$collapsed', (tester) async {
+      const url = 'https://soundcloud.com/artist/a%20b?token=copy-test#t=12';
+      tester.view.physicalSize = const Size(1280, 820);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+        if (call.method == 'Clipboard.setData') {
+          clipboard.add((call.arguments as Map)['text'] as String);
+        }
+        return null;
+      });
+      addTearDown(
+        () => messenger.setMockMethodCallHandler(SystemChannels.platform, null),
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            soundcloudApiProvider.overrideWithValue(const MockSoundcloudApi()),
+            audioEngineProvider.overrideWithValue(engine),
+            likedTracksProvider.overrideWith(StubLikedTracks.new),
+            clipboardWatcherProvider.overrideWith((ref) => watcher),
+            talkerProvider.overrideWithValue(Talker()),
+          ],
+          child: const WaveformApp(),
+        ),
+      );
+      appRouter.go('/');
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+      final container = ProviderScope.containerOf(
+        tester.element(find.byType(WaveformApp)),
+      );
+      if (collapsed) {
+        container.read(playerCollapsedProvider.notifier).collapse();
+      }
+      container
+          .read(playerControllerProvider.notifier)
+          .play(track('route-copy', url: url));
+      await tester.pump();
+
+      final before = container.read(playerControllerProvider);
+      final routeBefore = appRouter.routeInformationProvider.value.uri;
+      await tester.tap(find.byIcon(Icons.link));
+      await tester.pump();
+
+      expect(clipboard, [url]);
+      expect(watcher.seen, [url]);
+      expect(appRouter.routeInformationProvider.value.uri, routeBefore);
+      expect(container.read(playerControllerProvider), same(before));
+      expect(find.text('link copied'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pump(const Duration(seconds: 5));
+    });
+  }
+
+  for (final collapsed in [false, true]) {
+    for (final width in [920.0, 960.0, 1280.0, 1600.0]) {
       testWidgets('copy survives resize: collapsed=$collapsed width=$width', (
         tester,
       ) async {
@@ -165,9 +239,21 @@ void main() {
 
     testWidgets('copy tracks next, queue replacement and crossfade swap: '
         'collapsed=$collapsed', (tester) async {
-      final a = track('a', url: 'https://soundcloud.com/artist/a');
-      final b = track('b', url: 'https://soundcloud.com/artist/b');
-      final c = track('c', url: 'https://soundcloud.com/artist/c');
+      final a = track(
+        'a',
+        url: 'https://soundcloud.com/artist/a',
+        playable: true,
+      );
+      final b = track(
+        'b',
+        url: 'https://soundcloud.com/artist/b',
+        playable: true,
+      );
+      final c = track(
+        'c',
+        url: 'https://soundcloud.com/artist/c',
+        playable: true,
+      );
       final container = await pumpPlayer(tester, collapsed: collapsed);
       final controller = container.read(playerControllerProvider.notifier);
       controller.play(a, queue: [a, b]);
@@ -217,12 +303,19 @@ void main() {
           expect(node.flagsCollection.isButton, isTrue);
           expect(node.flagsCollection.isEnabled, Tristate.isTrue);
           expect(node.flagsCollection.isFocused, isNot(Tristate.none));
-          await tester.sendKeyEvent(LogicalKeyboardKey.tab);
-          await tester.pump();
-          expect(
-            Focus.of(tester.element(find.byIcon(Icons.link))).hasFocus,
-            isTrue,
-          );
+          final copyContext = tester.element(find.byIcon(Icons.link));
+          final copyFocus = Focus.of(copyContext);
+          final tabStops = FocusScope.of(
+            copyContext,
+          ).traversalDescendants.length;
+          // Playback controls before Copy are keyboard accessible too.
+          // Traverse the real focus order instead of assuming Copy is first.
+          for (var i = 0; i < tabStops && !copyFocus.hasFocus; i++) {
+            await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+            await tester.pump();
+          }
+          expect(copyFocus.hasFocus, isTrue);
+          expect(clipboard, isEmpty);
           final before = container.read(playerControllerProvider);
           await tester.sendKeyEvent(LogicalKeyboardKey.enter);
           await tester.pump();

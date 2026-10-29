@@ -11,11 +11,16 @@ import '../../core/audio/playback_prefs.dart';
 import '../../core/audio/waveform_audio_handler.dart';
 import '../../core/drm/drm_stream_service.dart';
 import '../../core/log/talker.dart';
+import '../../core/recommendations/listening_event.dart';
+import '../../core/recommendations/listening_providers.dart';
+import '../../core/recommendations/listening_tracker.dart';
+import '../../core/recommendations/vector_engine.dart';
+import '../../core/recommendations/wave_sources.dart';
 import '../../shared/models/track.dart';
 
 /// Событие «трек не проигрался» — для всплывающего уведомления в UI.
 /// [seq] растёт с каждым событием, чтобы listener срабатывал и на повтор.
-typedef Unplayable = ({int seq, String title});
+typedef Unplayable = ({int seq, String title, bool goPlus});
 
 /// Состояние плеера. Прогресс/признак «играет» приходят из [AudioEngine]
 /// (just_audio); очередь next/previous — реальный список с экрана.
@@ -32,6 +37,9 @@ class PlayerState {
     this.muted = false,
     this.unplayable,
     this.queueVersion = 0,
+    this.transitionCause,
+    this.sessionVersion = 0,
+    this.seekVersion = 0,
   });
 
   final Track? track;
@@ -51,6 +59,13 @@ class PlayerState {
   /// очереди. UI слушает `select((s) => s.queueVersion)` и пере-читает
   /// `notifier.upcomingTracks` для актуального списка.
   final int queueVersion;
+  final ListeningTransitionCause? transitionCause;
+
+  /// New playback intent, including replay/restart of the same track.
+  final int sessionVersion;
+
+  /// Explicit seek intent; normal position ticks leave this unchanged.
+  final int seekVersion;
 
   /// Последний непроигравшийся трек — UI показывает уведомление.
   final Unplayable? unplayable;
@@ -81,6 +96,9 @@ class PlayerState {
     bool? muted,
     Unplayable? unplayable,
     int? queueVersion,
+    ListeningTransitionCause? transitionCause,
+    int? sessionVersion,
+    int? seekVersion,
   }) => PlayerState(
     track: track ?? this.track,
     isPlaying: isPlaying ?? this.isPlaying,
@@ -93,11 +111,15 @@ class PlayerState {
     muted: muted ?? this.muted,
     unplayable: unplayable ?? this.unplayable,
     queueVersion: queueVersion ?? this.queueVersion,
+    transitionCause: transitionCause ?? this.transitionCause,
+    sessionVersion: sessionVersion ?? this.sessionVersion,
+    seekVersion: seekVersion ?? this.seekVersion,
   );
 }
 
 class PlayerController extends Notifier<PlayerState> {
   AudioEngine get _engine => ref.read(audioEngineProvider);
+  late ListeningTracker _listening;
 
   /// Очередь, из которой пришёл текущий трек (для next/previous).
   /// Growable — мутируется queue-панелью (add/remove/reorder).
@@ -123,6 +145,10 @@ class PlayerController extends Notifier<PlayerState> {
   /// если пользователь быстро переключил на другой.
   int _loadToken = 0;
 
+  /// Only the matching completed load/swap may supply listening observations.
+  int? _readySourceToken;
+  bool get _sourceReady => _readySourceToken == _loadToken;
+
   /// Когда реально начали играть текущий источник — для защиты от
   /// «мгновенного completed» (битый HLS), который иначе устраивал skip-storm.
   DateTime? _startedAt;
@@ -139,6 +165,7 @@ class PlayerController extends Notifier<PlayerState> {
   @override
   PlayerState build() {
     final engine = ref.watch(audioEngineProvider);
+    _listening = ref.read(listeningTrackerProvider);
 
     _subs.add(
       engine.positionStream.listen((p) {
@@ -149,7 +176,13 @@ class PlayerController extends Notifier<PlayerState> {
         // в конце / трек стартовал с середины).
         final dur = state.track!.durationMs;
         if (dur > 0 && p.inMilliseconds > dur + 2000) return;
-        if (p.inMilliseconds > _maxPosMs) _maxPosMs = p.inMilliseconds;
+        if (_sourceReady) {
+          if (p.inMilliseconds > _maxPosMs) _maxPosMs = p.inMilliseconds;
+          _listening.sample(
+            positionMs: p.inMilliseconds,
+            playing: state.isPlaying,
+          );
+        }
         state = state.copyWith(position: p);
         // Истинный crossfade: overlap-переход стартует ДО конца трека.
         _maybeStartCrossfade(p.inMilliseconds, dur);
@@ -162,6 +195,8 @@ class PlayerController extends Notifier<PlayerState> {
     );
     _subs.add(
       engine.playingStream.listen((playing) {
+        if (!_sourceReady) return;
+        _listening.setPlaying(playing);
         if (state.track != null && state.isPlaying != playing) {
           state = state.copyWith(isPlaying: playing);
         }
@@ -170,7 +205,7 @@ class PlayerController extends Notifier<PlayerState> {
     _subs.add(
       engine.completedStream.listen((_) {
         // Crossfade уже идёт (early-trigger по позиции) — не дублируем переход.
-        if (_swapping) return;
+        if (_swapping || !_sourceReady) return;
         // Ложный «completed» сразу после загрузки (битый HLS) НЕ должен
         // перескакивать дальше — иначе очередь пролистывается за секунды.
         // Реальный конец трека = играли заметное время И дошли почти до конца.
@@ -185,15 +220,27 @@ class PlayerController extends Notifier<PlayerState> {
         final reachedEnd = dur > 0
             ? _maxPosMs >= dur * 0.7
             : since.inSeconds > 5;
-        if (since.inSeconds < 5 || !reachedEnd) return;
+        if (since.inSeconds < 5) return;
+        if (!reachedEnd) {
+          ref
+              .read(talkerProvider)
+              .warning(
+                'source ended early (${_maxPosMs}ms of ${dur}ms): '
+                '${state.track?.title}',
+              );
+        }
+        final reason = reachedEnd
+            ? ListeningTransitionCause.naturalCompletion
+            : ListeningTransitionCause.unplayable;
         if (state.repeat) {
+          _restartListening(reason);
           _engine.seek(Duration.zero);
           _engine.resume();
-        } else if (_engine.hasPreload) {
+        } else if (_hasMatchingPreload) {
           // Preload ready → бесшовный swap (gapless или crossfade per prefs).
-          _advanceViaSwap();
+          _advanceViaSwap(reason: reason);
         } else {
-          next();
+          next(reason: reason);
         }
       }),
     );
@@ -219,6 +266,10 @@ class PlayerController extends Notifier<PlayerState> {
     });
 
     ref.onDispose(() {
+      ++_loadToken;
+      ++_preloadToken;
+      _readySourceToken = null;
+      _listening.finish(ListeningTransitionCause.disposal);
       for (final s in _subs) {
         s.cancel();
       }
@@ -233,18 +284,35 @@ class PlayerController extends Notifier<PlayerState> {
   /// shuffle-порядок и историю из одного трека. Навигация next/previous НЕ
   /// проходит сюда (иначе сбрасывала бы шафл на каждый шаг — старый баг).
   void play(Track track, {List<Track>? queue}) {
+    // Wave sources belong to the queue the wave started: a play from anywhere
+    // else must not inherit them through a shared track id.
+    final waveSources = ref.read(waveSourcesProvider.notifier);
+    if (!waveSources.consumeArm()) waveSources.clear();
     _queue = (queue != null && queue.isNotEmpty) ? List.of(queue) : [track];
     _orderSource = null; // новый контекст → _order пересоберётся в _ensureOrder
     _order = [];
     _history = [track];
     _histIdx = 0;
     _recomputeFrontierNext();
-    _activate(track);
+    _activate(track, reason: ListeningTransitionCause.directSelection);
   }
 
   /// Загрузить трек как текущий БЕЗ изменения очереди/истории (история и
   /// shuffle-порядок ведутся вызывающим). Общий путь для play/next/previous.
-  void _activate(Track track) {
+  void _activate(Track track, {required ListeningTransitionCause reason}) {
+    _readySourceToken = null;
+    _preloadedTrackId = null;
+    ++_preloadToken;
+    if (_swapping) {
+      // Invalidate the old engine transition before resolving the new URL.
+      // Its completion must not own this track's swap gate or preload.
+      _swapping = false;
+      ++_preloadToken;
+      unawaited(_engine.stop());
+    }
+    _listening.finish(reason);
+    _startListening(track);
+    _startedAt = null;
     _maxPosMs = 0;
     state = state.copyWith(
       track: track,
@@ -254,6 +322,8 @@ class PlayerController extends Notifier<PlayerState> {
       // Подсветка лайка — из реального множества лайков (а не сброс в false).
       liked: ref.read(likedTracksProvider).contains(track.id),
       queueVersion: state.queueVersion + 1,
+      transitionCause: reason,
+      sessionVersion: state.sessionVersion + 1,
     );
     _load(track);
   }
@@ -300,6 +370,7 @@ class PlayerController extends Notifier<PlayerState> {
     final item = seq.removeAt(oldAbs);
     seq.insert(newAbs, item);
     _recomputeFrontierNext();
+    _refreshPreload();
     state = state.copyWith(queueVersion: state.queueVersion + 1);
   }
 
@@ -311,6 +382,7 @@ class PlayerController extends Notifier<PlayerState> {
     if (_order.isNotEmpty) _order.removeWhere((t) => t.id == trackId);
     if (_queue.length == n) return;
     _recomputeFrontierNext();
+    _refreshPreload();
     state = state.copyWith(queueVersion: state.queueVersion + 1);
   }
 
@@ -323,6 +395,7 @@ class PlayerController extends Notifier<PlayerState> {
     _queue.add(t);
     if (_order.isNotEmpty) _order.add(t);
     _recomputeFrontierNext();
+    _refreshPreload();
     state = state.copyWith(queueVersion: state.queueVersion + 1);
   }
 
@@ -352,6 +425,7 @@ class PlayerController extends Notifier<PlayerState> {
       if (!_queue.any((x) => x.id == t.id)) _queue.add(t);
     }
     _recomputeFrontierNext();
+    _refreshPreload();
     state = state.copyWith(queueVersion: state.queueVersion + 1);
   }
 
@@ -360,6 +434,10 @@ class PlayerController extends Notifier<PlayerState> {
   /// отдаёт 404 — тогда играем следующий источник. Мок/не streamable — тихо.
   Future<void> _load(Track track) async {
     final token = ++_loadToken;
+    if (track.blocked) {
+      _markUnplayable(token, track);
+      return;
+    }
     final candidates = track.streamCandidates;
     // Нет незашифрованных источников — возможен GO+ (Widevine). Ни тех, ни
     // других (мок/не streamable) — тихо (UI оптимистичен, реальный «играет»
@@ -374,15 +452,16 @@ class PlayerController extends Notifier<PlayerState> {
         await _engine.load(url);
         if (token != _loadToken) return;
         _startedAt = DateTime.now();
+        _markSourceReady(token);
         _deadStreak = 0; // успешная загрузка сбрасывает счётчик мёртвых
         // Фоном prepare'им next — для gapless/crossfade swap'а.
         unawaited(_preloadAfter(track));
         return; // успех
       } catch (e, st) {
+        if (token != _loadToken) return;
         ref
             .read(talkerProvider)
             .warning('stream candidate failed: ${track.title}', e, st);
-        if (token != _loadToken) return;
         // пробуем следующий источник
       }
     }
@@ -397,15 +476,16 @@ class PlayerController extends Notifier<PlayerState> {
           await _engine.load(uri);
           if (token != _loadToken) return;
           _startedAt = DateTime.now();
+          _markSourceReady(token);
           _deadStreak = 0;
           unawaited(_preloadAfter(track));
           return;
         }
       } catch (e, st) {
+        if (token != _loadToken) return;
         ref
             .read(talkerProvider)
             .warning('drm stream failed: ${track.title}', e, st);
-        if (token != _loadToken) return;
       }
     }
     // Все кандидаты исчерпаны: трек удалён/недоступен или остались только
@@ -419,12 +499,18 @@ class PlayerController extends Notifier<PlayerState> {
   /// чтобы цепочка мёртвых треков не пролистала всю очередь.
   void _markUnplayable(int token, Track track) {
     if (token != _loadToken || state.track?.id != track.id) return;
+    _listening.finish(ListeningTransitionCause.unplayable);
     state = state.copyWith(
       isPlaying: false,
-      unplayable: (seq: ++_unplayableSeq, title: track.title),
+      unplayable: (
+        seq: ++_unplayableSeq,
+        title: track.title,
+        goPlus: track.goPlus,
+      ),
+      transitionCause: ListeningTransitionCause.unplayable,
     );
     if (_queue.length > 1 && ++_deadStreak < _maxDeadSkips) {
-      next();
+      next(reason: ListeningTransitionCause.unplayable);
     }
   }
 
@@ -432,6 +518,27 @@ class PlayerController extends Notifier<PlayerState> {
 
   /// Токен текущей preload-операции — отбрасываем устаревшие резолвы.
   int _preloadToken = 0;
+  String? _preloadedTrackId;
+
+  bool get _hasMatchingPreload =>
+      _engine.hasPreload && _preloadedTrackId == _upNext?.id;
+
+  void _refreshPreload() {
+    ++_preloadToken;
+    _preloadedTrackId = null;
+    final current = state.track;
+    if (current != null && _sourceReady) {
+      unawaited(_preloadAfter(current));
+    }
+  }
+
+  void _markSourceReady(int token, {int positionMs = 0}) {
+    if (token != _loadToken) return;
+    _readySourceToken = token;
+    _maxPosMs = positionMs;
+    _listening.sample(positionMs: positionMs, playing: false);
+    _listening.setPlaying(state.isPlaying);
+  }
 
   /// Готовит следующий трек ([_upNext]) в теневом движке: резолвит первый
   /// candidate, кидает engine.preloadNext. Тихо отказывается на пустых.
@@ -439,8 +546,13 @@ class PlayerController extends Notifier<PlayerState> {
   /// [_upNext], чтобы preload и фактический переход выбрали один и тот же трек.
   Future<void> _preloadAfter(Track current) async {
     final token = ++_preloadToken;
+    _preloadedTrackId = null;
+    // The inactive player may still own the selected incoming source until
+    // output binding commits. Defer queue/shuffle preloads until swap settles.
+    if (_swapping) return;
     final n = _upNext;
     if (n == null ||
+        n.blocked ||
         (n.streamCandidates.isEmpty && n.drmStreamCandidates.isEmpty)) {
       await _engine.preloadNext(null);
       return;
@@ -460,6 +572,7 @@ class PlayerController extends Notifier<PlayerState> {
         return;
       }
       await _engine.preloadNext(url);
+      if (token == _preloadToken) _preloadedTrackId = n.id;
     } catch (_) {
       if (token == _preloadToken) await _engine.preloadNext(null);
     }
@@ -469,13 +582,29 @@ class PlayerController extends Notifier<PlayerState> {
   /// БЕЗ полного `_load` (он бы порвал стрим). Затем preload'им следующий.
   /// Ведёт ту же историю, что и ручной [next] — иначе авто-переход и кнопка
   /// расходились бы.
-  Future<void> _advanceViaSwap() async {
+  Future<void> _advanceViaSwap({
+    ListeningTransitionCause reason =
+        ListeningTransitionCause.naturalCompletion,
+  }) async {
     final n = _upNext;
-    if (n == null) return;
+    if (n == null) {
+      _listening.finish(reason);
+      return;
+    }
+    final previous = state;
+    final history = List<Track>.of(_history);
+    final historyIndex = _histIdx;
+    final startedAt = _startedAt;
+    final maxPosMs = _maxPosMs;
+    _listening.finish(reason);
+    _startListening(n);
+    _readySourceToken = null;
+    _preloadedTrackId = null;
     _swapping = true;
     final crossfade = _crossfade;
     // Бамп _loadToken — старые in-flight кандидаты-резолвы устаревают.
-    _loadToken++;
+    final token = ++_loadToken;
+    ++_preloadToken;
     _stepHistoryForward(n);
     _maxPosMs = 0;
     // ВАЖНО: state.track обновляем СРАЗУ, до await на swap. При crossfade
@@ -489,12 +618,69 @@ class PlayerController extends Notifier<PlayerState> {
       isPlaying: true,
       liked: ref.read(likedTracksProvider).contains(n.id),
       queueVersion: state.queueVersion + 1,
+      transitionCause: reason,
+      sessionVersion: state.sessionVersion + 1,
     );
     _startedAt = DateTime.now();
     _deadStreak = 0;
-    await _engine.swapToNext(crossfade: crossfade);
-    unawaited(_preloadAfter(n));
-    _swapping = false;
+    try {
+      await _engine.swapToNext(crossfade: crossfade);
+      if (token == _loadToken) {
+        _markSourceReady(token);
+        _swapping = false;
+        unawaited(_preloadAfter(n));
+      }
+    } catch (error, stack) {
+      if (token != _loadToken) return;
+      ref.read(talkerProvider).warning('audio swap failed', error, stack);
+      if (error is AudioSwapCommittedException) {
+        // The incoming source owns the active player already. Stop playback
+        // instead of rolling metadata back over a different audio source.
+        state = state.copyWith(
+          isPlaying: false,
+          unplayable: (seq: ++_unplayableSeq, title: n.title, goPlus: n.goPlus),
+        );
+        _listening.finish(ListeningTransitionCause.unplayable);
+        _startListening(n);
+        _markSourceReady(token);
+        // Publish before cleanup so a failed pause still reports the source
+        // error, and delayed cleanup cannot overwrite a newer play/resume.
+        try {
+          await _engine.pause();
+        } catch (pauseError, pauseStack) {
+          if (token != _loadToken) return;
+          ref
+              .read(talkerProvider)
+              .warning('audio swap pause failed', pauseError, pauseStack);
+        }
+        return;
+      }
+      // Binding failed before the engine committed the incoming player.
+      // Restore navigation and metadata, retaining the user's pause intent.
+      _history = history;
+      _histIdx = historyIndex;
+      _recomputeFrontierNext();
+      _startedAt = startedAt;
+      _maxPosMs = maxPosMs;
+      state = state.copyWith(
+        track: previous.track,
+        position: previous.position,
+        buffered: previous.buffered,
+        liked: previous.liked,
+        queueVersion: state.queueVersion + 1,
+      );
+      _listening.finish(ListeningTransitionCause.unplayable);
+      final track = state.track;
+      if (track != null) {
+        _startListening(track, positionMs: previous.position.inMilliseconds);
+        _markSourceReady(token, positionMs: previous.position.inMilliseconds);
+        _maxPosMs = maxPosMs;
+      }
+      _swapping = false;
+      if (track != null) unawaited(_preloadAfter(track));
+    } finally {
+      if (token == _loadToken) _swapping = false;
+    }
   }
 
   /// Стартовать overlap-crossfade за [_crossfade] до конца текущего трека —
@@ -507,10 +693,10 @@ class PlayerController extends Notifier<PlayerState> {
     if (durMs <= 0 || posMs <= 0) return;
     final cf = _crossfade.inMilliseconds;
     if (cf <= 0) return;
-    if (!_engine.hasPreload) return;
+    if (!_sourceReady || !_hasMatchingPreload) return;
     final remaining = durMs - posMs;
     if (remaining <= 0 || remaining > cf) return;
-    _advanceViaSwap();
+    _advanceViaSwap(reason: ListeningTransitionCause.crossfadeCompletion);
   }
 
   /// Длительность crossfade'а из пользовательских настроек. 0 = gapless.
@@ -531,16 +717,14 @@ class PlayerController extends Notifier<PlayerState> {
     state = state.copyWith(shuffle: !state.shuffle);
     // Сменился режим выбора «следующего» — пересчитать кеш и перепреload'ить.
     _recomputeFrontierNext();
-    final t = state.track;
-    if (t != null) unawaited(_preloadAfter(t));
+    _refreshPreload();
   }
 
   void setShuffle(bool on) {
     if (state.shuffle == on) return;
     state = state.copyWith(shuffle: on);
     _recomputeFrontierNext();
-    final t = state.track;
-    if (t != null) unawaited(_preloadAfter(t));
+    _refreshPreload();
   }
 
   void toggleRepeat() => state = state.copyWith(repeat: !state.repeat);
@@ -558,24 +742,37 @@ class PlayerController extends Notifier<PlayerState> {
   /// Следующий трек. Если мы зашли назад в историю — идём вперёд по реальной
   /// истории (симметрично previous). На фронтире — берём закешированный
   /// [_frontierNext] (новый трек) и дописываем его в историю.
-  void next() {
+  void next({
+    ListeningTransitionCause reason = ListeningTransitionCause.manualNext,
+  }) {
     final track = _upNext;
-    if (track == null) return;
+    if (track == null) {
+      if (reason == ListeningTransitionCause.naturalCompletion ||
+          reason == ListeningTransitionCause.unplayable) {
+        _listening.finish(reason);
+        state = state.copyWith(transitionCause: reason);
+      }
+      return;
+    }
     _stepHistoryForward(track);
-    _activate(track);
+    _activate(track, reason: reason);
   }
 
   /// Предыдущий трек (или начало текущего, если прошло >3с). Ретрейс назад по
   /// реальной истории — никакой пере-тасовки.
   void previous() {
     if (state.position.inSeconds > 3) {
+      _restartListening(ListeningTransitionCause.manualRestart);
       _engine.seek(Duration.zero);
       state = state.copyWith(position: Duration.zero);
       return;
     }
     if (_histIdx > 0) {
       _histIdx--;
-      _activate(_history[_histIdx]);
+      _activate(
+        _history[_histIdx],
+        reason: ListeningTransitionCause.manualPrevious,
+      );
     }
   }
 
@@ -655,9 +852,11 @@ class PlayerController extends Notifier<PlayerState> {
   void toggle() {
     if (state.track == null) return;
     if (state.isPlaying) {
+      _listening.setPlaying(false);
       _engine.pause();
       state = state.copyWith(isPlaying: false);
     } else {
+      if (_sourceReady) _listening.setPlaying(true);
       _engine.resume();
       state = state.copyWith(isPlaying: true);
     }
@@ -670,8 +869,9 @@ class PlayerController extends Notifier<PlayerState> {
     final pos = Duration(
       milliseconds: (fraction.clamp(0.0, 1.0) * total).round(),
     );
+    _listening.seek(pos.inMilliseconds);
     _engine.seek(pos);
-    state = state.copyWith(position: pos);
+    state = state.copyWith(position: pos, seekVersion: state.seekVersion + 1);
   }
 
   /// Сдвинуть позицию на [delta] (может быть отрицательной), clamp в трек.
@@ -681,8 +881,9 @@ class PlayerController extends Notifier<PlayerState> {
     if (total == 0) return;
     final ms = (state.position + delta).inMilliseconds.clamp(0, total);
     final pos = Duration(milliseconds: ms);
+    _listening.seek(pos.inMilliseconds);
     _engine.seek(pos);
-    state = state.copyWith(position: pos);
+    state = state.copyWith(position: pos, seekVersion: state.seekVersion + 1);
   }
 
   /// Mute/unmute. Mute → движок 0; UI-значение громкости сохраняется в
@@ -697,6 +898,28 @@ class PlayerController extends Notifier<PlayerState> {
       state = state.copyWith(muted: true);
       _engine.setVolume(0);
     }
+  }
+
+  /// Begin a listening fact for [track], stamped with the wave source that
+  /// queued it (null for anything played outside my wave).
+  void _startListening(Track track, {int positionMs = 0}) => _listening.start(
+    trackId: track.id,
+    durationMs: track.durationMs,
+    positionMs: positionMs,
+    source: ref.read(waveSourcesProvider)[track.id],
+    obscure: VectorEngine.isObscure(track),
+  );
+
+  void _restartListening(ListeningTransitionCause reason) {
+    final track = state.track;
+    if (track == null) return;
+    _listening.finish(reason);
+    _startListening(track);
+    _listening.setPlaying(_sourceReady && state.isPlaying);
+    state = state.copyWith(
+      transitionCause: reason,
+      sessionVersion: state.sessionVersion + 1,
+    );
   }
 }
 

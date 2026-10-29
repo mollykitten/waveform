@@ -83,7 +83,12 @@ class WebView {
 
   std::wstring user_data_folder_;
 
+  // launch(triggerOnUrlRequestEvent: ...): route top-level navigations
+  // through Dart's onUrlRequested before they proceed.
   bool triggerOnUrlRequestedEvent{true};
+  // Set right before re-issuing a navigation Dart allowed, so that one
+  // navigation is not intercepted a second time.
+  bool bypass_next_url_request_{false};
 
   void OnWebviewControllerCreated();
 

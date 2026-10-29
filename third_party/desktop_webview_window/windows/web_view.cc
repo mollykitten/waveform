@@ -113,11 +113,18 @@ void WebView::OnWebviewControllerCreated() {
 
   UpdateBounds();
 
-  // Always use single window to load web page.
+  // waveform patch: в видимом окне window.open() НЕ перехватываем — WebView2
+  // сам открывает попап-окно (общий профиль/cookie, живой window.opener). Без
+  // этого OAuth-вход через Google/Apple/Facebook грузился в то же окно, терял
+  // opener и зависал. Скрытый фоновый "sync"-webview по-прежнему грузит всё в
+  // себя, чтобы попапы не вылезали на экран.
   webview_->add_NewWindowRequested(
       Callback<ICoreWebView2NewWindowRequestedEventHandler>(
-          [](ICoreWebView2 *sender,
-             ICoreWebView2NewWindowRequestedEventArgs *args) {
+          [this](ICoreWebView2 *sender,
+                 ICoreWebView2NewWindowRequestedEventArgs *args) {
+            if (::IsWindowVisible(view_window_.get())) {
+              return S_OK;
+            }
             wil::unique_cotaskmem_string url;
             HRESULT hr = args->get_Uri(&url);
             if (SUCCEEDED(hr) && url) {
@@ -166,7 +173,14 @@ void WebView::OnWebviewControllerCreated() {
                      flutter::EncodableValue(web_view_id_)},
                 }));
 
-            if (triggerOnUrlRequestedEvent) {
+            // Waveform patch: upstream re-armed interception after every
+            // navigation, so even launch(triggerOnUrlRequestEvent: false)
+            // cancelled and re-issued every page load after the first one
+            // (a Dart round-trip each, and form POSTs re-sent as GETs).
+            // Now it's intercepted only when requested, once per navigation.
+            if (bypass_next_url_request_) {
+              bypass_next_url_request_ = false;
+            } else if (triggerOnUrlRequestedEvent) {
               wil::unique_cotaskmem_string uri;
               HRESULT hr = args->get_Uri(&uri);
               if (FAILED(hr) || !uri) {
@@ -187,7 +201,7 @@ void WebView::OnWebviewControllerCreated() {
                           letPass = std::get<bool>(*success_value);
                         }
                         if (letPass) {
-                          this->setTriggerOnUrlRequestedEvent(false);
+                          this->bypass_next_url_request_ = true;
                           sender->Navigate(uri_string.c_str());
                         }
                       },
@@ -208,9 +222,6 @@ void WebView::OnWebviewControllerCreated() {
               // navigation is canceled here and retriggered later from the
               // callback passed to the method channel
               args->put_Cancel(true);
-            } else {
-              args->put_Cancel(false);
-              triggerOnUrlRequestedEvent = true;
             }
             return S_OK;
           })

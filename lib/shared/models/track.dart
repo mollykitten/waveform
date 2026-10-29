@@ -18,8 +18,9 @@ class Track {
     this.streamCandidates = const [],
     this.drmStreamCandidates = const [],
     this.permalinkUrl,
-    this.minted = false,
-    this.genre = 'electronic',
+    this.blocked = false,
+    this.goPlus = false,
+    this.genre = '',
     this.postedAt = '3 days ago',
     this.description = '',
   });
@@ -74,12 +75,16 @@ class Track {
   /// Постоянный URL трека на soundcloud.com (для «share» и «open in browser»).
   final String? permalinkUrl;
 
-  /// web3-маркер: трек заминчен как NFT.
-  final bool minted;
+  /// The API blocks playback or only offers preview sources.
+  final bool blocked;
+
+  /// Needs a GO+ subscription (preview-only or subscription-tier track).
+  /// Distributor DRM tracks that play for free are not GO+.
+  final bool goPlus;
 
   Duration get duration => Duration(milliseconds: durationMs);
 
-  Track copyWith({List<double>? waveform, bool? minted}) => Track(
+  Track copyWith({List<double>? waveform}) => Track(
     id: id,
     title: title,
     artist: artist,
@@ -94,7 +99,8 @@ class Track {
     streamCandidates: streamCandidates,
     drmStreamCandidates: drmStreamCandidates,
     permalinkUrl: permalinkUrl,
-    minted: minted ?? this.minted,
+    blocked: blocked,
+    goPlus: goPlus,
     genre: genre,
     postedAt: postedAt,
     description: description,

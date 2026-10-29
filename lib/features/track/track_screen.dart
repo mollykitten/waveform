@@ -17,6 +17,7 @@ import '../../shared/models/track.dart';
 import '../../shared/widgets/async_view.dart';
 import '../../shared/widgets/cover_art.dart';
 import '../../shared/widgets/empty_state.dart';
+import '../../shared/widgets/go_plus_badge.dart';
 import '../../shared/widgets/pressable.dart';
 import '../../shared/widgets/section_header.dart';
 import '../../shared/widgets/selectable_block.dart';
@@ -236,6 +237,10 @@ class _Hero extends StatelessWidget {
                                 ),
                               ),
                             ),
+                            if (track.goPlus) ...[
+                              const SizedBox(width: 10),
+                              const GoPlusBadge(),
+                            ],
                           ],
                         ),
                         const SizedBox(height: 4),
@@ -255,7 +260,9 @@ class _Hero extends StatelessWidget {
                       ],
                     ),
                   ),
-                  _TagChip(text: '#${track.genre}'),
+                  _TagChip(
+                    text: '#${track.genre.isEmpty ? 'music' : track.genre}',
+                  ),
                 ],
               ),
               const SizedBox(height: 18),

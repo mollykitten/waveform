@@ -2,6 +2,13 @@ import 'dart:async';
 
 import 'package:desktop_webview_window/desktop_webview_window.dart';
 
+/// Точное сравнение домена cookie: `soundcloud.com` и его поддомены, без
+/// ведущей точки. `soundcloud.evil.com` не проходит.
+bool isSoundcloudDomain(String domain) {
+  final d = domain.toLowerCase().replaceFirst(RegExp(r'^\.+'), '');
+  return d == 'soundcloud.com' || d.endsWith('.soundcloud.com');
+}
+
 /// Вход через настоящую страницу логина SoundCloud в embedded WebView.
 /// Пароль вводится на сайте SC — мы его не видим; после входа вытаскиваем
 /// `oauth_token` из cookie сессии (poll).
@@ -9,6 +16,11 @@ import 'package:desktop_webview_window/desktop_webview_window.dart';
 /// Ключевой момент: SoundCloud ставит `oauth_token` ещё ДО логина (гостевой),
 /// поэтому каждый кандидат проверяется через [validate] (запрос `/me`). Окно
 /// закрываем только когда токен реально опознан как пользовательский.
+///
+/// Реальный popup/opener не означает поддержку Google sign-in: Google
+/// запрещает OAuth в embedded user-agent под контролем приложения. Не
+/// подменяем User-Agent и не обходим отказ провайдера; см. docs/research/
+/// google-sign-in-verification.md для ограничений и разрешённого пути.
 abstract final class WebviewLogin {
   static Future<bool> available() => WebviewWindow.isWebviewAvailable();
 
@@ -25,7 +37,7 @@ abstract final class WebviewLogin {
         windowHeight: 760,
       ),
     );
-    webview.launch('https://soundcloud.com');
+    webview.launch('https://soundcloud.com', triggerOnUrlRequestEvent: false);
     await webview.onClose;
   }
 
@@ -53,7 +65,7 @@ abstract final class WebviewLogin {
               (c) =>
                   c.name == 'oauth_token' &&
                   c.value.isNotEmpty &&
-                  c.domain.contains('soundcloud'),
+                  isSoundcloudDomain(c.domain),
             )
             .map((c) => c.value)
             .firstOrNull;
@@ -80,17 +92,20 @@ abstract final class WebviewLogin {
       }
     }
 
-    webview.setOnUrlRequestCallback((url) {
-      capture();
-      return true;
-    });
-    poll = Timer.periodic(const Duration(seconds: 2), (_) => capture());
+    // Токен ловим только поллингом cookie. Раньше тут ещё висел
+    // setOnUrlRequestCallback — на Windows он заставляет плагин отменять
+    // каждую навигацию и перезапускать её после round-trip'а в Dart
+    // (лаги + POST-формы уходили как GET). Навигации больше не перехватываем.
+    poll = Timer.periodic(const Duration(seconds: 1), (_) => capture());
     webview.onClose.then((_) {
       poll?.cancel();
       if (!completer.isCompleted) completer.complete(null);
     });
 
-    webview.launch('https://soundcloud.com/signin');
+    webview.launch(
+      'https://soundcloud.com/signin',
+      triggerOnUrlRequestEvent: false,
+    );
     return completer.future;
   }
 }

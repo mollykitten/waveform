@@ -22,7 +22,6 @@ class Collection {
     this.trackCount = 0,
     this.mixLabel,
     this.wordmark,
-    this.minted = false,
     this.coverUrl,
     this.target = CollectionTarget.playlist,
     this.handle,
@@ -48,9 +47,6 @@ class Collection {
 
   /// Вордмарк для авто-подборок, напр. «DAILY DROPS».
   final String? wordmark;
-
-  /// web3: подборка владельца / заминчена.
-  final bool minted;
 
   /// URL обложки (реальный арт). null → процедурная обложка по seed.
   final String? coverUrl;

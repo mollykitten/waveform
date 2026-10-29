@@ -53,13 +53,10 @@ talker_logs_*.txt
 # Brainstorming specs / design docs (local only)
 docs/superpowers/
 
-# Hermes kanban worker worktrees (`hermes kanban create --workspace worktree`)
-.worktrees/
-
 # приватный Widevine-профиль устройства, не коммитится
 assets/widevine/*.wvd
+*.wvd
 
-# Local secrets / per-user Superset overrides
+# Local secrets
 .env
 .env.json
-.superset/config.local.json

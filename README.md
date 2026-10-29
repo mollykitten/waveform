@@ -10,7 +10,7 @@
   <a href="https://github.com/mollykitten/waveform/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/mollykitten/waveform/actions/workflows/ci.yml/badge.svg?branch=main" /></a>
   <img alt="Flutter" src="https://img.shields.io/badge/Flutter-3.41-02569B?logo=flutter&logoColor=white" />
   <img alt="Platforms" src="https://img.shields.io/badge/Platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey" />
-  <img alt="Version" src="https://img.shields.io/badge/version-0.3.0-FF5500" />
+  <img alt="Version" src="https://img.shields.io/badge/version-0.4.0-FF5500" />
   <a href="https://t.me/waveformsc"><img alt="Telegram" src="https://img.shields.io/badge/Telegram-waveform-26A5E4?logo=telegram&logoColor=white" /></a>
 </p>
 
@@ -22,17 +22,35 @@ web soundcloud is fine, tabs are not
 
 desktop clients for it either don't exist or they're electron wrapped around the website. so i made a real native one, closer to canonical soundcloud than other unofficial clients but darker and quieter, and you can run it for hours without touching the trackpad
 
-> **v0.3.0:** likes and reposts finally stick
+> **v0.4.0:** my wave
 >
-> soundcloud's datadome anti-bot was 403-ing every write because a plain http client doesn't look like a browser. writes now go through the app's own invisible webview with a real browser fingerprint lol
+> one button, an endless queue of real soundcloud tracks. it's built on your machine from your likes, your home stream and people with similar taste, and refills while it plays. no settings, no model, nothing sent anywhere but soundcloud itself
 >
-> also full soundcloud-web keyboard parity (press `H` in the app) and crossfade fixes, no more silent or non-overlapping transitions. daily-driver loop works on macos, windows and linux build too but i test them less. the api is unofficial so rough edges stay. everything else in [`CHANGELOG.md`](CHANGELOG.md)
+> also: drm-protected tracks from distributors and labels play on macos through a small go core that decrypts widevine streams over `dart:ffi` (go+ tracks still need a go+ subscription; the macos release bundles a device profile, from source you bring your own, see [limitations](docs/limitations.md)). plus an audio output picker with airplay, keyboard focus everywhere, reduced motion, a new icon, and web3 bits are gone for good
+>
+> daily-driver loop works on macos, windows and linux build too but i test them less. the api is unofficial so rough edges stay. everything else in [`CHANGELOG.md`](CHANGELOG.md)
+
+<p align="center">
+  <img src="screenshots/my-wave.png" alt="my wave screen: a pause button over an orange ribbon ring, with the upcoming wave queue below" width="100%" />
+</p>
+
+### how my wave works
+
+open **discover** in the top bar and press **play my wave** (you need to be signed in). each batch mixes three sources:
+
+- **related** (half): tracks related to what you're playing, your newest likes and recent plays, ranked by a small local graph that learns from what you finish, skip and dislike
+- **your stream** (a quarter): fresh uploads and reposts from people you follow
+- **co-likers** (a quarter): people who liked the same tracks as you, and what else they liked. a background job, cached for a day, never stores their ids
+
+tracks you can't play are dropped before they reach the queue, and the wave keeps going after the batch ends. thumbs down skips and teaches it, stop my wave hands the player back. details and the pilots behind it in [docs/my-wave.md](docs/my-wave.md)
 
 ## what you get
 
 - **keyboard first.** space plays, ⌘K finds anything, arrows seek, ⇧ + arrows skip. enter on a track page plays it
 - **gapless + crossfade 0-6 s.** the next track preloads on a second engine and swaps in on the last sample
-- **media keys.** control center on macos, SMTC on windows, MPRIS on linux
+- **media keys.** control center and media keys on macos. windows and linux aren't wired yet, see [limitations](docs/limitations.md)
+- **my wave.** a nonstop queue of real soundcloud tracks picked on your device, see [above](#how-my-wave-works)
+- **audio output.** pick a core audio device or airplay from the player, macos only. see [audio output](docs/audio-output.md)
 - **your account.** you sign in on soundcloud's own page in a webview, the app never sees your password
 - **last.fm.** off until you connect it
 - **local stats.** top artists, genres and hours from your last 400 plays, counted on your machine

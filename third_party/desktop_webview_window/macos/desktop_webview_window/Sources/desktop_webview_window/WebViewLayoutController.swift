@@ -22,6 +22,9 @@ class WebViewLayoutController: NSViewController {
 
   private var javaScriptHandlerNames: [String] = []
 
+  // waveform patch: открытые через window.open() попапы (OAuth-провайдеры).
+  private var popups: [PopupWindowController] = []
+
   weak var webViewPlugin: DesktopWebviewWindowPlugin?
 
   private var defaultUserAgent: String?
@@ -153,6 +156,9 @@ class WebViewLayoutController: NSViewController {
   }
 
   func destroy() {
+    let open = popups
+    popups.removeAll()
+    open.forEach { $0.close() }
     webView.stopLoading(self)
     webView.removeFromSuperview()
     titleBarController.engine.shutDownEngine()
@@ -256,6 +262,23 @@ extension WebViewLayoutController: WKUIDelegate {
   }
 
   func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+    // waveform patch: window.open() получает настоящее окно-попап со связью
+    // opener, иначе OAuth-вход через Google/Apple/Facebook не может вернуть
+    // результат странице. Исключение — фоновый "sync"-webview (окно с alpha 0):
+    // там попап вылез бы видимым окном, оставляем upstream-поведение.
+    if navigationAction.targetFrame == nil, let host = view.window, host.alphaValue > 0 {
+      let popup = PopupWindowController(
+        configuration: configuration,
+        windowFeatures: windowFeatures,
+        parent: host,
+        userAgent: webView.customUserAgent
+      ) { [weak self] closed in
+        self?.popups.removeAll { $0 === closed }
+      }
+      popups.append(popup)
+      popup.showWindow(nil)
+      return popup.webView
+    }
     if !(navigationAction.targetFrame?.isMainFrame ?? false) {
       webView.load(navigationAction.request)
     }

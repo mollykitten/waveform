@@ -29,10 +29,4 @@ abstract final class Fmt {
     if (h > 0) return '$h:${m.toString().padLeft(2, '0')}:$s';
     return '$m:$s';
   }
-
-  /// Сокращённый адрес кошелька: 0x1234…ab9f.
-  static String wallet(String address) {
-    if (address.length <= 11) return address;
-    return '${address.substring(0, 6)}…${address.substring(address.length - 4)}';
-  }
 }

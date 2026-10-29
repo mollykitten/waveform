@@ -74,10 +74,43 @@ gboolean on_load_failed_with_tls_errors(WebKitWebView *web_view,
   return false;
 }
 
+// waveform patch: window.open() получает настоящее окно-попап. Upstream
+// возвращал тот же web_view — попап грузился поверх страницы, терялся
+// window.opener, и OAuth-вход через Google/Apple/Facebook зависал. Related view
+// делит с родителем процесс, сессию и cookie.
+void on_popup_close(WebKitWebView *popup, gpointer popup_window) {
+  gtk_widget_destroy(GTK_WIDGET(popup_window));
+}
+
+void on_popup_ready_to_show(WebKitWebView *popup, gpointer parent) {
+  GdkRectangle geometry = {0, 0, 0, 0};
+  webkit_window_properties_get_geometry(
+      webkit_web_view_get_window_properties(popup), &geometry);
+
+  auto *popup_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+  gtk_window_set_default_size(GTK_WINDOW(popup_window),
+                              geometry.width > 0 ? geometry.width : 520,
+                              geometry.height > 0 ? geometry.height : 680);
+  if (GTK_IS_WINDOW(parent)) {
+    gtk_window_set_transient_for(GTK_WINDOW(popup_window), GTK_WINDOW(parent));
+    gtk_window_set_destroy_with_parent(GTK_WINDOW(popup_window), TRUE);
+    gtk_window_set_position(GTK_WINDOW(popup_window),
+                            GTK_WIN_POS_CENTER_ON_PARENT);
+  }
+  gtk_container_add(GTK_CONTAINER(popup_window), GTK_WIDGET(popup));
+  g_signal_connect(G_OBJECT(popup), "close", G_CALLBACK(on_popup_close),
+                   popup_window);
+  gtk_widget_show_all(popup_window);
+}
+
 GtkWidget *on_create(WebKitWebView *web_view,
                      WebKitNavigationAction *navigation_action,
                      gpointer user_data) {
-  return GTK_WIDGET(web_view);
+  auto *popup = webkit_web_view_new_with_related_view(web_view);
+  g_signal_connect(G_OBJECT(popup), "ready-to-show",
+                   G_CALLBACK(on_popup_ready_to_show),
+                   gtk_widget_get_toplevel(GTK_WIDGET(web_view)));
+  return popup;
 }
 
 void on_load_changed(WebKitWebView *web_view, WebKitLoadEvent load_event,

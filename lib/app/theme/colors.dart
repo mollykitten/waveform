@@ -1,8 +1,8 @@
 import 'package:flutter/painting.dart';
 
 /// Палитра Waveform — тёмная по умолчанию.
-/// Минимализм + лёгкие web3-акценты. Acid orange используется скупо:
-/// только активные элементы. Lime — web3-маркеры (minted, owned).
+/// Минимализм. Acid orange используется скупо: только активные элементы.
+/// Lime — второй акцент: метки и маркеры (комментарии на waveform, ◆ профиля).
 abstract final class AppColors {
   // Поверхности
   static const bg = Color(0xFF0A0A0A);
@@ -21,5 +21,5 @@ abstract final class AppColors {
 
   // Акценты
   static const acid = Color(0xFFFF5500); // SoundCloud orange — только активное
-  static const lime = Color(0xFFC6FF00); // web3: minted, owned
+  static const lime = Color(0xFFC6FF00); // второй акцент: метки и маркеры
 }

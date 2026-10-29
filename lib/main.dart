@@ -4,6 +4,7 @@ import 'package:audio_service/audio_service.dart';
 import 'package:desktop_webview_window/desktop_webview_window.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 import 'package:talker_flutter/talker_flutter.dart';
 import 'package:talker_riverpod_logger/talker_riverpod_logger.dart';
 import 'package:window_manager/window_manager.dart';
@@ -11,6 +12,7 @@ import 'package:window_manager/window_manager.dart';
 import 'app/app.dart';
 import 'core/audio/waveform_audio_handler.dart';
 import 'core/log/talker.dart';
+import 'features/onboarding/onboarding_gate.dart';
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -18,6 +20,14 @@ Future<void> main(List<String> args) async {
   // WebView titlebars run this entrypoint in a secondary Flutter engine
   // without the primary window/audio plugins. Do not bootstrap the app there.
   if (runWebViewTitleBarWidget(args)) return;
+
+  // just_audio has no native Windows/Linux implementation (the channel call
+  // throws MissingPluginException and every track ends up "unavailable"), so
+  // route those platforms through the media_kit (libmpv) backend. macOS keeps
+  // the vendored darwin plugin.
+  if (Platform.isWindows || Platform.isLinux) {
+    JustAudioMediaKit.ensureInitialized();
+  }
 
   // Window manager — для динамического title и базового sizing на desktop.
   if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) {
@@ -71,6 +81,10 @@ Future<void> main(List<String> args) async {
     overrides: [talkerProvider.overrideWithValue(talker)],
   );
   handler.container = container;
+
+  // Флаг онбординга читаем до первого кадра, чтобы роутер сразу знал стартовый
+  // экран (первый запуск → /welcome).
+  await onboardingGate.restore();
 
   runApp(
     UncontrolledProviderScope(container: container, child: const WaveformApp()),

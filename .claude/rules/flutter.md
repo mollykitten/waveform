@@ -113,10 +113,10 @@ Dart MCP server (`plugin:dart-flutter:dart-mcp-server`) уже подключё�
   Отдельного шага проверки формата в CI нет — `dart_format`/PostToolUse-хук
   всё равно форматируют правки по ходу работы.
 * **Авторство коммитов переопределено.** Автор и коммиттер — `alina
-  <hi@alina.sh>` (см. `CLAUDE.md`). НЕ добавлять `Co-Authored-By: Claude`
+  <hi@kitten.ac>` (см. `CLAUDE.md`). НЕ добавлять `Co-Authored-By: Claude`
   или любые AI-co-author пометки по умолчанию — это правило репозитория
   явно отменяет дефолт харнесса.
-* Все числа/тайм-коды/адреса кошельков — через `AppTheme.mono()` helper, не
+* Все числа/тайм-коды/тех. метки — через `AppTheme.mono()` helper, не
   городи свой моно-стайлинг.
 * Секреты Last.fm (`lib/core/lastfm/lastfm_constants.dart`) приходят только
   через `--dart-define=LASTFM_API_KEY=…`/`LASTFM_SHARED_SECRET=…` — никогда

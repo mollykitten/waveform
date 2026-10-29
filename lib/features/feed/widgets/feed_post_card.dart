@@ -8,7 +8,6 @@ import '../../../shared/format.dart';
 import '../../../shared/models/feed_post.dart';
 import '../../../shared/models/track.dart';
 import '../../../shared/widgets/cover_art.dart';
-import '../../../shared/widgets/minted_badge.dart';
 import '../../../shared/widgets/pressable.dart';
 import '../../../shared/widgets/live_waveform.dart';
 import '../../player/player_controller.dart';
@@ -127,12 +126,14 @@ class _ActorHeader extends StatelessWidget {
     return Row(
       children: [
         Pressable(
-          onTap: () => context.push('/artist/${Uri.encodeComponent(post.actor)}'),
+          onTap: () =>
+              context.push('/artist/${Uri.encodeComponent(post.actor)}'),
           child: CoverArt(seed: post.actorSeed, size: 28, circular: true),
         ),
         const SizedBox(width: 10),
         Pressable(
-          onTap: () => context.push('/artist/${Uri.encodeComponent(post.actor)}'),
+          onTap: () =>
+              context.push('/artist/${Uri.encodeComponent(post.actor)}'),
           child: Text(
             post.actor,
             style: const TextStyle(
@@ -221,7 +222,6 @@ class _ActionBar extends StatelessWidget {
         const _Action(icon: Icons.share_outlined),
         const _Action(icon: Icons.more_horiz),
         const Spacer(),
-        if (t.minted) ...[const MintedBadge(), const SizedBox(width: 14)],
         Icon(Icons.play_arrow, size: 13, color: AppColors.textLow),
         const SizedBox(width: 3),
         Text(Fmt.count(t.plays), style: AppTheme.mono(size: 11)),

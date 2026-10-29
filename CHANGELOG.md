@@ -6,9 +6,106 @@ All notable changes to Waveform are documented here. Format follows
 
 ## [Unreleased]
 
-### Changed
-- **macOS 12 Monterey is now the minimum supported version.** Runner, tests,
-  and CocoaPods targets use a consistent minimum compatible with Xcode 27.
+### added
+- **my wave draws on three candidate sources**: the related-track graph, your
+  home stream and co-likers (people with similar likes), interleaved 50% /
+  25% / 25% with a shared playability filter. co-likers run as a background
+  job (at most 250 requests, cached for 24 hours without other users' ids);
+  listening facts record which source supplied each track, and stats shows a
+  listened/skipped tally per source.
+
+### fixed
+- **every track was "unavailable" on windows (and linux).** just_audio has no
+  native implementation there, so loading any stream threw
+  `MissingPluginException`. windows and linux now play through the media_kit
+  (libmpv) backend; linux builds need `libmpv-dev`. not yet verified on a real
+  windows machine.
+
+### removed
+- **the model-assisted route of my wave.** the chatgpt connection, custom
+  openai-compatible and ollama providers, the mood field and the listening
+  consent dialog are gone: my wave now runs entirely on this device. an
+  offline pilot found the model route reached none of 100 new likes, below the
+  related-track graph. dev builds may leave a keychain item
+  `waveform.chatgpt.credentials.v1` and an `ai_config.json` in the support
+  directory; both can be deleted by hand.
+- the `jose`, `flutter_secure_storage` and `url_launcher` dependencies, the
+  loopback-server entitlement and the linux libsecret build requirement.
+
+## [0.4.0] — 2026-10-28
+
+my wave recommendations, macos audio output controls, keyboard accessibility,
+and release preparation. includes the merged work in #50–#56.
+
+### added
+- **my wave** plays a continuous queue of real soundcloud tracks. local
+  structural vectors rank a bounded related-track pool using account-isolated
+  listening evidence, diversity and exploration; these are graph vectors, not
+  audio embeddings. nothing is sent to a model.
+- **macos audio output selection** lists real core audio devices and routes
+  waveform's players without changing the system default. a native airplay
+  picker stays attached to the active player; opening it conservatively
+  suspends gapless/crossfade until a local output is selected.
+- **keyboard activation, focus and semantics** for shared controls and player
+  collapse controls; reduced motion extends to routes and transient UI.
+- **opt-in developer worker notifier** delivers completed ACP worker messages
+  to a coordinator with durable identities, retries and journal replay. its
+  python regressions run in CI; no active watcher or credentials are shipped.
+- **drm-protected tracks play on macos** (uploaded by distributors and labels)
+  through a bundled Widevine decryption core (`scdrm`, go over `dart:ffi`), as
+  a fallback after regular streams. go+ tracks still require a go+
+  subscription. from source you need your own device profile in
+  `assets/widevine/device.wvd`; it's never committed.
+- **copy-link button** in both player layouts; selectable track title and
+  description.
+- **new app icon, svg logo** and a static landing page.
+
+### changed
+- **my wave presentation** uses animated ribbons and a single play action.
+  generation preserves the queue until results play.
+- desktop account controls stay aligned 16px from the window edge.
+- **macos 12 monterey is now the minimum supported version.** runner, tests,
+  and cocoapods targets use a consistent minimum compatible with xcode 27.
+- **web3 removed.** the `◆ minted` badge and wallet placeholders are gone;
+  lime stays as a secondary accent for markers.
+- **the `🔒 GO+` locked-track badge is gone**; unplayable tracks get the
+  common "unavailable — skipped" notice.
+- docs moved from the README into `docs/`.
+
+### fixed
+- settings and my wave forms share compact controls, consistent labels and
+  spacing.
+- the owned wave control pauses and resumes playback; compact rows show the
+  actual upcoming queue and preserve recommendation reasons.
+- my wave background reacts to fetched soundcloud waveform envelopes during
+  advancing playback, not an fft/pcm spectrum; the envelope reaction stops
+  when hidden or paused.
+- audio output uses an icon-only trigger and shows full device names in its menu.
+- initial profile lookup failures retry with bounded backoff; listening
+  attribution stays suspended until identity is verified.
+- player source generations and swap recovery preserve playback intent,
+  reject stale preloads after queue edits, and avoid attributing outgoing
+  audio to a pending track.
+- audio output binding keeps pause/resume and active-player state coherent.
+- collection navigation avoids invalid hero tags.
+- reduced motion is respected by press states and skeleton pulses.
+- windows sign-in navigation no longer gets intercepted.
+- webview engines start through their own titlebar entrypoint.
+- the ⌘K search trigger stays in sync with query edits.
+- release workflow uses a bounded notarization wait, retrieves the apple log
+  when a submission id is available, installs linux webkit/libsoup
+  build dependencies, and waits for all platforms before the publish gate.
+
+### validation limits
+- native playback/refill of my wave and its musical recommendation quality
+  still require manual validation.
+- physical airplay receiver playback and switching outputs during playback
+  still require hardware verification; a compiled picker is not that evidence.
+- the older [dry run on 2026-10-25](https://github.com/mollykitten/waveform/actions/runs/40156324361)
+  built and signed macos and built windows/linux, but apple rejected notarization
+  with HTTP 403 for a missing or expired required agreement. staple and DMG
+  creation were skipped. it ran SHA `4e4f87463f77f7e077724a1d73ffd7be9836edcc`,
+  so the release candidate still needs its own successful dry run.
 
 ## [0.3.0] — 2026-06-10
 

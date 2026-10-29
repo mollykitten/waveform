@@ -7,8 +7,6 @@ import '../models/track.dart';
 
 /// Единый источник мок-данных на время разработки (до реального SoundCloud API).
 abstract final class Mock {
-  static const wallet = '0x7F3aD9e4C21b8F0a6E5d3C2b1A0f9E8d7C6b5A4f';
-
   /// Сводка профиля для правого рейла.
   static const plays7d = 1192;
 
@@ -59,7 +57,6 @@ abstract final class Mock {
       title: 'шура кинул барыгу',
       subtitle: 'polkovniksobr',
       kind: CollectionKind.playlist,
-      minted: true,
     ),
     Collection(
       id: 'm3',
@@ -107,7 +104,6 @@ abstract final class Mock {
       title: 'dope (remix)',
       subtitle: 'made for you',
       kind: CollectionKind.playlist,
-      minted: true,
     ),
     Collection(
       id: 'rp4',
@@ -146,7 +142,6 @@ abstract final class Mock {
       subtitle: 'immmortal, еверсинс',
       kind: CollectionKind.mix,
       mixLabel: 'MIX 2',
-      minted: true,
     ),
     Collection(
       id: 'mx3',
@@ -186,7 +181,6 @@ abstract final class Mock {
       subtitle: 'trippie redd · 2023',
       kind: CollectionKind.album,
       trackCount: 11,
-      minted: true,
     ),
     Collection(
       id: 'al3',
@@ -264,7 +258,6 @@ abstract final class Mock {
       title: "Seemann's Picks",
       subtitle: 'liked by Seemann',
       kind: CollectionKind.playlist,
-      minted: true,
     ),
     Collection(
       id: 'lb4',
@@ -289,7 +282,6 @@ abstract final class Mock {
       subtitle: 'the best of Waveform',
       kind: CollectionKind.autoMix,
       wordmark: 'WEEKLY WAVE',
-      minted: true,
     ),
   ];
 
@@ -351,7 +343,6 @@ abstract final class Mock {
       title: 'dope (remix)',
       subtitle: 'bladexxd',
       kind: CollectionKind.playlist,
-      minted: true,
     ),
     Collection(
       id: 'lk4',
@@ -370,7 +361,6 @@ abstract final class Mock {
       title: 'SUNSET',
       subtitle: 'lucki',
       kind: CollectionKind.album,
-      minted: true,
     ),
   ];
 
@@ -385,11 +375,10 @@ abstract final class Mock {
     ),
     Collection(
       id: 'pl2',
-      title: 'web3 audio',
-      subtitle: '12 tracks · owned',
+      title: 'late night',
+      subtitle: '12 tracks',
       kind: CollectionKind.playlist,
       trackCount: 12,
-      minted: true,
     ),
     Collection(
       id: 'pl3',

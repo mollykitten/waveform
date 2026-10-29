@@ -40,8 +40,8 @@ flutter test      # must pass
 - Data flows through the `SoundcloudApi` interface — UI never talks to the
   network directly. Mocks live only in `MockSoundcloudApi` (behind
   `--dart-define=MOCK=true`); never let mock data reach the live app.
-- The internal `client_id` is **scraped at runtime** and user tokens live in
-  `flutter_secure_storage` — **never hardcode or commit secrets.**
+- The internal `client_id` is **scraped at runtime** and user tokens live in a file
+  (`lib/core/storage/token_store.dart`) — **never hardcode or commit secrets.**
 
 ## Design contract
 

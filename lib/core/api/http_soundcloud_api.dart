@@ -66,7 +66,9 @@ class HttpSoundcloudApi implements SoundcloudApi {
     try {
       return (await call()).data;
     } on DioException catch (e) {
-      if (e.response?.statusCode == 401) {
+      // 401 на личной ручке — это токен пользователя, а не протухший
+      // client_id: ротация id тут не поможет, отдаём ошибку как есть.
+      if (e.response?.statusCode == 401 && !authed) {
         await _ids.refresh();
         return (await call()).data;
       }
@@ -147,7 +149,9 @@ class HttpSoundcloudApi implements SoundcloudApi {
   ];
 
   /// Личный стрим подписок (только треки) — требует userToken.
-  Future<List<Track>> _streamTracks(int limit) async {
+  @override
+  Future<List<Track>> streamTracks({int limit = 40}) async {
+    if (!_authed) throw StateError('the home stream needs a signed-in user');
     final data = await _get('/stream', {'limit': limit}, true);
     return _page(data, StreamItemDto.fromJson).collection
         .where((e) => e.isTrack && e.track != null)
@@ -176,7 +180,8 @@ class HttpSoundcloudApi implements SoundcloudApi {
           .map((m) {
             final p = PlaylistDto.fromJson(m);
             return Collection(
-              id: '${p.id}',
+              // У системных плейлистов (trending by genre) id — строковый urn.
+              id: '${m['id'] ?? p.id}',
               title: p.title,
               subtitle: p.user.username.isEmpty
                   ? 'SoundCloud'
@@ -226,7 +231,14 @@ class HttpSoundcloudApi implements SoundcloudApi {
   // Личные коллекции в api-v2 — по /users/{id}/…, а НЕ /me/… (последние 404).
   // Исключения, которые реально работают как /me/…: /me и /me/play-history.
   Future<String?>? _meIdFuture;
-  Future<String?> _meId() => _meIdFuture ??= _fetchMeId();
+  Future<String?> _meId() async {
+    final future = _meIdFuture ??= _fetchMeId();
+    final id = await future;
+    // Неудача (сеть, 5xx, null) не кешируется на весь срок жизни экземпляра.
+    if (id == null && identical(_meIdFuture, future)) _meIdFuture = null;
+    return id;
+  }
+
   Future<String?> _fetchMeId() async {
     try {
       final id = asMap(await _get('/me', null, true))['id'];
@@ -307,9 +319,14 @@ class HttpSoundcloudApi implements SoundcloudApi {
   /// GET абсолютного URL (для next_href пагинации). Подмешиваем свежий
   /// client_id поверх собственных query-параметров SC, 401 → refresh + retry.
   Future<dynamic> _getUrl(String url, bool authed) async {
+    final uri = Uri.parse(url);
+    // next_href приходит из ответа сервера: Bearer уходит только на api-v2,
+    // чужой хост игнорируем целиком (токен не утекает на сторонний адрес).
+    if (uri.scheme != 'https' || uri.host != 'api-v2.soundcloud.com') {
+      throw StateError('refusing next_href on foreign host: ${uri.host}');
+    }
     Future<Response<dynamic>> call() async {
       final cid = await _ids.get();
-      final uri = Uri.parse(url);
       final query = {...uri.queryParameters, 'client_id': cid};
       final full = uri.replace(queryParameters: query).toString();
       return _dio.get(full, options: authed ? _authOptions : null);
@@ -318,7 +335,7 @@ class HttpSoundcloudApi implements SoundcloudApi {
     try {
       return (await call()).data;
     } on DioException catch (e) {
-      if (e.response?.statusCode == 401) {
+      if (e.response?.statusCode == 401 && !authed) {
         await _ids.refresh();
         return (await call()).data;
       }
@@ -381,7 +398,7 @@ class HttpSoundcloudApi implements SoundcloudApi {
   Future<HomeData> home() async {
     // Личный стрим — только залогиненным; анонимам секции не будет.
     final stream = _tryAuthed(
-      () => _streamTracks(12),
+      () => streamTracks(limit: 12),
       () => Future.value(<Track>[]),
     );
     List<Shelf> shelves;
@@ -416,8 +433,15 @@ class HttpSoundcloudApi implements SoundcloudApi {
       () => _mePlaylists(),
       () async => const <Collection>[],
     );
-    final albums = _searchPlaylists(_genres[0], albums: true);
-    final stations = _genreStations(_genres[1]);
+    // Публичные секции не должны ронять лайки и плейлисты при сбое.
+    final albums = _publicOrEmpty(
+      'albums',
+      () => _searchPlaylists(_genres[0], albums: true),
+    );
+    final stations = _publicOrEmpty(
+      'stations',
+      () => _genreStations(_genres[1]),
+    );
     final following = _tryAuthed(
       () => _meFollowings(),
       () async => const <Collection>[],
@@ -435,6 +459,18 @@ class HttpSoundcloudApi implements SoundcloudApi {
       following: await following,
       history: await history,
     );
+  }
+
+  Future<List<Collection>> _publicOrEmpty(
+    String what,
+    Future<List<Collection>> Function() load,
+  ) async {
+    try {
+      return await load();
+    } catch (e, st) {
+      _log.warning('library: $what failed → empty', e, st);
+      return const <Collection>[];
+    }
   }
 
   Future<List<Collection>> _meFollowings() async {
@@ -485,7 +521,7 @@ class HttpSoundcloudApi implements SoundcloudApi {
   Future<TrackDetail> trackDetail(String id) async {
     // Только сам трек обязателен — комменты/related не должны ронять страницу.
     final commentsF = _trackComments(id);
-    final relatedF = _trackRelated(id);
+    final relatedF = relatedTracks(id);
 
     final dto = TrackDto.fromJson(asMap(await _get('/tracks/$id')));
     final wave = await _waveform(dto.waveformUrl);
@@ -510,7 +546,63 @@ class HttpSoundcloudApi implements SoundcloudApi {
     }
   }
 
-  Future<List<Track>> _trackRelated(String id) async {
+  @override
+  Future<List<String>> trackLikers(String trackId, {int limit = 50}) async {
+    final data = await _get('/tracks/$trackId/likers', {'limit': limit});
+    return [
+      for (final user in asMapList(asMap(data)['collection']))
+        if (asInt(user['id']) > 0) '${asInt(user['id'])}',
+    ];
+  }
+
+  @override
+  Future<List<({String trackId, DateTime? likedAt})>> userTrackLikes(
+    String userId, {
+    int limit = 200,
+  }) async {
+    final data = await _get('/users/$userId/track_likes', {'limit': limit});
+    final likes = <({String trackId, DateTime? likedAt})>[];
+    for (final item in asMapList(asMap(data)['collection'])) {
+      // One malformed item must not cost the whole page.
+      try {
+        final id = asInt(asMap(item['track'])['id']);
+        if (id <= 0) continue;
+        likes.add((
+          trackId: '$id',
+          likedAt: DateTime.tryParse(asStr(item['created_at'])),
+        ));
+      } catch (_) {
+        continue;
+      }
+    }
+    return likes;
+  }
+
+  @override
+  Future<List<Track>> tracksByIds(List<String> ids) async {
+    const batch = 50;
+    final tracks = <Track>[];
+    for (var i = 0; i < ids.length; i += batch) {
+      final csv = ids.skip(i).take(batch).join(',');
+      try {
+        final data = await _get('/tracks', {'ids': csv});
+        if (data is List) {
+          for (final item in data) {
+            final json = asMap(item);
+            if (json.containsKey('title')) {
+              tracks.add(TrackDto.fromJson(json).toDomain());
+            }
+          }
+        }
+      } catch (e, st) {
+        _log.warning('hydrate batch ($i+) failed', e, st);
+      }
+    }
+    return tracks;
+  }
+
+  @override
+  Future<List<Track>> relatedTracks(String id) async {
     try {
       final data = await _get('/tracks/$id/related', {'limit': 12});
       return _page(data, TrackDto.fromJson).mapList((d) => d.toDomain());
@@ -567,12 +659,24 @@ class HttpSoundcloudApi implements SoundcloudApi {
     );
   }
 
+  /// Путь ручки плейлиста: системные (подборки по жанрам и т.п.) имеют
+  /// строковый urn-id и живут в `/system-playlists/`, а не в `/playlists/`.
+  String _playlistPath(String id) =>
+      id.startsWith('soundcloud:system-playlists:')
+      ? '/system-playlists/$id'
+      : '/playlists/$id';
+
   /// Hydrate-весь плейлист: оставляем порядок из `tracks[]` ответа, для огрызков
   /// (без `title`) батчами тянем `/tracks?ids=…` (api-v2 принимает CSV id).
   @override
   Future<List<Track>> allPlaylistTracks(String id) async {
-    final raw = asMap(await _get('/playlists/$id'));
-    final tracksJson = asMapList(raw['tracks']);
+    final raw = asMap(await _get(_playlistPath(id)));
+    return _hydrateTracks(asMapList(raw['tracks']));
+  }
+
+  Future<List<Track>> _hydrateTracks(
+    List<Map<String, dynamic>> tracksJson,
+  ) async {
     // Восстановим порядок плейлиста через map trackId → index.
     final order = <int, int>{};
     final hydrated = <Track>[];
@@ -617,11 +721,13 @@ class HttpSoundcloudApi implements SoundcloudApi {
 
   @override
   Future<PlaylistDetail> playlist(String id) async {
-    final dto = PlaylistDto.fromJson(asMap(await _get('/playlists/$id')));
-    return (
-      playlist: dto.toDomain(),
-      tracks: [for (final t in dto.tracks) t.toDomain()],
-    );
+    final raw = asMap(await _get(_playlistPath(id)));
+    final dto = PlaylistDto.fromJson(raw);
+    // У системных плейлистов все треки — огрызки (только id): гидрируем.
+    final tracks = id.startsWith('soundcloud:system-playlists:')
+        ? await _hydrateTracks(asMapList(raw['tracks']))
+        : [for (final t in dto.tracks) t.toDomain()];
+    return (playlist: dto.toDomain(), tracks: tracks);
   }
 
   /// Транскодинг api-v2 — это указатель: GET по нему (с client_id) возвращает
@@ -664,12 +770,13 @@ class HttpSoundcloudApi implements SoundcloudApi {
     try {
       final data = asMap(await _get('/resolve', {'url': u}));
       final kind = data['kind'] as String?;
+      final id = data['id'];
       switch (kind) {
         case 'track':
-          return '/track/${data['id']}';
+          return id == null ? null : '/track/${Uri.encodeComponent('$id')}';
         case 'playlist':
         case 'system-playlist':
-          return '/playlist/${data['id']}';
+          return id == null ? null : '/playlist/${Uri.encodeComponent('$id')}';
         case 'user':
           final permalink = data['permalink'] as String?;
           return (permalink == null || permalink.isEmpty)

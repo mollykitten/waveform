@@ -22,6 +22,8 @@ lib/
 
 you need a recent [flutter](https://docs.flutter.dev/get-started/install) sdk with desktop enabled
 
+linux builds also need the gtk, webkit2gtk and libsoup development packages listed in [the release workflow](../.github/workflows/release.yml)
+
 ```bash
 flutter pub get
 flutter run -d macos      # or -d windows / -d linux
