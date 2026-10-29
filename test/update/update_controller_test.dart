@@ -119,4 +119,12 @@ void main() {
     expect(backend.manual, 1);
     expect(container.read(updateControllerProvider).available, '0.5.0');
   });
+
+  test('a failed manual check reports failed and keeps the record', () async {
+    backend.outcome = UpdateOutcome.failed;
+    final outcome = await controller().checkNow();
+
+    expect(outcome, UpdateOutcome.failed);
+    expect(await store.readString(UpdateController.prefsKey), isNull);
+  });
 }

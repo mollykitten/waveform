@@ -198,7 +198,13 @@ jobs:
           done
           for xpc in Installer Downloader; do
             echo "--- $xpc.xpc entitlements ---"
-            codesign -d --entitlements :- "$SPK/Versions/B/XPCServices/$xpc.xpc" 2>&1
+            ENT=$(codesign -d --entitlements :- "$SPK/Versions/B/XPCServices/$xpc.xpc" 2>&1)
+            echo "$ENT"
+            # the downloader fetches the update inside its own sandbox
+            if [ "$xpc" = Downloader ] && ! grep -q com.apple.security.network.client <<<"$ENT"; then
+              echo "::error::Downloader.xpc lost com.apple.security.network.client"
+              exit 1
+            fi
           done
 
           codesign --verify --strict --deep --verbose=2 "$APP"
@@ -331,6 +337,27 @@ jobs:
       - name: Verify no widevine profile in build output
         shell: bash
         run: tool/check_no_wvd.sh build
+
+      # winsparkle accepts unsigned updates when the exe carries no EdDSAPub
+      # resource, so a build without the compiled-in key must not ship.
+      - name: Verify the update public key is compiled into the exe
+        shell: bash
+        run: |
+          KEY=$(sed -n 's/^EdDSAPub EDDSA {"\([^"]*\)"}.*/\1/p' windows/runner/Runner.rc)
+          test -n "$KEY" || { echo "::error::no EdDSAPub in Runner.rc"; exit 1; }
+          python3 - "$KEY" build/windows/x64/runner/Release/*.exe <<'PY'
+          import sys
+          key = sys.argv[1]
+          exes = sys.argv[2:]
+          needles = (key.encode('ascii'), key.encode('utf-16-le'))
+          for exe in exes:
+              data = open(exe, 'rb').read()
+              if any(n in data for n in needles):
+                  print('EdDSAPub found in', exe)
+                  sys.exit(0)
+          print('::error::EdDSAPub resource missing from the built exe')
+          sys.exit(1)
+          PY
 
       - name: Package Windows zip
         shell: pwsh

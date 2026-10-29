@@ -73,10 +73,10 @@ class UpdateController extends Notifier<UpdateState> {
   }
 
   /// Кнопка «check for updates».
-  Future<void> checkNow() async {
+  Future<UpdateOutcome?> checkNow() async {
     final backend = ref.read(updateBackendProvider);
-    if (backend is NoopUpdateBackend || state.checking) return;
-    await _run(() => backend.checkNow(), DateTime.now());
+    if (backend is NoopUpdateBackend || state.checking) return null;
+    return _run(() => backend.checkNow(), DateTime.now());
   }
 
   /// Linux: поставить найденное обновление.
@@ -86,14 +86,17 @@ class UpdateController extends Notifier<UpdateState> {
     return backend.installAvailable();
   }
 
-  Future<void> _run(Future<UpdateOutcome> Function() op, DateTime at) async {
+  Future<UpdateOutcome> _run(
+    Future<UpdateOutcome> Function() op,
+    DateTime at,
+  ) async {
     state = state.copyWith(checking: true);
     try {
       final outcome = await op();
       if (outcome == UpdateOutcome.failed) {
         // сбой сети не считается проверкой: следующий запуск попробует снова
         state = state.copyWith(checking: false);
-        return;
+        return outcome;
       }
       final backend = ref.read(updateBackendProvider);
       state = state.copyWith(
@@ -103,9 +106,11 @@ class UpdateController extends Notifier<UpdateState> {
         clearAvailable: backend.availableVersion == null,
       );
       await _writeLastCheck(at);
+      return outcome;
     } catch (e, st) {
       ref.read(talkerProvider).warning('update check failed', e, st);
       state = state.copyWith(checking: false);
+      return UpdateOutcome.failed;
     }
   }
 

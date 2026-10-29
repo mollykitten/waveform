@@ -34,11 +34,18 @@ pair. the public half is committed; the private half is only a github secret.
 1. download the sparkle release matching the pod (`Sparkle-2.9.6.tar.xz` from
    github.com/sparkle-project/Sparkle/releases), unpack it somewhere outside
    the repo and run `bin/generate_keys`. it stores the private key in your
-   login keychain and prints the public key.
+   login keychain and prints the public key. the real key lives in the
+   keychain under the account `waveform` (`generate_keys --account waveform`);
+   re-export it with `generate_keys --account waveform -x <file>`.
 2. put the public key into `macos/Runner/Info.plist` (`SUPublicEDKey`) and
-   `windows/runner/Runner.rc` (`EdDSAPub EDDSA "…"`), replacing
-   `REPLACE_WITH_SPARKLE_PUBLIC_ED_KEY`. tag builds refuse to run while the
-   placeholder is still there.
+   `windows/runner/Runner.rc`. the rc line must use braces, not a plain
+   string (rc would treat a quoted string as a file name, error RC2135):
+   `EdDSAPub EDDSA {"<base64 key>"}`. keep it on one line; to split a long
+   value use adjacent strings inside the braces: `{"part1" "part2"}`. the
+   committed key is already the real one; tag builds refuse to run if the
+   `REPLACE_WITH_SPARKLE_PUBLIC_ED_KEY` placeholder ever comes back, and the
+   windows job checks that the key is really compiled into the exe (winsparkle
+   accepts unsigned updates when the resource is missing).
 3. export the private key with `bin/generate_keys -x sparkle_private.key`,
    store the file's contents as the github secret **`SPARKLE_ED_PRIVATE_KEY`**
    and delete the file. sparkle 2.x exports the 32-byte ed25519 seed (base64);

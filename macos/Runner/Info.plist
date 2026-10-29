@@ -44,7 +44,7 @@
 	<key>SUFeedURL</key>
 	<string>https://github.com/mollykitten/waveform/releases/latest/download/appcast-macos.xml</string>
 	<key>SUPublicEDKey</key>
-	<string>REPLACE_WITH_SPARKLE_PUBLIC_ED_KEY</string>
+	<string>kZJ5UlVY6LKvlumsBx9vmicFRwjV6QkbEPSECxQe9eo=</string>
 	<key>SUEnableInstallerLauncherService</key>
 	<true/>
 	<key>SUEnableAutomaticChecks</key>

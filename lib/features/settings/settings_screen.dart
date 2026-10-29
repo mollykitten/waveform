@@ -749,6 +749,12 @@ class _UpdateRow extends ConsumerWidget {
     );
   }
 
+  Future<void> _check(BuildContext context, UpdateController controller) async {
+    final outcome = await controller.checkNow();
+    if (!context.mounted || outcome != UpdateOutcome.failed) return;
+    showToast(context, "couldn't check for updates");
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final controller = ref.read(updateControllerProvider.notifier);
@@ -772,7 +778,7 @@ class _UpdateRow extends ConsumerWidget {
           label: canInstall ? 'update ↗' : 'check for updates',
           onTap: () => canInstall
               ? _install(context, controller)
-              : controller.checkNow(),
+              : _check(context, controller),
         ),
       ],
     );
