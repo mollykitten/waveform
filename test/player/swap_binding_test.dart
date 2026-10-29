@@ -401,7 +401,7 @@ void main() {
       expect(h.state.isPlaying, isTrue);
       expect(h.players[0].isPlaying, isFalse);
       expect(h.players[1].isPlaying, isTrue);
-      expect(h.players[1].volume, 1);
+    expect(h.players[1].volume, closeTo(0.125, 1e-9)); // default 0.5 ^ 3
     },
   );
 
