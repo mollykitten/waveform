@@ -41,5 +41,13 @@
 			</array>
 		</dict>
 	</array>
+	<key>SUFeedURL</key>
+	<string>https://github.com/mollykitten/waveform/releases/latest/download/appcast-macos.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>kZJ5UlVY6LKvlumsBx9vmicFRwjV6QkbEPSECxQe9eo=</string>
+	<key>SUEnableInstallerLauncherService</key>
+	<true/>
+	<key>SUEnableAutomaticChecks</key>
+	<false/>
 </dict>
 </plist>

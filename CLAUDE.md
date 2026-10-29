@@ -365,7 +365,13 @@ CF по весу соседа и давности его лайка, без фи
    прогоне 2026-10-25 импорт сертификата и подпись прошли; текущий
    наблюдавшийся блокер — обязательное соглашение Apple, HTTP 403 при
    notarization. Нужен успешный прогон финального main после его принятия.
-2. **Last.fm** (опционально): зарегистрировать Waveform на
+2. **EdDSA-ключ автообновления** (Sparkle/WinSparkle, одна пара на macOS и
+   Windows): `bin/generate_keys` из релиза Sparkle (2.9.6) → публичный ключ в
+   `macos/Runner/Info.plist` (`SUPublicEDKey`) и `windows/runner/Runner.rc`
+   (`EdDSAPub`) вместо `REPLACE_WITH_SPARKLE_PUBLIC_ED_KEY`; приватный
+   (`generate_keys -x`) — GitHub secret `SPARKLE_ED_PRIVATE_KEY`, файл удалить.
+   Без этого тег-сборка падает. Подробнее — `docs/releasing.md`.
+3. **Last.fm** (опционально): зарегистрировать Waveform на
    last.fm/api/account/create → положить `LASTFM_API_KEY` и
    `LASTFM_SHARED_SECRET` ещё двумя GitHub Actions secrets (рядом
    с APPLE_*). Они прокидываются в сборку через `--dart-define`
@@ -374,10 +380,10 @@ CF по весу соседа и давности его лайка, без фи
    shared_secret приватным, а git-история public-репо публикует
    всё навсегда. Локально для тестирования: `flutter run
    --dart-define=LASTFM_API_KEY=… --dart-define=LASTFM_SHARED_SECRET=…`.
-3. **Иконка приложения**: положить квадратный PNG в
+4. **Иконка приложения**: положить квадратный PNG в
    `assets/icon/icon.png` → `dart run flutter_launcher_icons` →
    `flutter clean && flutter build macos`.
-4. **Тег `v0.4.0`** (решено 2026-10). Сначала CI и сухой прогон финального
+5. **Тег `v0.4.0`** (решено 2026-10). Сначала CI и сухой прогон финального
    main без публикации: `gh workflow run release.yml --ref main`
    (publish-джоб гейтится на тег). Проверить совпадение SHA и результаты
    платформ; macOS обязателен, Windows/Linux best effort. Дату в CHANGELOG
