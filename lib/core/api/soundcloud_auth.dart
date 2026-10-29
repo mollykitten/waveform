@@ -74,6 +74,8 @@ class AuthController extends Notifier<SoundcloudAuth> {
     final generation = _generation;
     await _enqueue(() async {
       final token = await _store.read();
+      // Провайдер могли уничтожить, пока читали диск (закрытие контейнера).
+      if (!ref.mounted) return;
       if (generation != _generation) {
         ref.read(talkerProvider).info('auth: restore skipped (state changed)');
         return;
@@ -131,10 +133,14 @@ class AuthController extends Notifier<SoundcloudAuth> {
     });
   }
 
+  /// Операция из очереди может дойти до исполнения уже после dispose
+  /// провайдера — тогда `ref` недоступен, и операцию просто пропускаем.
   Future<void> _safe(Future<void> Function() op) async {
+    if (!ref.mounted) return;
     try {
       await op();
     } catch (e, st) {
+      if (!ref.mounted) return;
       ref.read(talkerProvider).warning('auth: storage op failed', e, st);
     }
   }

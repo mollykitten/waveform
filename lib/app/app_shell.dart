@@ -16,6 +16,7 @@ import '../core/lastfm/scrobbler.dart';
 import '../core/log/talker.dart';
 import '../core/recommendations/co_likers_job.dart';
 import '../core/recommendations/listening_providers.dart';
+import '../core/tray/tray_menu.dart';
 import '../features/omnibox/omnibox_dropdown.dart';
 import '../features/omnibox/omnibox_providers.dart';
 import '../features/player/player_controller.dart';
@@ -107,6 +108,7 @@ class _AppShellState extends ConsumerState<AppShell> {
     // Lazy-bootstrap скробблера: provider создаст Notifier, который подпишется
     // на playerController.
     ref.watch(lastfmScrobblerProvider);
+    ref.watch(trayMenuProvider);
     ref.watch(listeningFeedbackProvider);
     ref.watch(coLikersJobProvider);
     // Lazy-bootstrap deep-link сервиса (waveform:// + soundcloud.com ссылки).

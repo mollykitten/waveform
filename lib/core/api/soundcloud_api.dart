@@ -140,4 +140,26 @@ abstract interface class SoundcloudApi {
   /// Репост/снять репост (PUT/DELETE `/users/{me}/track_reposts/{id}`).
   /// Тот же контракт что у [setLiked].
   Future<LikeOutcome> setReposted(String trackId, bool reposted);
+
+  /// IDs of the users the signed-in account follows. **Cursor pagination**
+  /// like [likesPage]: pass the previous `nextHref`. api-v2 has no per-user
+  /// "do I follow X" lookup (`/users/{me}/followings/{id}` answers 404 for
+  /// followed and unfollowed alike), so the full list is the only source.
+  Future<({List<String> ids, String? nextHref})> followingsPage({
+    String? nextHref,
+    int limit = 200,
+  });
+
+  /// Follow/unfollow a user (PUT/DELETE `/users/{me}/followings/{id}`).
+  /// Same contract as [setLiked].
+  Future<LikeOutcome> setFollowing(String userId, bool following);
+
+  /// One page of a user's own reposts (`/stream/users/{id}/reposts`, public),
+  /// newest first, independent of the spotlight. Playlist reposts are skipped.
+  /// Cursor pagination: pass the previous `nextHref`.
+  Future<({List<Track> tracks, String? nextHref})> userRepostsPage(
+    String userId, {
+    String? nextHref,
+    int limit = 20,
+  });
 }

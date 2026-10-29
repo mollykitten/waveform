@@ -4,10 +4,12 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   app_links
+  auto_updater_windows
   desktop_webview_window
   media_kit_libs_windows_audio
   screen_retriever_windows
   share_plus
+  tray_manager
   url_launcher_windows
   window_manager
 )

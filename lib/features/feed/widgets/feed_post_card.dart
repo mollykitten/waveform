@@ -4,6 +4,9 @@ import 'package:go_router/go_router.dart';
 
 import '../../../app/theme/app_theme.dart';
 import '../../../app/theme/colors.dart';
+import '../../../core/api/liked_tracks.dart';
+import '../../../core/api/soundcloud_api.dart';
+import '../../../shared/action_feedback.dart';
 import '../../../shared/format.dart';
 import '../../../shared/models/feed_post.dart';
 import '../../../shared/models/track.dart';
@@ -208,16 +211,44 @@ class _TagChip extends StatelessWidget {
   }
 }
 
-class _ActionBar extends StatelessWidget {
+class _ActionBar extends ConsumerStatefulWidget {
   const _ActionBar({required this.post});
   final FeedPost post;
 
   @override
+  ConsumerState<_ActionBar> createState() => _ActionBarState();
+}
+
+class _ActionBarState extends ConsumerState<_ActionBar> {
+  // Оптимистичный ±1 на счётчике; откатывается, если API ответила !ok.
+  int _likesDelta = 0;
+
+  Future<void> _toggleLike() async {
+    final track = widget.post.track;
+    final wasLiked = ref.read(likedTracksProvider).contains(track.id);
+    setState(() => _likesDelta += wasLiked ? -1 : 1);
+    final outcome = await ref
+        .read(likedTracksProvider.notifier)
+        .toggle(track.id, track: track);
+    if (outcome != LikeOutcome.ok && mounted) {
+      setState(() => _likesDelta += wasLiked ? 1 : -1);
+    }
+    if (mounted) showWriteOutcome(context, outcome, verb: 'like');
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final t = post.track;
+    final t = widget.post.track;
+    // Источник правды — множество лайков пользователя, а не данные поста.
+    final liked = ref.watch(likedTracksProvider).contains(t.id);
     return Row(
       children: [
-        _Action(icon: Icons.favorite_border, value: Fmt.count(t.likes)),
+        _Action(
+          icon: liked ? Icons.favorite : Icons.favorite_border,
+          iconColor: liked ? AppColors.acid : null,
+          value: Fmt.count(t.likes + _likesDelta),
+          onTap: _toggleLike,
+        ),
         _Action(icon: Icons.repeat, value: Fmt.count(t.reposts)),
         const _Action(icon: Icons.share_outlined),
         const _Action(icon: Icons.more_horiz),
@@ -228,31 +259,37 @@ class _ActionBar extends StatelessWidget {
         const SizedBox(width: 14),
         Icon(Icons.mode_comment_outlined, size: 12, color: AppColors.textLow),
         const SizedBox(width: 4),
-        Text(Fmt.count(post.comments), style: AppTheme.mono(size: 11)),
+        Text(Fmt.count(widget.post.comments), style: AppTheme.mono(size: 11)),
       ],
     );
   }
 }
 
 class _Action extends StatelessWidget {
-  const _Action({required this.icon, this.value});
+  const _Action({required this.icon, this.value, this.iconColor, this.onTap});
   final IconData icon;
   final String? value;
+  final Color? iconColor;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     return MouseRegion(
       cursor: SystemMouseCursors.click,
-      child: Padding(
-        padding: const EdgeInsets.only(right: 18),
-        child: Row(
-          children: [
-            Icon(icon, size: 15, color: AppColors.textMid),
-            if (value != null) ...[
-              const SizedBox(width: 5),
-              Text(value!, style: AppTheme.mono(size: 11)),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.only(right: 18),
+          child: Row(
+            children: [
+              Icon(icon, size: 15, color: iconColor ?? AppColors.textMid),
+              if (value != null) ...[
+                const SizedBox(width: 5),
+                Text(value!, style: AppTheme.mono(size: 11)),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );

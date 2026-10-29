@@ -4,8 +4,9 @@ import '../../app/theme/colors.dart';
 
 /// Waveform во всю ширину: прослушанная часть — acid orange, буферизированная
 /// (но ещё не сыгранная) — приглушённый acid, остальная — waveDim.
-/// Клик/драг по дорожке вызывает [onSeek] (доля 0..1).
-class WaveformView extends StatelessWidget {
+/// Клик вызывает [onSeek] (доля 0..1) сразу; драг — один раз на отпускание,
+/// а пока он идёт, курсор рисуется по локальной позиции пальца/мыши.
+class WaveformView extends StatefulWidget {
   const WaveformView({
     super.key,
     required this.bars,
@@ -29,27 +30,61 @@ class WaveformView extends StatelessWidget {
   final List<double> markers;
 
   @override
+  State<WaveformView> createState() => _WaveformViewState();
+}
+
+class _WaveformViewState extends State<WaveformView> {
+  /// Доля под курсором во время драга; null — драга нет.
+  double? _dragFraction;
+
+  double _fractionAt(double dx, double width) =>
+      width <= 0 ? 0.0 : (dx / width).clamp(0.0, 1.0);
+
+  @override
   Widget build(BuildContext context) {
+    final onSeek = widget.onSeek;
     return SizedBox(
-      height: height,
+      height: widget.height,
       child: LayoutBuilder(
         builder: (context, c) {
-          void seekAt(Offset local) =>
-              onSeek?.call((local.dx / c.maxWidth).clamp(0.0, 1.0));
-
           return GestureDetector(
             behavior: HitTestBehavior.opaque,
-            onTapDown: onSeek == null ? null : (d) => seekAt(d.localPosition),
+            onTapUp: onSeek == null
+                ? null
+                : (d) => onSeek(_fractionAt(d.localPosition.dx, c.maxWidth)),
+            onHorizontalDragStart: onSeek == null
+                ? null
+                : (d) => setState(
+                    () => _dragFraction = _fractionAt(
+                      d.localPosition.dx,
+                      c.maxWidth,
+                    ),
+                  ),
             onHorizontalDragUpdate: onSeek == null
                 ? null
-                : (d) => seekAt(d.localPosition),
+                : (d) => setState(
+                    () => _dragFraction = _fractionAt(
+                      d.localPosition.dx,
+                      c.maxWidth,
+                    ),
+                  ),
+            onHorizontalDragEnd: onSeek == null
+                ? null
+                : (_) {
+                    final f = _dragFraction;
+                    setState(() => _dragFraction = null);
+                    if (f != null) onSeek(f);
+                  },
+            onHorizontalDragCancel: () {
+              if (_dragFraction != null) setState(() => _dragFraction = null);
+            },
             child: CustomPaint(
-              size: Size(c.maxWidth, height),
+              size: Size(c.maxWidth, widget.height),
               painter: _WaveformPainter(
-                bars: bars,
-                progress: progress,
-                buffered: buffered,
-                markers: markers,
+                bars: widget.bars,
+                progress: _dragFraction ?? widget.progress,
+                buffered: widget.buffered,
+                markers: widget.markers,
               ),
             ),
           );

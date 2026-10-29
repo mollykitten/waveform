@@ -158,7 +158,7 @@ class TrackRow extends ConsumerWidget {
             const SizedBox(width: 16),
             Pressable(
               onTap: () async {
-                final outcome = await c2.toggle(track.id);
+                final outcome = await c2.toggle(track.id, track: track);
                 if (context.mounted) showLikeOutcome(context, outcome);
               },
               child: Icon(
