@@ -1,6 +1,6 @@
 /// Версия приложения. Обновлять синхронно с `version:` в pubspec.yaml
 /// (сверяет тест `update_version_test.dart` и релизный workflow).
-const kAppVersion = '0.4.0';
+const kAppVersion = '0.5.0';
 
 /// Страница релизов: фолбэк, когда автообновление недоступно.
 const kReleasesPageUrl =
