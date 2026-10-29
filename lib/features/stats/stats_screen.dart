@@ -64,9 +64,16 @@ class _Body extends StatelessWidget {
         ),
         const SizedBox(height: 6),
         Text(
-          'aggregated from your soundcloud play-history (up to last ~400 plays)',
+          _sampleNote(stats),
           style: AppTheme.mono(size: 11, color: AppColors.textLow),
         ),
+        if (stats.partial) ...[
+          const SizedBox(height: 6),
+          Text(
+            'some pages failed to load — numbers are incomplete',
+            style: AppTheme.mono(size: 11, color: AppColors.acid),
+          ),
+        ],
         const SizedBox(height: 26),
         Row(
           children: [
@@ -80,8 +87,8 @@ class _Body extends StatelessWidget {
             const SizedBox(width: 12),
             Expanded(
               child: _Tile(
-                big: _formatHours(stats.totalListened),
-                small: 'hours',
+                big: _formatHours(stats.totalTrackLength),
+                small: 'hours of tracks',
               ),
             ),
           ],
@@ -126,6 +133,15 @@ class _Body extends StatelessWidget {
         const WaveSourceSummary(),
       ],
     );
+  }
+
+  String _sampleNote(ListeningStats s) {
+    final n = Fmt.count(s.totalPlays);
+    final limit = Fmt.count(ListeningStats.sampleLimit);
+    final base = s.capped
+        ? 'last $n plays — sample limit reached ($limit)'
+        : '$n plays from your soundcloud play-history';
+    return '$base · hours = summed track lengths, not time listened';
   }
 
   String _formatHours(Duration d) {
