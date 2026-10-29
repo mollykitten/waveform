@@ -11,6 +11,7 @@ import 'package:waveform_app/core/api/soundcloud_auth.dart';
 import 'package:waveform_app/core/audio/audio_engine.dart';
 import 'package:waveform_app/core/log/talker.dart';
 import 'package:waveform_app/features/home/mock_tracks.dart';
+import 'package:waveform_app/features/player/player_controller.dart';
 
 /// Заглушка звукового движка — без плагина just_audio в тестах.
 class _FakeAudioEngine implements AudioEngine {
@@ -121,6 +122,24 @@ void main() {
 
     expect(find.text('select a track'), findsNothing);
     expect(find.byIcon(Icons.pause), findsWidgets);
+  });
+
+  testWidgets('Track page keeps the queue when the track is already in it', (
+    tester,
+  ) async {
+    final container = await pumpApp(tester, loggedIn: true);
+    final likes = mockTracks.take(3).toList();
+    final pc = container.read(playerControllerProvider.notifier);
+    pc.play(likes[0], queue: likes);
+    await tester.pump();
+
+    appRouter.go('/track/${likes[1].id}');
+    await load(tester);
+    await tester.tap(find.byIcon(Icons.play_arrow).first);
+    await tester.pump();
+
+    expect(container.read(playerControllerProvider).track?.id, likes[1].id);
+    expect(pc.queueSnapshot.map((t) => t.id), likes.map((t) => t.id));
   });
 
   testWidgets('Home hides "from your stream" even when logged in', (

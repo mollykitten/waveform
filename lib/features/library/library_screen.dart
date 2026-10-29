@@ -436,8 +436,11 @@ class _PaginatedLikesTabState extends ConsumerState<_PaginatedLikesTab> {
                 mainAxisSpacing: 24,
               ),
               itemCount: tracks.length,
-              itemBuilder: (_, i) =>
-                  LikeTile(track: tracks[i], queue: state.tracks),
+              itemBuilder: (_, i) => LikeTile(
+                key: ValueKey(tracks[i].id),
+                track: tracks[i],
+                queue: tracks,
+              ),
             ),
           )
         else
@@ -445,8 +448,7 @@ class _PaginatedLikesTabState extends ConsumerState<_PaginatedLikesTab> {
             padding: hPad,
             sliver: SliverList.builder(
               itemCount: tracks.length,
-              itemBuilder: (_, i) =>
-                  TrackRow(track: tracks[i], queue: state.tracks),
+              itemBuilder: (_, i) => TrackRow(track: tracks[i], queue: tracks),
             ),
           ),
         SliverToBoxAdapter(
@@ -642,6 +644,7 @@ class LikeTile extends ConsumerStatefulWidget {
 
 class LikeTileState extends ConsumerState<LikeTile> {
   bool _hover = false;
+  bool _focused = false;
 
   @override
   Widget build(BuildContext context) {
@@ -651,7 +654,7 @@ class LikeTileState extends ConsumerState<LikeTile> {
     final isCurrent = player.track?.id == track.id;
     final isPlaying = isCurrent && player.isPlaying;
     final reduced = MediaQuery.disableAnimationsOf(context);
-    final showPlay = _hover || isCurrent;
+    final showPlay = _hover || _focused || isCurrent;
     return SizedBox(
       width: 160,
       child: Column(
@@ -660,46 +663,55 @@ class LikeTileState extends ConsumerState<LikeTile> {
           MouseRegion(
             onEnter: (_) => setState(() => _hover = true),
             onExit: (_) => setState(() => _hover = false),
-            child: Pressable(
-              onTap: () =>
-                  isCurrent ? c.toggle() : c.play(track, queue: widget.queue),
-              child: Stack(
-                children: [
-                  Hero(
-                    tag: 'cover-track-${track.id}',
-                    child: CoverArt(
-                      seed: track.id,
-                      imageUrl: track.coverUrl,
-                      size: 160,
-                    ),
-                  ),
-                  Positioned.fill(
-                    child: AnimatedOpacity(
-                      opacity: showPlay ? 1 : 0,
-                      duration: reduced
-                          ? Duration.zero
-                          : const Duration(milliseconds: 120),
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: AppColors.bg.withValues(alpha: 0.45),
-                          borderRadius: AppTheme.borderRadius,
+            child: Focus(
+              canRequestFocus: false,
+              onFocusChange: (v) => setState(() => _focused = v),
+              child: Semantics(
+                button: true,
+                label: isPlaying
+                    ? 'pause ${track.title}'
+                    : 'play ${track.title}',
+                excludeSemantics: true,
+                child: Pressable(
+                  onTap: () => isCurrent
+                      ? c.toggle()
+                      : c.play(track, queue: widget.queue),
+                  child: Stack(
+                    children: [
+                      Hero(
+                        tag: 'cover-track-${track.id}',
+                        child: CoverArt(
+                          seed: track.id,
+                          imageUrl: track.coverUrl,
+                          size: 160,
                         ),
-                        child: Center(
-                          child: Icon(
-                            isPlaying ? Icons.pause : Icons.play_arrow,
-                            semanticLabel: isPlaying
-                                ? 'pause ${track.title}'
-                                : 'play ${track.title}',
-                            size: 36,
-                            color: isCurrent
-                                ? AppColors.acid
-                                : AppColors.textHi,
+                      ),
+                      Positioned.fill(
+                        child: AnimatedOpacity(
+                          opacity: showPlay ? 1 : 0,
+                          duration: reduced
+                              ? Duration.zero
+                              : const Duration(milliseconds: 120),
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: AppColors.bg.withValues(alpha: 0.45),
+                              borderRadius: AppTheme.borderRadius,
+                            ),
+                            child: Center(
+                              child: Icon(
+                                isPlaying ? Icons.pause : Icons.play_arrow,
+                                size: 36,
+                                color: isCurrent
+                                    ? AppColors.acid
+                                    : AppColors.textHi,
+                              ),
+                            ),
                           ),
                         ),
                       ),
-                    ),
+                    ],
                   ),
-                ],
+                ),
               ),
             ),
           ),
