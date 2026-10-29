@@ -85,6 +85,29 @@ class MeLikesPageController extends Notifier<LikesPageState> {
     await loadNext();
   }
 
+  int _refreshToken = 0;
+
+  /// Тихое обновление: перечитывает первую страницу и подменяет список, не
+  /// показывая skeleton (в отличие от [reset]). Зовётся после лайка/анлайка,
+  /// при открытии вкладки и по кнопке refresh. При ошибке список остаётся
+  /// прежним. Дальние страницы подтянутся скроллом заново.
+  Future<void> refresh() async {
+    final token = ++_refreshToken;
+    try {
+      final result = await ref
+          .read(soundcloudApiProvider)
+          .likesPage(limit: _pageSize);
+      if (token != _refreshToken) return;
+      state = LikesPageState(
+        tracks: result.tracks,
+        isInitial: false,
+        nextHref: result.nextHref,
+      );
+    } catch (_) {
+      // Оставляем текущий список: refresh — best-effort.
+    }
+  }
+
   bool _draining = false;
 
   /// Догрузить ВСЕ оставшиеся страницы лайков — чтобы поиск шёл по всем лайкам,

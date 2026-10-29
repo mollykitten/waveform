@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'me_likes.dart';
 import 'providers.dart';
 import 'soundcloud_api.dart';
 import 'soundcloud_auth.dart';
@@ -52,6 +55,10 @@ class LikedTracksController extends Notifier<Set<String>> {
         .setLiked(trackId, like);
     if (outcome != LikeOutcome.ok) {
       state = like ? ({...state}..remove(trackId)) : {...state, trackId};
+    } else if (ref.exists(meLikesPagedProvider)) {
+      // Список library > likes держит свою копию страниц — обновляем её, чтобы
+      // лайк появился без рестарта.
+      unawaited(ref.read(meLikesPagedProvider.notifier).refresh());
     }
     return outcome;
   }

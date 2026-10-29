@@ -33,7 +33,10 @@ const kShortcutRows = <(String, String)>[
   ('shift + S', 'shuffle'),
   ('Q', 'show queue'),
   ('H', 'this help'),
-  ('G then L / S / C / P / H', 'go to likes / feed / library / profile / history'),
+  (
+    'G then L / S / C / P / H',
+    'go to likes / feed / library / profile / history',
+  ),
   ('⌘K', 'command palette'),
   ('⌘L', 'go to likes'),
   ('⌘,', 'settings'),
@@ -48,8 +51,7 @@ class ShortcutsOverlay extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    void close() =>
-        ref.read(shortcutsOverlayOpenProvider.notifier).close();
+    void close() => ref.read(shortcutsOverlayOpenProvider.notifier).close();
 
     return Focus(
       autofocus: true,
@@ -71,8 +73,7 @@ class ShortcutsOverlay extends ConsumerWidget {
               onTap: close,
               child: BackdropFilter(
                 filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-                child: Container(
-                    color: AppColors.bg.withValues(alpha: 0.45)),
+                child: Container(color: AppColors.bg.withValues(alpha: 0.45)),
               ),
             ),
           ),
@@ -108,8 +109,7 @@ class ShortcutsOverlay extends ConsumerWidget {
                         const SizedBox(height: 16),
                         for (final (keys, label) in kShortcutRows)
                           Padding(
-                            padding:
-                                const EdgeInsets.symmetric(vertical: 4),
+                            padding: const EdgeInsets.symmetric(vertical: 4),
                             child: Row(
                               children: [
                                 SizedBox(

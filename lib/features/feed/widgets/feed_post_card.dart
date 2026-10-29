@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../app/theme/app_theme.dart';
 import '../../../app/theme/colors.dart';
+import '../../../core/api/liked_tracks.dart';
 import '../../../shared/format.dart';
 import '../../../shared/models/feed_post.dart';
 import '../../../shared/models/track.dart';
@@ -208,16 +209,23 @@ class _TagChip extends StatelessWidget {
   }
 }
 
-class _ActionBar extends StatelessWidget {
+class _ActionBar extends ConsumerWidget {
   const _ActionBar({required this.post});
   final FeedPost post;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final t = post.track;
+    // Источник правды — множество лайков пользователя, а не данные поста.
+    final liked = ref.watch(likedTracksProvider).contains(t.id);
     return Row(
       children: [
-        _Action(icon: Icons.favorite_border, value: Fmt.count(t.likes)),
+        _Action(
+          icon: liked ? Icons.favorite : Icons.favorite_border,
+          iconColor: liked ? AppColors.acid : null,
+          value: Fmt.count(t.likes),
+          onTap: () => ref.read(likedTracksProvider.notifier).toggle(t.id),
+        ),
         _Action(icon: Icons.repeat, value: Fmt.count(t.reposts)),
         const _Action(icon: Icons.share_outlined),
         const _Action(icon: Icons.more_horiz),
@@ -235,24 +243,30 @@ class _ActionBar extends StatelessWidget {
 }
 
 class _Action extends StatelessWidget {
-  const _Action({required this.icon, this.value});
+  const _Action({required this.icon, this.value, this.iconColor, this.onTap});
   final IconData icon;
   final String? value;
+  final Color? iconColor;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     return MouseRegion(
       cursor: SystemMouseCursors.click,
-      child: Padding(
-        padding: const EdgeInsets.only(right: 18),
-        child: Row(
-          children: [
-            Icon(icon, size: 15, color: AppColors.textMid),
-            if (value != null) ...[
-              const SizedBox(width: 5),
-              Text(value!, style: AppTheme.mono(size: 11)),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.only(right: 18),
+          child: Row(
+            children: [
+              Icon(icon, size: 15, color: iconColor ?? AppColors.textMid),
+              if (value != null) ...[
+                const SizedBox(width: 5),
+                Text(value!, style: AppTheme.mono(size: 11)),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );
