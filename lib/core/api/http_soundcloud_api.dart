@@ -851,21 +851,22 @@ class HttpSoundcloudApi implements SoundcloudApi {
     String? nextHref,
     int limit = 200,
   }) async {
-    return _tryAuthed<({List<String> ids, String? nextHref})>(() async {
-      late final dynamic data;
-      if (nextHref != null) {
-        data = await _getUrl(nextHref, true);
-      } else {
-        final id = await _meId();
-        if (id == null) return (ids: <String>[], nextHref: null);
-        data = await _get('/users/$id/followings', {'limit': limit}, true);
-      }
-      final page = _page(data, UserDto.fromJson);
-      return (
-        ids: [for (final u in page.collection) '${u.id}'],
-        nextHref: page.nextHref,
-      );
-    }, () async => (ids: <String>[], nextHref: null));
+    // Errors propagate (no anon fallback): an empty page after a failure would
+    // look like the end of the list and yield a silently partial set.
+    if (!_authed) return (ids: <String>[], nextHref: null);
+    late final dynamic data;
+    if (nextHref != null) {
+      data = await _getUrl(nextHref, true);
+    } else {
+      final id = await _meId();
+      if (id == null) throw StateError('followings: /me id unavailable');
+      data = await _get('/users/$id/followings', {'limit': limit}, true);
+    }
+    final page = _page(data, UserDto.fromJson);
+    return (
+      ids: [for (final u in page.collection) '${u.id}'],
+      nextHref: page.nextHref,
+    );
   }
 
   @override
