@@ -198,17 +198,20 @@ jobs:
           done
           for xpc in Installer Downloader; do
             echo "--- $xpc.xpc entitlements ---"
-            ENT=$(codesign -d --entitlements :- "$SPK/Versions/B/XPCServices/$xpc.xpc" 2>&1)
-            echo "$ENT"
-            # the downloader fetches the update inside its own sandbox
-            if [ "$xpc" = Downloader ] && ! grep -q com.apple.security.network.client <<<"$ENT"; then
-              echo "::error::Downloader.xpc lost com.apple.security.network.client"
-              exit 1
-            fi
+            codesign -d --entitlements :- "$SPK/Versions/B/XPCServices/$xpc.xpc" 2>&1
           done
 
           codesign --verify --strict --deep --verbose=2 "$APP"
-          codesign -d --entitlements :- "$APP"
+          # sparkle's Downloader.xpc ships without entitlements and is off
+          # (SUEnableDownloaderService unset): the update is downloaded by the
+          # app itself, so the app must carry the outgoing network entitlement
+          APP_ENT=$(codesign -d --entitlements :- "$APP" 2>&1)
+          echo "$APP_ENT"
+          for key in com.apple.security.app-sandbox \
+            com.apple.security.network.client; do
+            grep -q "$key" <<<"$APP_ENT" ||
+              { echo "::error::signed app lost $key"; exit 1; }
+          done
 
       - name: Prepare notary API key
         env:
