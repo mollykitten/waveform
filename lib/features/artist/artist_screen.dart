@@ -5,6 +5,8 @@ import 'package:go_router/go_router.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/colors.dart';
 import '../../core/api/feeds.dart';
+import '../../core/api/followed_users.dart';
+import '../../core/api/providers.dart';
 import '../../core/api/soundcloud_api.dart';
 import '../../shared/format.dart';
 import '../../shared/models/artist.dart';
@@ -29,7 +31,6 @@ class ArtistScreen extends ConsumerStatefulWidget {
 class _ArtistScreenState extends ConsumerState<ArtistScreen> {
   static const _tabs = ['popular', 'tracks', 'albums', 'playlists', 'reposts'];
   int _tab = 0;
-  bool _following = false;
 
   @override
   Widget build(BuildContext context) {
@@ -52,8 +53,12 @@ class _ArtistScreenState extends ConsumerState<ArtistScreen> {
               const SizedBox(height: 16),
               _Header(
                 artist: p.artist,
-                following: _following,
-                onFollow: () => setState(() => _following = !_following),
+                following: ref.watch(
+                  followedUsersProvider.select((s) => s.contains(p.artist.id)),
+                ),
+                onFollow: () => ref
+                    .read(followedUsersProvider.notifier)
+                    .toggle(p.artist.id),
               ),
               const SizedBox(height: 28),
               _TabBar(
@@ -77,7 +82,7 @@ class _ArtistScreenState extends ConsumerState<ArtistScreen> {
       case 'playlists':
         return _grid('playlists', p.playlists);
       case 'reposts':
-        return _tracks('reposts', p.tracks.reversed.toList());
+        return RepostsTab(key: ValueKey(p.artist.id), userId: p.artist.id);
       case 'tracks':
         return _tracks('all tracks', p.tracks);
       case 'popular':
@@ -115,6 +120,92 @@ class _ArtistScreenState extends ConsumerState<ArtistScreen> {
           runSpacing: 24,
           children: [for (final it in items) CollectionCard(item: it)],
         ),
+      ],
+    );
+  }
+}
+
+/// Artist's own reposts (not the spotlight), paged by cursor.
+class RepostsTab extends ConsumerStatefulWidget {
+  const RepostsTab({super.key, required this.userId});
+
+  final String userId;
+
+  @override
+  ConsumerState<RepostsTab> createState() => _RepostsTabState();
+}
+
+class _RepostsTabState extends ConsumerState<RepostsTab> {
+  final _tracks = <Track>[];
+  String? _next;
+  bool _loading = false;
+  bool _failed = false;
+  bool _done = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _more();
+  }
+
+  Future<void> _more() async {
+    if (_loading || _done) return;
+    setState(() {
+      _loading = true;
+      _failed = false;
+    });
+    try {
+      final page = await ref
+          .read(soundcloudApiProvider)
+          .userRepostsPage(widget.userId, nextHref: _next);
+      if (!mounted) return;
+      setState(() {
+        _tracks.addAll(page.tracks);
+        _next = page.nextHref;
+        _done = page.nextHref == null;
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _failed = true;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SectionHeader(title: 'reposts'),
+        const SizedBox(height: AppTheme.headerGap),
+        for (final t in _tracks) TrackRow(track: t, queue: _tracks),
+        if (_tracks.isEmpty && _done)
+          Text(
+            'no reposts yet',
+            style: AppTheme.mono(size: 12, color: AppColors.textMid),
+          ),
+        if (_loading)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            child: Text(
+              'loading…',
+              style: AppTheme.mono(size: 12, color: AppColors.textMid),
+            ),
+          )
+        else if (_failed || !_done)
+          Pressable(
+            onTap: _more,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              child: Text(
+                _failed ? 'failed to load — tap to retry' : 'load more',
+                style: AppTheme.mono(size: 12, color: AppColors.textMid),
+              ),
+            ),
+          ),
       ],
     );
   }

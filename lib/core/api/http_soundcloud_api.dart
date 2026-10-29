@@ -845,4 +845,59 @@ class HttpSoundcloudApi implements SoundcloudApi {
       '/users/$id/track_reposts/$trackId',
     );
   }
+
+  @override
+  Future<({List<String> ids, String? nextHref})> followingsPage({
+    String? nextHref,
+    int limit = 200,
+  }) async {
+    return _tryAuthed<({List<String> ids, String? nextHref})>(() async {
+      late final dynamic data;
+      if (nextHref != null) {
+        data = await _getUrl(nextHref, true);
+      } else {
+        final id = await _meId();
+        if (id == null) return (ids: <String>[], nextHref: null);
+        data = await _get('/users/$id/followings', {'limit': limit}, true);
+      }
+      final page = _page(data, UserDto.fromJson);
+      return (
+        ids: [for (final u in page.collection) '${u.id}'],
+        nextHref: page.nextHref,
+      );
+    }, () async => (ids: <String>[], nextHref: null));
+  }
+
+  @override
+  Future<LikeOutcome> setFollowing(String userId, bool following) async {
+    if (!_authed) return LikeOutcome.failed;
+    final id = await _meId();
+    if (id == null) return LikeOutcome.failed;
+    return writeOutcome(
+      following ? 'PUT' : 'DELETE',
+      '/users/$id/followings/$userId',
+    );
+  }
+
+  // `/stream/users/{id}/reposts` отдаёт `{type: track-repost|playlist-repost,
+  // track|playlist:{…}}`; `/users/{id}/track_reposts` для чужих — 404.
+  @override
+  Future<({List<Track> tracks, String? nextHref})> userRepostsPage(
+    String userId, {
+    String? nextHref,
+    int limit = 20,
+  }) async {
+    final data = nextHref != null
+        ? await _getUrl(nextHref, false)
+        : await _get('/stream/users/$userId/reposts', {'limit': limit});
+    final page = _page(data, StreamItemDto.fromJson);
+    return (
+      tracks: [
+        for (final it in page.collection)
+          if (it.isRepost && it.isTrack && it.track != null)
+            it.track!.toDomain(),
+      ],
+      nextHref: page.nextHref,
+    );
+  }
 }
