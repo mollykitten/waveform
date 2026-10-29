@@ -47,13 +47,13 @@ void main() {
   });
 
   test('github backend reports a newer release', () async {
-    final b = GithubUpdateBackend(dio: _dio('{"tag_name":"v0.5.0"}'));
+    final b = GithubUpdateBackend(dio: _dio('{"tag_name":"v99.0.0"}'));
     expect(await b.checkNow(), UpdateOutcome.available);
-    expect(b.availableVersion, '0.5.0');
+    expect(b.availableVersion, '99.0.0');
   });
 
   test('github backend: same version is up to date', () async {
-    final b = GithubUpdateBackend(dio: _dio('{"tag_name":"v0.4.0"}'));
+    final b = GithubUpdateBackend(dio: _dio('{"tag_name":"v$kAppVersion"}'));
     expect(await b.checkNow(), UpdateOutcome.upToDate);
     expect(b.availableVersion, isNull);
   });
