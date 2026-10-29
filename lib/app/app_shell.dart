@@ -176,8 +176,8 @@ class _AppShellState extends ConsumerState<AppShell> {
       final url = next.url;
       showToast(
         context,
-        'SoundCloud link copied',
-        duration: const Duration(seconds: 6),
+        'SoundCloud link copied · ${scLinkLabel(url)}',
+        duration: const Duration(seconds: 10),
         action: (
           label: 'open in Waveform',
           onTap: () async {

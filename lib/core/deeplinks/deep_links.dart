@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:app_links/app_links.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/router.dart';
 import '../api/providers.dart';
 import '../log/talker.dart';
+import 'scheme_registrar.dart';
 
 /// Ловит входящие deep-link'и (`waveform://…` + публичные soundcloud.com
 /// ссылки, переданные ОС) и открывает соответствующий экран в клиенте.
@@ -23,6 +25,12 @@ class DeepLinkService {
   StreamSubscription<Uri>? _sub;
 
   Future<void> _init() async {
+    unawaited(
+      SchemeRegistrar(
+        executable: Platform.resolvedExecutable,
+        talker: _ref.read(talkerProvider),
+      ).register(),
+    );
     try {
       final initial = await _appLinks.getInitialLink();
       if (initial != null) await _handle(initial);
