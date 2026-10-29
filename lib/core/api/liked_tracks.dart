@@ -1,5 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../shared/models/track.dart';
+import 'me_likes.dart';
 import 'providers.dart';
 import 'soundcloud_api.dart';
 import 'soundcloud_auth.dart';
@@ -44,7 +46,12 @@ class LikedTracksController extends Notifier<Set<String>> {
   /// Оптимистично переключаем и пишем в API; при провале (нет авторизации /
   /// блокировка/капча) — откат к прежнему состоянию. Возвращает исход, чтобы UI
   /// мог показать предложение верификации при [LikeOutcome.blocked].
-  Future<LikeOutcome> toggle(String trackId) async {
+  ///
+  /// После успешной записи синхронизируем уже загруженный список лайков
+  /// библиотеки — иначе он живёт со снимка первой загрузки и новые лайки там
+  /// не появляются до перезапуска.
+  Future<LikeOutcome> toggle(Track track) async {
+    final trackId = track.id;
     final like = !state.contains(trackId);
     state = like ? {...state, trackId} : ({...state}..remove(trackId));
     final outcome = await ref
@@ -52,6 +59,8 @@ class LikedTracksController extends Notifier<Set<String>> {
         .setLiked(trackId, like);
     if (outcome != LikeOutcome.ok) {
       state = like ? ({...state}..remove(trackId)) : {...state, trackId};
+    } else if (ref.exists(meLikesPagedProvider)) {
+      ref.read(meLikesPagedProvider.notifier).applyLike(track, liked: like);
     }
     return outcome;
   }

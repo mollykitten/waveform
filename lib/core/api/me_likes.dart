@@ -85,6 +85,16 @@ class MeLikesPageController extends Notifier<LikesPageState> {
     await loadNext();
   }
 
+  /// Отразить успешный лайк/анлайк в загруженном списке: новый лайк — в
+  /// начало (SC сортирует по дате лайка), анлайк — убрать.
+  void applyLike(Track track, {required bool liked}) {
+    final rest = [
+      for (final t in state.tracks)
+        if (t.id != track.id) t,
+    ];
+    state = state.copyWith(tracks: liked ? [track, ...rest] : rest);
+  }
+
   bool _draining = false;
 
   /// Догрузить ВСЕ оставшиеся страницы лайков — чтобы поиск шёл по всем лайкам,
