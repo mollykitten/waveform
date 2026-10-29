@@ -131,6 +131,10 @@ class PlayerController extends Notifier<PlayerState> {
   List<Track> _history = [];
   int _histIdx = -1;
 
+  /// Session-only ids the user rejected (wave dislike): kept out of the queue
+  /// and out of previous/next history steps. See [forget].
+  final Set<String> _forgotten = {};
+
   /// Закешированный «следующий новый» трек на фронтире — вычисляется один раз
   /// при активации фронтир-трека, чтобы preload и фактический переход выбрали
   /// ОДИН и тот же трек (иначе на границе цикла шафл мог разойтись).
@@ -310,6 +314,9 @@ class PlayerController extends Notifier<PlayerState> {
     _order = [];
     _history = [track];
     _histIdx = 0;
+    // Picking a track by hand makes it a normal track again.
+    _forgotten.remove(track.id);
+    _purgeForgotten();
     _recomputeFrontierNext();
     _activate(track, reason: ListeningTransitionCause.directSelection);
   }
@@ -407,6 +414,51 @@ class PlayerController extends Notifier<PlayerState> {
     _recomputeFrontierNext();
     _refreshPreload();
     state = state.copyWith(queueVersion: state.queueVersion + 1);
+  }
+
+  /// Reject a track for this session: drop it from the queue and from the
+  /// back/forward history so previous/next never land on it. The playing track
+  /// is not interrupted; it leaves the history once playback moves off it.
+  void forget(String trackId) {
+    _forgotten.add(trackId);
+    final isCurrent = trackId == state.track?.id;
+    if (!isCurrent) {
+      _queue.removeWhere((t) => t.id == trackId);
+      if (_order.isNotEmpty) _order.removeWhere((t) => t.id == trackId);
+    }
+    _purgeForgotten();
+    _recomputeFrontierNext();
+    _refreshPreload();
+    state = state.copyWith(queueVersion: state.queueVersion + 1);
+  }
+
+  /// Take back [forget]: the track may be queued and stepped to again. It is
+  /// not put back where [forget] already removed it.
+  void unforget(String trackId) => _forgotten.remove(trackId);
+
+  /// Remove forgotten tracks from the history and the queue, except the entry
+  /// at [_histIdx] (the one playing), shifting [_histIdx] for entries removed
+  /// to its left.
+  void _purgeForgotten() {
+    if (_forgotten.isEmpty || _history.isEmpty) return;
+    final playing = _histIdx >= 0 && _histIdx < _history.length
+        ? _history[_histIdx].id
+        : state.track?.id;
+    bool gone(Track t) => t.id != playing && _forgotten.contains(t.id);
+    _queue.removeWhere(gone);
+    if (_order.isNotEmpty) _order.removeWhere(gone);
+    final kept = <Track>[];
+    var idx = _histIdx;
+    for (var i = 0; i < _history.length; i++) {
+      final t = _history[i];
+      if (i != _histIdx && _forgotten.contains(t.id)) {
+        if (i < _histIdx) idx--;
+        continue;
+      }
+      kept.add(t);
+    }
+    _history = kept;
+    _histIdx = idx;
   }
 
   /// Добавить трек в конец очереди; игнорим дубликат.
@@ -682,6 +734,7 @@ class PlayerController extends Notifier<PlayerState> {
       // Restore navigation and metadata, retaining the user's pause intent.
       _history = history;
       _histIdx = historyIndex;
+      _purgeForgotten();
       _recomputeFrontierNext();
       _startedAt = startedAt;
       _maxPosMs = maxPosMs;
@@ -791,8 +844,12 @@ class PlayerController extends Notifier<PlayerState> {
       state = state.copyWith(position: Duration.zero);
       return;
     }
+    _purgeForgotten();
     if (_histIdx > 0) {
       _histIdx--;
+      // A forgotten track we are stepping back from must not stay as up-next.
+      _purgeForgotten();
+      _recomputeFrontierNext();
       _activate(
         _history[_histIdx],
         reason: ListeningTransitionCause.manualPrevious,
@@ -832,6 +889,7 @@ class PlayerController extends Notifier<PlayerState> {
       }
       _histIdx = _history.length - 1;
     }
+    _purgeForgotten();
     _recomputeFrontierNext();
   }
 

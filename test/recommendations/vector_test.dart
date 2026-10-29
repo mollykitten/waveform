@@ -382,6 +382,47 @@ void main() {
     },
   );
 
+  test('plays counts replayed time between one and two full plays', () {
+    expect(event('a', heard: 180000).plays, closeTo(1.5, 1e-9));
+    expect(event('a', heard: 360000).plays, 2);
+    expect(event('a', heard: 96000).plays, 1);
+  });
+
+  test('a replayed session and a second session add more support', () {
+    final provenance = {
+      'b': VectorProvenance({'seedB': 1}, now),
+    };
+    double support(List<ListeningEvent> events) =>
+        engine.interests(['seedB'], provenance, events, '1').single.support;
+    final single = support([event('b', session: 's1')]);
+    final replayed = support([event('b', session: 's1', heard: 240000)]);
+    final twice = support([
+      event('b', session: 's1'),
+      event('b', session: 's2'),
+    ]);
+    expect(single, closeTo(2, 1e-9));
+    expect(replayed, closeTo(3, 1e-9));
+    expect(replayed, greaterThan(single));
+    expect(twice, greaterThan(single));
+  });
+
+  test('a replayed track is seeded ahead of fresher one-off listens', () async {
+    for (var i = 0; i < 12; i++) {
+      await facts.append(event('fresh$i', session: 'f$i', daysAgo: i));
+    }
+    for (var i = 0; i < 3; i++) {
+      await facts.append(event('loved', session: 'l$i', daysAgo: 20 + i));
+    }
+    await engine.generate(
+      seeds: const [],
+      identity: '1',
+      excludedTrackIds: {},
+      check: () {},
+    );
+    expect(api.relatedCalls.length, 6);
+    expect(api.relatedCalls, contains('loved'));
+  });
+
   test(
     'cold start caps retrieval, merges overlap, excludes ids and artists',
     () async {

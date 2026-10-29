@@ -335,18 +335,14 @@ class WaveController extends Notifier<WaveState> {
         if (player.upcomingTracks.isEmpty) {
           // Nothing to skip to yet: ask for more and keep playing.
           if (!state.discovering) unawaited(_generate(append: true));
+          // The track keeps playing; it leaves the history once we move on.
+          _forgetInPlayer(player, track.id);
         } else {
           player.next(reason: ListeningTransitionCause.dislike);
           skipped = ref.read(playerControllerProvider).track?.id != track.id;
-          // Drop it from the queue too, or a wrap or reshuffle replays it.
-          if (skipped) {
-            _mutatingQueue = true;
-            try {
-              player.removeFromQueue(track.id);
-            } finally {
-              _mutatingQueue = false;
-            }
-          }
+          // Drop it from the queue and history too, or a wrap, reshuffle or
+          // previous replays it.
+          if (skipped) _forgetInPlayer(player, track.id);
         }
       }
       return (identity: identity, track: track, saved: saved, skipped: skipped);
@@ -357,8 +353,18 @@ class WaveController extends Notifier<WaveState> {
     }
   }
 
+  void _forgetInPlayer(PlayerController player, String trackId) {
+    _mutatingQueue = true;
+    try {
+      player.forget(trackId);
+    } finally {
+      _mutatingQueue = false;
+    }
+  }
+
   /// Take back a dislike for the account it was made under.
   Future<void> undoDislike(WaveDislike dislike) async {
+    ref.read(playerControllerProvider.notifier).unforget(dislike.track.id);
     try {
       await ref
           .read(seenStoreProvider)

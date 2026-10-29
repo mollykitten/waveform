@@ -177,10 +177,12 @@ class VectorEngine {
       };
       for (final edge in vector.entries) {
         if (!support.containsKey(edge.key)) continue;
-        final amount = edge.value * decay;
+        final positive = event.evidence == ListeningEvidence.positive;
+        // A positive session that replays the track counts up to two plays.
+        final amount = edge.value * decay * (positive ? event.plays : 1.0);
         observations[edge.key] = observations[edge.key]! + amount;
-        final sign = event.evidence == ListeningEvidence.positive ? 1.0 : -1.5;
-        support[edge.key] = support[edge.key]! + sign * amount;
+        support[edge.key] =
+            support[edge.key]! + (positive ? 1.0 : -1.5) * amount;
       }
     }
     // A dislike weakens the interests its track came from, with the same
@@ -394,8 +396,16 @@ class VectorEngine {
     return store.excluded(identity, now);
   }
 
-  /// Choose up to six seeds: caller seeds, then recent positive listens, with
-  /// least-used seeds first so consecutive refills explore different roots.
+  /// How many of the latest positive sessions are scanned for replays.
+  static const repeatWindow = 60;
+
+  /// Decayed play count (30-day half-life, [ListeningEvent.plays] per session)
+  /// from which a track counts as replayed and is seeded before fresh ones.
+  static const repeatThreshold = 1.8;
+
+  /// Choose up to six seeds: caller seeds, then replayed tracks, then recent
+  /// positive listens, with least-used seeds first so consecutive refills
+  /// explore different roots.
   List<_Seed> _pickSeeds(
     List<Track> callerSeeds,
     List<ListeningEvent> events,
@@ -412,18 +422,40 @@ class VectorEngine {
         );
       }
     }
-    var listened = 0;
+    // Recent positive sessions, newest first, with decayed play counts per
+    // track; a replayed track outranks fresh one-off listens.
+    final recency = <String>[];
+    final replays = <String, double>{};
+    final sessions = <String>{};
+    var windowed = 0;
     for (final event in events.reversed) {
-      if (listened == 10) break;
-      if (event.identity == identity &&
-          event.isValid &&
-          event.evidence == ListeningEvidence.positive &&
-          validVectorId(event.trackId) &&
-          !blocked.contains(event.trackId) &&
-          !all.containsKey(event.trackId)) {
-        all[event.trackId] = _Seed(event.trackId, '', '');
-        listened++;
+      if (windowed == repeatWindow) break;
+      if (event.identity != identity ||
+          !event.isValid ||
+          event.evidence != ListeningEvidence.positive ||
+          !validVectorId(event.trackId) ||
+          !sessions.add(event.sessionId)) {
+        continue;
       }
+      windowed++;
+      final age = _now().difference(event.endedAt).inSeconds;
+      if (age < 0) continue;
+      final decay = math.pow(.5, age / const Duration(days: 30).inSeconds);
+      if (!replays.containsKey(event.trackId)) recency.add(event.trackId);
+      replays[event.trackId] =
+          (replays[event.trackId] ?? 0) + event.plays * decay;
+    }
+    final candidates = [
+      for (final id in recency)
+        if (!blocked.contains(id) && !all.containsKey(id)) id,
+    ];
+    // Stable partition keeps freshness order inside both groups.
+    final listenedIds = [
+      ...candidates.where((id) => replays[id]! >= repeatThreshold),
+      ...candidates.where((id) => replays[id]! < repeatThreshold),
+    ];
+    for (final id in listenedIds.take(10)) {
+      all[id] = _Seed(id, '', '');
     }
     final ordered = all.values.toList();
     final ranks = {for (var i = 0; i < ordered.length; i++) ordered[i].id: i};

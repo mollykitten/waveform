@@ -79,6 +79,17 @@ negative evidence when heard time is 5–30 seconds and below 25% of track
 duration. other transitions, including unplayable tracks, are neutral. feedback
 support decays with a 30-day half-life.
 
+повторы считаются как более сильный сигнал вкуса. сессия, в которой трек
+переслушан (repeat one, рестарт через prev, перемотка назад), весит
+`heardMs / durationMs`, зажатое в [1, 2]: одна сессия не даёт больше двух
+проигрываний, а каждая новая сессия трека добавляется отдельно. этот вес
+умножает вклад positive-факта в интерес сида (негативные факты не меняются).
+при выборе сидов среди последних 60 positive-сессий считается затухающая (те же
+30 дней) сумма проигрываний на трек; трек с суммой не меньше 1,8 ставится
+впереди свежих одиночных, внутри групп порядок по свежести, лимит 10
+прослушанных сидов и блок-лист дизлайков сохраняются. пауза до повторного показа
+(45 дней) не меняется.
+
 facts are stored locally per verified SoundCloud identity in an atomic bounded
 store of at most 2,000 records and 2 MiB. the store holds track IDs and playback
 facts, not titles, stream URLs, audio, or SoundCloud payloads. account changes
