@@ -18,8 +18,9 @@ jobs:
   # ── macOS: build → sign with Developer ID Application → notarize → staple → DMG ──
   macos:
     name: Build macOS (signed + notarized)
-    # own self-hosted mac (tag pushes and manual dry runs only).
-    runs-on: [self-hosted, macOS, ARM64, waveform]
+    # github-hosted by default; repo variable MACOS_RUNNER=self-hosted moves
+    # it to our own mac.
+    runs-on: ${{ vars.MACOS_RUNNER == 'self-hosted' && fromJSON('["self-hosted", "macOS", "ARM64", "waveform"]') || 'macos-latest' }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -279,8 +280,8 @@ jobs:
         if: always()
         run: rm -f "$RUNNER_TEMP/AuthKey.p8"
 
-      # the runner is a persistent mac: drop the developer id keychain the
-      # import step created instead of leaving it for the next job.
+      # a self-hosted mac persists: drop the developer id keychain the import
+      # step created instead of leaving it for the next job.
       - name: Remove signing keychain
         if: always()
         run: |
