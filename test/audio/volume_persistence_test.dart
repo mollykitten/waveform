@@ -46,6 +46,8 @@ void main() {
     final s = second.read(playerControllerProvider);
     expect(s.volume, 0.3);
     expect(s.muted, isTrue);
-    expect(pc, isNotNull);
+    expect(engine.lastVolume, 0); // muted engine
+    pc.toggleMute();
+    expect(engine.lastVolume, closeTo(0.3 * 0.3 * 0.3, 1e-9));
   });
 }

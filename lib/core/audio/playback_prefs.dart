@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../storage/prefs_store.dart';
@@ -37,7 +38,8 @@ final playbackPrefsStoreProvider = Provider<PrefsStore>(
   (_) => const PrefsStore(),
 );
 
-class PlaybackPrefsController extends Notifier<PlaybackPrefs> {
+class PlaybackPrefsController extends Notifier<PlaybackPrefs>
+    with WidgetsBindingObserver {
   static const _keyCrossfade = 'playback_crossfade_ms';
   static const _keyVolume = 'playback_volume';
   static const _keyMuted = 'playback_muted';
@@ -52,7 +54,11 @@ class PlaybackPrefsController extends Notifier<PlaybackPrefs> {
   @override
   PlaybackPrefs build() {
     _store; // resolve now: ref can't be used inside onDispose
+    // Контейнер при выходе из десктоп-приложения не диспозится: сбрасываем
+    // отложенную запись, как только окно теряет фокус/скрывается/закрывается.
+    WidgetsFlutterBinding.ensureInitialized().addObserver(this);
     ref.onDispose(() {
+      WidgetsBinding.instance.removeObserver(this);
       if (_volumeTimer?.isActive ?? false) _flushVolume();
       _volumeTimer?.cancel();
     });
@@ -90,6 +96,15 @@ class PlaybackPrefsController extends Notifier<PlaybackPrefs> {
     _pendingMuted = muted;
     _volumeTimer?.cancel();
     _volumeTimer = Timer(_volumeDebounce, _flushVolume);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed &&
+        (_volumeTimer?.isActive ?? false)) {
+      _volumeTimer!.cancel();
+      _flushVolume();
+    }
   }
 
   void _flushVolume() {
