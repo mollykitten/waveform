@@ -23,6 +23,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      - name: Check tag matches pubspec and kAppVersion
+        if: startsWith(github.ref, 'refs/tags/')
+        run: tool/check_version.sh "$GITHUB_REF_NAME"
+
       - name: Setup Flutter
         uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
@@ -88,6 +92,14 @@ jobs:
           test -s assets/widevine/device.wvd
           echo "widevine profile written ($(wc -c < assets/widevine/device.wvd) bytes)"
 
+      - name: Refuse to ship the sparkle key placeholder
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          if grep -q REPLACE_WITH_SPARKLE macos/Runner/Info.plist; then
+            echo "::error::SUPublicEDKey in macos/Runner/Info.plist is still the placeholder (see docs/releasing.md)"
+            exit 1
+          fi
+
       - name: Build macOS release
         env:
           REF_NAME: ${{ github.ref_name }}
@@ -132,6 +144,17 @@ jobs:
               --sign "$IDENTITY" --keychain "$KEYCHAIN" "$@"
           }
 
+          # codesign does not expand build settings: resolve the sparkle
+          # mach-lookup names ($(PRODUCT_BUNDLE_IDENTIFIER)-spks/-spki) here
+          BUNDLE_ID=$(/usr/libexec/PlistBuddy \
+            -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")
+          ENTITLEMENTS="$RUNNER_TEMP/Release.entitlements"
+          sed "s|\$(PRODUCT_BUNDLE_IDENTIFIER)|$BUNDLE_ID|g" \
+            macos/Runner/Release.entitlements > "$ENTITLEMENTS"
+          grep -q "$BUNDLE_ID-spks" "$ENTITLEMENTS"
+          grep -q "$BUNDLE_ID-spki" "$ENTITLEMENTS"
+          ! grep -q '\$(' "$ENTITLEMENTS"
+
           # inside out, no --deep: every nested bundle and every Mach-O
           # except the main executable, deepest path first (hardened
           # runtime + timestamp, no entitlements); the app goes last with
@@ -148,13 +171,47 @@ jobs:
               done
           } | awk '{ print gsub("/", "/") "\t" $0 }' | sort -rn | cut -f2- |
             while IFS= read -r target; do
-              echo "signing: $target"
-              sign "$target" || exit 1
+              case "$target" in
+                # the executable inside sparkle's downloader.xpc is signed
+                # with the bundle below: signing it on its own first would
+                # strip the entitlements the bundle signature preserves
+                */Downloader.xpc/Contents/MacOS/*) continue ;;
+                # downloader.xpc carries its own network entitlement:
+                # keep what sparkle shipped
+                */Downloader.xpc)
+                  echo "signing (keeping entitlements): $target"
+                  sign --preserve-metadata=entitlements "$target" || exit 1 ;;
+                *)
+                  echo "signing: $target"
+                  sign "$target" || exit 1 ;;
+              esac
             done
-          sign --entitlements macos/Runner/Release.entitlements "$APP"
+          sign --entitlements "$ENTITLEMENTS" "$APP"
+
+          # sparkle's helpers must be signed and carry our team identity
+          SPK="$APP/Contents/Frameworks/Sparkle.framework"
+          for part in Versions/B/Autoupdate Versions/B/Updater.app \
+            Versions/B/XPCServices/Installer.xpc \
+            Versions/B/XPCServices/Downloader.xpc; do
+            test -e "$SPK/$part" || { echo "::error::missing $part"; exit 1; }
+            codesign --verify --strict --verbose=2 "$SPK/$part"
+          done
+          for xpc in Installer Downloader; do
+            echo "--- $xpc.xpc entitlements ---"
+            codesign -d --entitlements :- "$SPK/Versions/B/XPCServices/$xpc.xpc" 2>&1
+          done
 
           codesign --verify --strict --deep --verbose=2 "$APP"
-          codesign -d --entitlements :- "$APP"
+          # sparkle's Downloader.xpc ships without entitlements and is off
+          # (SUEnableDownloaderService unset): the update is downloaded by the
+          # app itself, so the app must carry the outgoing network entitlement
+          APP_ENT=$(codesign -d --entitlements :- "$APP" 2>&1)
+          echo "$APP_ENT"
+          for key in com.apple.security.app-sandbox \
+            com.apple.security.network.client; do
+            grep -q "$key" <<<"$APP_ENT" ||
+              { echo "::error::signed app lost $key"; exit 1; }
+          done
 
       - name: Prepare notary API key
         env:
@@ -198,7 +255,16 @@ jobs:
           hdiutil attach -readonly -nobrowse -mountpoint "$MNT" "$DMG"
           xcrun stapler validate "$MNT/Waveform.app" \
             || { hdiutil detach "$MNT"; exit 1; }
+          # the appcast advertises pubspec's version: the dmg must carry it
+          WANT_VER=$(sed -nE 's/^version:[[:space:]]*([0-9.]+)\+([0-9]+).*/\1/p' pubspec.yaml)
+          WANT_BUILD=$(sed -nE 's/^version:[[:space:]]*([0-9.]+)\+([0-9]+).*/\2/p' pubspec.yaml)
+          GOT_VER=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$MNT/Waveform.app/Contents/Info.plist")
+          GOT_BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$MNT/Waveform.app/Contents/Info.plist")
           hdiutil detach "$MNT"
+          if [ "$GOT_VER" != "$WANT_VER" ] || [ "$GOT_BUILD" != "$WANT_BUILD" ]; then
+            echo "::error::dmg is $GOT_VER ($GOT_BUILD), pubspec is $WANT_VER ($WANT_BUILD)"
+            exit 1
+          fi
           codesign --force --timestamp \
             --sign "$SIGN_IDENTITY" --keychain "$SIGN_KEYCHAIN" "$DMG"
           codesign --verify --verbose=2 "$DMG"
@@ -226,6 +292,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      - name: Check tag matches pubspec and kAppVersion
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: tool/check_version.sh "$GITHUB_REF_NAME"
+
       - name: Setup Flutter
         uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
@@ -247,6 +318,15 @@ jobs:
         shell: bash
         run: tool/check_no_wvd.sh assets
 
+      - name: Refuse to ship the sparkle key placeholder
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          if grep -q REPLACE_WITH_SPARKLE windows/runner/Runner.rc; then
+            echo "::error::EdDSAPub in windows/runner/Runner.rc is still the placeholder (see docs/releasing.md)"
+            exit 1
+          fi
+
       - name: Build Windows release
         # Default shell on windows-latest is PowerShell, which uses
         # backtick (not ^) for line continuation. Single-line keeps it
@@ -260,6 +340,27 @@ jobs:
       - name: Verify no widevine profile in build output
         shell: bash
         run: tool/check_no_wvd.sh build
+
+      # winsparkle accepts unsigned updates when the exe carries no EdDSAPub
+      # resource, so a build without the compiled-in key must not ship.
+      - name: Verify the update public key is compiled into the exe
+        shell: bash
+        run: |
+          KEY=$(sed -n 's/^EdDSAPub EDDSA {"\([^"]*\)"}.*/\1/p' windows/runner/Runner.rc)
+          test -n "$KEY" || { echo "::error::no EdDSAPub in Runner.rc"; exit 1; }
+          python3 - "$KEY" build/windows/x64/runner/Release/*.exe <<'PY'
+          import sys
+          key = sys.argv[1]
+          exes = sys.argv[2:]
+          needles = (key.encode('ascii'), key.encode('utf-16-le'))
+          for exe in exes:
+              data = open(exe, 'rb').read()
+              if any(n in data for n in needles):
+                  print('EdDSAPub found in', exe)
+                  sys.exit(0)
+          print('::error::EdDSAPub resource missing from the built exe')
+          sys.exit(1)
+          PY
 
       - name: Package Windows zip
         shell: pwsh
@@ -275,11 +376,49 @@ jobs:
           $z.Dispose()
           if ($bad) { throw "widevine profile in zip: $($bad.FullName)" }
 
+      - name: Build per-user installer (Inno Setup)
+        shell: pwsh
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup --version=6.4.3 --no-progress -y
+          }
+          if (-not (Test-Path $iscc)) { throw "ISCC.exe not found" }
+          $version = (Select-String -Path pubspec.yaml -Pattern '^version:\s*(\d+\.\d+\.\d+)\+\d+').Matches[0].Groups[1].Value
+          $src = (Resolve-Path build/windows/x64/runner/Release).Path
+          $name = "waveform-windows-$env:REF_NAME-setup"
+          & $iscc "/DAppVersion=$version" "/DSourceDir=$src" "/DOutputName=$name" "/O$PWD" windows/installer/waveform.iss
+          if ($LASTEXITCODE -ne 0) { throw "iscc failed" }
+          Get-Item "$name.exe" | Select-Object Name, Length
+
+      - name: Verify no widevine profile inside the installer
+        # install it for real (per-user, silent) into a scratch dir and scan
+        # what landed on disk; the compressed payload can't be grepped
+        shell: bash
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          SETUP="waveform-windows-$REF_NAME-setup.exe"
+          SCRATCH="$RUNNER_TEMP/installer-check"
+          "./$SETUP" //VERYSILENT //SUPPRESSMSGBOXES //NORESTART //SP- //NOICONS \
+            "//DIR=$(cygpath -w "$SCRATCH")" //LOG="$(cygpath -w "$RUNNER_TEMP/setup.log")"
+          test -f "$SCRATCH/waveform_app.exe"
+          tool/check_no_wvd.sh "$SCRATCH"
+          "$SCRATCH"/unins000.exe //VERYSILENT //SUPPRESSMSGBOXES || true
+
       - name: Upload Windows artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: windows-zip
           path: waveform-windows-${{ github.ref_name }}.zip
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: windows-setup
+          path: waveform-windows-${{ github.ref_name }}-setup.exe
 
   # ── Linux: unsigned tar.gz ──
   linux:
@@ -288,6 +427,10 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Check tag matches pubspec and kAppVersion
+        if: startsWith(github.ref, 'refs/tags/')
+        run: tool/check_version.sh "$GITHUB_REF_NAME"
 
       - name: Setup Flutter
         uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
@@ -318,7 +461,7 @@ jobs:
           sudo apt-get install -y \
             clang cmake ninja-build pkg-config libgtk-3-dev \
             liblzma-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev \
-            libmpv-dev mpv libayatana-appindicator3-dev
+            libmpv-dev mpv zsync libayatana-appindicator3-dev
 
       - name: Install pub dependencies
         run: flutter pub get
@@ -352,11 +495,110 @@ jobs:
           fi
           ls -lh "$TAR"
 
+      - name: Package AppImage (+ zsync)
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: tool/make_appimage.sh build/linux/x64/release/bundle "$REF_NAME"
+
       - name: Upload Linux artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: linux-tar
           path: waveform-linux-${{ github.ref_name }}.tar.gz
+
+      - name: Upload Linux AppImage
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: linux-appimage
+          path: |
+            waveform-${{ github.ref_name }}-x86_64.AppImage
+            waveform-${{ github.ref_name }}-x86_64.AppImage.zsync
+
+  # ── Appcasts: sign the final installers with the sparkle ed25519 key ──
+  # Runs after the macOS DMG is notarized and stapled (the signed bytes must
+  # be the shipped bytes). A dry run signs with a throwaway key so the whole
+  # path is exercised without the real secret.
+  appcast:
+    name: Build appcasts
+    needs: [macos, windows]
+    if: always() && needs.macos.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Download installers
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          path: dist
+
+      - name: Install signer dependency
+        run: pip install --quiet cryptography==44.0.0
+
+      - name: Pick the signing key
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          if [ -n "$SPARKLE_ED_PRIVATE_KEY" ]; then
+            echo "using SPARKLE_ED_PRIVATE_KEY"
+          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            echo "::error::SPARKLE_ED_PRIVATE_KEY is not set: refusing to publish unsigned updates"
+            exit 1
+          else
+            echo "::warning::SPARKLE_ED_PRIVATE_KEY is not set: dry run signs with a throwaway key"
+            python3 - <<'PY' >> "$RUNNER_TEMP/dry.key"
+          import base64
+          from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+          from cryptography.hazmat.primitives import serialization as s
+          k = Ed25519PrivateKey.generate().private_bytes(
+              s.Encoding.Raw, s.PrivateFormat.Raw, s.NoEncryption())
+          print(base64.b64encode(k).decode())
+          PY
+            echo "DRY_KEY_FILE=$RUNNER_TEMP/dry.key" >> "$GITHUB_ENV"
+          fi
+
+      - name: Generate appcast-macos.xml
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+          REF_NAME: ${{ github.ref_name }}
+          IS_TAG: ${{ startsWith(github.ref, 'refs/tags/') }}
+        run: |
+          [ -z "${DRY_KEY_FILE:-}" ] || export SPARKLE_ED_PRIVATE_KEY="$(cat "$DRY_KEY_FILE")"
+          # tags sign against the real tag (so -rc urls are right) and must
+          # match the committed public keys; a dry run has a branch name, so
+          # it uses the pubspec version just to exercise the format
+          if [ "$IS_TAG" = true ]; then
+            TAG="$REF_NAME"; CHECK=--check-public-keys
+          else
+            TAG="v$(sed -nE 's/^version:[[:space:]]*([0-9.]+)\+.*/\1/p' pubspec.yaml)"; CHECK=
+          fi
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          echo "CHECK=$CHECK" >> "$GITHUB_ENV"
+          DMG=$(ls dist/macos-dmg/*.dmg)
+          mkdir -p appcasts
+          python3 tool/appcast.py --platform macos --file "$DMG" \
+            --tag "$TAG" --out appcasts/appcast-macos.xml $CHECK
+          cat appcasts/appcast-macos.xml
+
+      - name: Generate appcast-windows.xml
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          [ -z "${DRY_KEY_FILE:-}" ] || export SPARKLE_ED_PRIVATE_KEY="$(cat "$DRY_KEY_FILE")"
+          SETUP=$(ls dist/windows-setup/*-setup.exe 2>/dev/null || true)
+          if [ -z "$SETUP" ]; then
+            echo "::warning::no windows installer: skipping appcast-windows.xml"
+            exit 0
+          fi
+          python3 tool/appcast.py --platform windows --file "$SETUP" \
+            --tag "$TAG" --out appcasts/appcast-windows.xml $CHECK
+          cat appcasts/appcast-windows.xml
+
+      - name: Upload appcasts
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: appcasts
+          path: appcasts/*.xml
 
   # ── Publish: gather artifacts → GitHub Release ──
   # Only macOS is required; Windows/Linux are best-effort and don't
@@ -366,9 +608,10 @@ jobs:
   # publishes from a workflow_dispatch dry run.
   release:
     name: Publish GitHub Release
-    needs: [macos, windows, linux]
+    needs: [macos, windows, linux, appcast]
     if: >-
       always() && needs.macos.result == 'success'
+      && needs.appcast.result == 'success'
       && startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
@@ -384,7 +627,9 @@ jobs:
       - name: Flatten artifacts
         run: |
           mkdir -p release
-          find dist -type f \( -name '*.dmg' -o -name '*.zip' -o -name '*.tar.gz' \) \
+          find dist -type f \( -name '*.dmg' -o -name '*.zip' -o -name '*.tar.gz' \
+          -o -name '*.exe' -o -name '*.xml' \
+          -o -name '*.AppImage' -o -name '*.zsync' \) \
             -exec cp -v {} release/ \; || true
           ls -lh release/
 
@@ -400,4 +645,8 @@ jobs:
           files: |
             release/*.dmg
             release/*.zip
+            release/*.exe
+            release/*.AppImage
+            release/*.zsync
             release/*.tar.gz
+            release/appcast-*.xml
