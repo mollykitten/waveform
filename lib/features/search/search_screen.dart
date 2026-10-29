@@ -211,8 +211,7 @@ class _ArtistRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Pressable(
-      onTap: () =>
-          context.push('/artist/${Uri.encodeComponent(artist.handle)}'),
+      onTap: () => context.push('/artist/${Uri.encodeComponent(artist.handle)}'),
       child: Container(
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.all(10),

@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/colors.dart';
 import '../../core/api/feeds.dart';
+import '../../core/api/liked_tracks.dart';
 import '../../core/api/me_likes.dart';
 import '../../core/api/soundcloud_api.dart';
 import '../../core/api/soundcloud_auth.dart';
@@ -286,8 +287,7 @@ class _PaginatedLikesTabState extends ConsumerState<_PaginatedLikesTab>
     // Открытие вкладки: подтягиваем лайки, поставленные после первой загрузки.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      final s = ref.read(meLikesPagedProvider);
-      if (!s.isInitial) ref.read(meLikesPagedProvider.notifier).refresh();
+      _refresh();
     });
     // Если экран открыт уже с активным фильтром — догружаем все лайки.
     if (widget.query.isNotEmpty) {
@@ -305,14 +305,24 @@ class _PaginatedLikesTabState extends ConsumerState<_PaginatedLikesTab>
     }
   }
 
-  void _loadAllForSearch() => ref.read(meLikesPagedProvider.notifier).loadAll();
+  void _loadAllForSearch() =>
+      ref.read(meLikesPagedProvider.notifier).loadAll();
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // Возврат в окно (например, после лайка на soundcloud.com).
-    if (state == AppLifecycleState.resumed) {
-      ref.read(meLikesPagedProvider.notifier).refresh();
+    if (state == AppLifecycleState.resumed) _refresh();
+  }
+
+  /// [full] — явное обновление: перечитывает и множество лайков целиком.
+  void _refresh({bool full = false}) {
+    final liked = ref.read(likedTracksProvider.notifier);
+    if (full) {
+      liked.reload();
+    } else {
+      liked.syncRecent();
     }
+    ref.read(meLikesPagedProvider.notifier).refresh();
   }
 
   @override
@@ -421,8 +431,7 @@ class _PaginatedLikesTabState extends ConsumerState<_PaginatedLikesTab>
                       Tooltip(
                         message: 'refresh',
                         child: Pressable(
-                          onTap: () =>
-                              ref.read(meLikesPagedProvider.notifier).refresh(),
+                          onTap: () => _refresh(full: true),
                           child: const Icon(
                             Icons.refresh,
                             size: 16,

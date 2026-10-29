@@ -736,7 +736,7 @@ class PlayerController extends Notifier<PlayerState> {
     final track = state.track;
     if (track == null) return LikeOutcome.failed;
     state = state.copyWith(liked: !state.liked);
-    return ref.read(likedTracksProvider.notifier).toggle(track.id);
+    return ref.read(likedTracksProvider.notifier).toggle(track.id, track: track);
   }
 
   /// Следующий трек. Если мы зашли назад в историю — идём вперёд по реальной

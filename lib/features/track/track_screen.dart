@@ -303,7 +303,7 @@ class _ActionBarState extends ConsumerState<_ActionBar> {
     setState(() => _likesDelta += wasLiked ? -1 : 1);
     final outcome = await ref
         .read(likedTracksProvider.notifier)
-        .toggle(widget.track.id);
+        .toggle(widget.track.id, track: widget.track);
     if (outcome != LikeOutcome.ok) {
       // Контроллер уже откатил `liked`-set; здесь откатываем дельту счётчика.
       if (mounted) setState(() => _likesDelta += wasLiked ? 1 : -1);

@@ -110,7 +110,7 @@ Future<void> showTrackContextMenu({
     case 'like':
       final outcome = await ref
           .read(likedTracksProvider.notifier)
-          .toggle(track.id);
+          .toggle(track.id, track: track);
       if (context.mounted) showWriteOutcome(context, outcome, verb: 'like');
     case 'repost':
       final outcome = await ref

@@ -19,9 +19,8 @@ class FeedShowReposts extends Notifier<bool> {
   void toggle() => state = !state;
 }
 
-final feedShowRepostsProvider = NotifierProvider<FeedShowReposts, bool>(
-  FeedShowReposts.new,
-);
+final feedShowRepostsProvider =
+    NotifierProvider<FeedShowReposts, bool>(FeedShowReposts.new);
 
 class FeedScreen extends ConsumerWidget {
   const FeedScreen({super.key});
