@@ -1,61 +1,102 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:talker_flutter/talker_flutter.dart';
+
 import '../../shared/models/track.dart';
 import '../log/talker.dart';
 import 'providers.dart';
+import 'soundcloud_api.dart';
 
-/// Агрегаты по личной истории прослушиваний (`/me/play-history`).
+/// Размер страницы и максимум страниц, которые тянем из play-history.
+const statsPageSize = 50;
+const statsMaxPages = 8;
+
+/// Агрегаты по выборке личной истории прослушиваний (`/me/play-history`).
+///
+/// Это не вся история и не время прослушивания: [totalTrackLength] — сумма
+/// полных длительностей сыгранных треков (api не отдаёт, сколько реально
+/// прослушано), а выборка ограничена [statsPageSize] × [statsMaxPages] записей.
 class ListeningStats {
   const ListeningStats({
     required this.totalPlays,
     required this.uniqueTracks,
     required this.uniqueArtists,
-    required this.totalListened,
+    required this.totalTrackLength,
     required this.topArtists,
     required this.topGenres,
+    this.partial = false,
+    this.capped = false,
   });
 
+  /// Размер выборки (число записей истории, попавших в агрегат).
   final int totalPlays;
   final int uniqueTracks;
   final int uniqueArtists;
-  final Duration totalListened;
+  final Duration totalTrackLength;
   final List<({String name, int count})> topArtists;
   final List<({String genre, int count})> topGenres;
 
+  /// Одна из следующих страниц не загрузилась: данные неполные.
+  final bool partial;
+
+  /// Упёрлись в лимит выборки; в истории могут быть более старые записи.
+  final bool capped;
+
+  /// Максимум записей в выборке.
+  static const sampleLimit = statsPageSize * statsMaxPages;
+
+  /// История действительно пуста (сбой первой страницы сюда не попадает —
+  /// провайдер падает с ошибкой).
   bool get isEmpty => totalPlays == 0;
 }
 
-/// Постранично тянем play-history (до 400 записей за раз — баланс времени и
-/// глубины), группируем и считаем. Безопасно для анона: `historyPage` сам
-/// возвращает [] если нет авторизации.
-final statsProvider = FutureProvider<ListeningStats>((ref) async {
-  final api = ref.read(soundcloudApiProvider);
-  final log = ref.read(talkerProvider);
+/// Постранично тянем play-history (до [ListeningStats.sampleLimit] записей),
+/// группируем и считаем. Безопасно для анона: `historyPage` сам возвращает []
+/// если нет авторизации.
+final statsProvider = FutureProvider<ListeningStats>(
+  (ref) => loadListeningStats(
+    ref.read(soundcloudApiProvider),
+    ref.read(talkerProvider),
+  ),
+);
+
+/// Сбой первой страницы пробрасывается (экран покажет ошибку с retry), сбой
+/// следующих — отдаёт уже собранное с `partial: true`.
+Future<ListeningStats> loadListeningStats(SoundcloudApi api, Talker log) async {
   final all = <Track>[];
-  const pageSize = 50;
-  const maxPages = 8;
-  for (var i = 0; i < maxPages; i++) {
-    final offset = i * pageSize;
+  var partial = false;
+  var capped = false;
+  for (var i = 0; i < statsMaxPages; i++) {
     try {
-      final page = await api.historyPage(limit: pageSize, offset: offset);
+      final page = await api.historyPage(
+        limit: statsPageSize,
+        offset: i * statsPageSize,
+      );
       if (page.isEmpty) break;
       all.addAll(page);
-      if (page.length < pageSize) break;
+      if (page.length < statsPageSize) break;
+      capped = i == statsMaxPages - 1;
     } catch (e, st) {
       log.warning('stats: page $i failed', e, st);
+      if (i == 0) rethrow;
+      partial = true;
       break;
     }
   }
-  return _aggregate(all);
-});
+  return _aggregate(all, partial: partial, capped: capped);
+}
 
-ListeningStats _aggregate(List<Track> tracks) {
+ListeningStats _aggregate(
+  List<Track> tracks, {
+  required bool partial,
+  required bool capped,
+}) {
   if (tracks.isEmpty) {
     return const ListeningStats(
       totalPlays: 0,
       uniqueTracks: 0,
       uniqueArtists: 0,
-      totalListened: Duration.zero,
+      totalTrackLength: Duration.zero,
       topArtists: [],
       topGenres: [],
     );
@@ -79,7 +120,9 @@ ListeningStats _aggregate(List<Track> tracks) {
     totalPlays: tracks.length,
     uniqueTracks: uniqueIds.length,
     uniqueArtists: artistCounts.length,
-    totalListened: Duration(milliseconds: totalMs),
+    totalTrackLength: Duration(milliseconds: totalMs),
+    partial: partial,
+    capped: capped,
     topArtists: [
       for (final e in artistsSorted.take(10)) (name: e.key, count: e.value),
     ],
