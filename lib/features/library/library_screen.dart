@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/colors.dart';
 import '../../core/api/feeds.dart';
+import '../../core/api/liked_tracks.dart';
 import '../../core/api/me_likes.dart';
 import '../../core/api/soundcloud_api.dart';
 import '../../core/api/soundcloud_auth.dart';
@@ -274,13 +275,20 @@ class _PaginatedLikesTab extends ConsumerStatefulWidget {
   ConsumerState<_PaginatedLikesTab> createState() => _PaginatedLikesTabState();
 }
 
-class _PaginatedLikesTabState extends ConsumerState<_PaginatedLikesTab> {
+class _PaginatedLikesTabState extends ConsumerState<_PaginatedLikesTab>
+    with WidgetsBindingObserver {
   final ScrollController _scroll = ScrollController();
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _scroll.addListener(_onScroll);
+    // Открытие вкладки: подтягиваем лайки, поставленные после первой загрузки.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _refresh();
+    });
     // Если экран открыт уже с активным фильтром — догружаем все лайки.
     if (widget.query.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _loadAllForSearch());
@@ -297,11 +305,27 @@ class _PaginatedLikesTabState extends ConsumerState<_PaginatedLikesTab> {
     }
   }
 
-  void _loadAllForSearch() =>
-      ref.read(meLikesPagedProvider.notifier).loadAll();
+  void _loadAllForSearch() => ref.read(meLikesPagedProvider.notifier).loadAll();
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Возврат в окно (например, после лайка на soundcloud.com).
+    if (state == AppLifecycleState.resumed) _refresh();
+  }
+
+  /// [full] — явное обновление: перечитывает и множество лайков целиком.
+  void _refresh({bool full = false}) {
+    final liked = ref.read(likedTracksProvider.notifier);
+    final sync = full ? liked.reload() : liked.syncRecent();
+    sync.catchError((Object e, StackTrace st) {
+      ref.read(talkerProvider).warning('likes sync failed', e, st);
+    });
+    ref.read(meLikesPagedProvider.notifier).refresh();
+  }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _scroll.dispose();
     super.dispose();
   }
@@ -399,6 +423,18 @@ class _PaginatedLikesTabState extends ConsumerState<_PaginatedLikesTab> {
                         style: AppTheme.mono(
                           size: 11,
                           color: AppColors.textLow,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Tooltip(
+                        message: 'refresh',
+                        child: Pressable(
+                          onTap: () => _refresh(full: true),
+                          child: const Icon(
+                            Icons.refresh,
+                            size: 16,
+                            color: AppColors.textMid,
+                          ),
                         ),
                       ),
                       const SizedBox(width: 12),
