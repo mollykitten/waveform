@@ -120,8 +120,9 @@ Future<void> showTrackContextMenu({
         showWriteOutcome(context, outcome, verb: 'repost');
       }
     case 'copy':
-      if (context.mounted)
+      if (context.mounted) {
         await copyToClipboard(context, track.permalinkUrl!, ref: ref);
+      }
     case 'open_sc':
       await openExternalUrl(track.permalinkUrl!);
     case 'artist':
