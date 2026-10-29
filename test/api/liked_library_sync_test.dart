@@ -33,10 +33,10 @@ void main() {
     expect(libraryIds(), contains(track.id));
 
     final liked = container.read(likedTracksProvider.notifier);
-    await liked.toggle(track);
+    await liked.toggle(track.id, track: track);
     expect(libraryIds(), isNot(contains(track.id)));
 
-    await liked.toggle(track);
+    await liked.toggle(track.id, track: track);
     expect(libraryIds().first, track.id);
   });
 }

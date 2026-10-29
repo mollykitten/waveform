@@ -52,8 +52,13 @@ class MeLikesPageController extends Notifier<LikesPageState> {
     return const LikesPageState();
   }
 
+  /// Поколение загрузок: [reset] увеличивает его, и запросы, стартовавшие
+  /// раньше, молча отбрасываются (не затирают свежее состояние).
+  int _gen = 0;
+
   Future<void> loadNext() async {
     if (state.isLoadingMore || !state.hasMore) return;
+    final gen = _gen;
     final api = ref.read(soundcloudApiProvider);
     state = state.copyWith(isLoadingMore: true, clearError: true);
     try {
@@ -61,6 +66,7 @@ class MeLikesPageController extends Notifier<LikesPageState> {
         nextHref: state.nextHref,
         limit: _pageSize,
       );
+      if (gen != _gen) return;
       // Дедуп на случай пересечений между страницами (или повторов от SC).
       final seen = {for (final t in state.tracks) t.id};
       final fresh = [
@@ -75,24 +81,78 @@ class MeLikesPageController extends Notifier<LikesPageState> {
         clearNextHref: result.nextHref == null,
       );
     } catch (e) {
+      if (gen != _gen) return;
       state = state.copyWith(isInitial: false, isLoadingMore: false, error: e);
     }
   }
 
-  /// Полный сброс — для pull-to-refresh / retry после ошибки.
+  /// Полный сброс — для retry после ошибки.
   Future<void> reset() async {
+    _gen++;
+    _refreshToken++;
     state = const LikesPageState();
     await loadNext();
   }
 
-  /// Отразить успешный лайк/анлайк в загруженном списке: новый лайк — в
-  /// начало (SC сортирует по дате лайка), анлайк — убрать.
-  void applyLike(Track track, {required bool liked}) {
+  int _refreshToken = 0;
+
+  /// Тихое обновление «головы» списка: свежая первая страница вливается в
+  /// начало уже загруженного списка (новые лайки сверху, снятые пропадают),
+  /// хвост и курсор дальних страниц сохраняются — скролл не прыгает. Без
+  /// skeleton; при ошибке список остаётся прежним.
+  Future<void> refresh() async {
+    if (state.isInitial) return; // первая загрузка ещё не завершилась
+    final token = ++_refreshToken;
+    final gen = _gen;
+    try {
+      final result = await ref
+          .read(soundcloudApiProvider)
+          .likesPage(limit: _pageSize);
+      if (token != _refreshToken || gen != _gen) return;
+      state = _mergeHead(result.tracks, result.nextHref);
+    } catch (_) {
+      // best-effort: оставляем текущий список.
+    }
+  }
+
+  LikesPageState _mergeHead(List<Track> fresh, String? freshNext) {
+    final existing = state.tracks;
+    if (freshNext == null) {
+      // Вся коллекция уместилась в одну страницу — она и есть истина.
+      return state.copyWith(
+        tracks: fresh,
+        clearNextHref: true,
+        clearError: true,
+      );
+    }
+    final freshIds = {for (final t in fresh) t.id};
+    final cut = fresh.isEmpty
+        ? -1
+        : existing.indexWhere((t) => t.id == fresh.last.id);
+    // Голова существующего списка до границы свежей страницы заменяется ею.
+    final tail = [
+      for (final t in existing.skip(cut + 1))
+        if (!freshIds.contains(t.id)) t,
+    ];
+    // Курсор дальних страниц сохраняем (в т.ч. null = «всё дочитано»); свежий
+    // берём, только если список был пуст.
+    final keepCursor = existing.isNotEmpty;
+    return state.copyWith(
+      tracks: [...fresh, ...tail],
+      nextHref: keepCursor ? state.nextHref : freshNext,
+      clearNextHref: keepCursor && state.nextHref == null,
+      clearError: true,
+    );
+  }
+
+  /// Локальная правка после успешного like/unlike: без похода в сеть (api-v2
+  /// может отдавать список с задержкой).
+  void applyLocal({required String trackId, Track? liked}) {
     final rest = [
       for (final t in state.tracks)
-        if (t.id != track.id) t,
+        if (t.id != trackId) t,
     ];
-    state = state.copyWith(tracks: liked ? [track, ...rest] : rest);
+    state = state.copyWith(tracks: [?liked, ...rest]);
   }
 
   bool _draining = false;
