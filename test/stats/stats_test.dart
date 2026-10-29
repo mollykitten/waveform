@@ -76,13 +76,16 @@ void main() {
     expect(s.capped, isFalse);
   });
 
-  test('hitting the page limit marks sample as capped', () async {
-    final api = _Api([for (var i = 0; i < 9; i++) _full(i * 50)]);
-    final s = await loadListeningStats(api, log);
-    expect(s.totalPlays, ListeningStats.sampleLimit);
-    expect(s.capped, isTrue);
-    expect(api.offsets.length, statsMaxPages);
-  });
+  test(
+    'reaching the sample limit marks capped without a 9th request',
+    () async {
+      final api = _Api([for (var i = 0; i < 9; i++) _full(i * 50)]);
+      final s = await loadListeningStats(api, log);
+      expect(s.totalPlays, ListeningStats.sampleLimit);
+      expect(s.capped, isTrue);
+      expect(api.offsets.length, statsMaxPages);
+    },
+  );
 
   test('exactly full last page then short data is not capped', () async {
     final s = await loadListeningStats(_Api([_full(0), _full(50)]), log);

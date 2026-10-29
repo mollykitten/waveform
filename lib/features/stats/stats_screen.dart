@@ -139,7 +139,7 @@ class _Body extends StatelessWidget {
     final n = Fmt.count(s.totalPlays);
     final limit = Fmt.count(ListeningStats.sampleLimit);
     final base = s.capped
-        ? 'last $n plays (sample limit $limit) — older history not counted'
+        ? 'last $n plays — sample limit reached ($limit)'
         : '$n plays from your soundcloud play-history';
     return '$base · hours = summed track lengths, not time listened';
   }
