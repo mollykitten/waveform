@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
@@ -49,8 +50,24 @@ class _TrayMenu with TrayListener {
     }
   }
 
-  Future<void> _rebuild() async {
-    if (_disposed) return;
+  Future<void>? _inFlight;
+  bool _dirty = false;
+
+  /// Serialized: while a rebuild is in flight, later calls only mark the menu
+  /// dirty so the final state (read fresh each pass) always wins.
+  Future<void> _rebuild() {
+    _dirty = true;
+    return _inFlight ??= _drain().whenComplete(() => _inFlight = null);
+  }
+
+  Future<void> _drain() async {
+    while (_dirty && !_disposed) {
+      _dirty = false;
+      await _applyMenu();
+    }
+  }
+
+  Future<void> _applyMenu() async {
     final s = _ref.read(playerControllerProvider);
     final track = s.track;
     final hasTrack = track != null;
@@ -137,7 +154,7 @@ class _TrayMenu with TrayListener {
         windowManager.show();
         windowManager.focus();
       case 'quit':
-        windowManager.destroy();
+        SystemNavigator.pop();
     }
   }
 
