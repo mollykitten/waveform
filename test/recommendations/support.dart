@@ -27,6 +27,23 @@ Track realTrack(
 );
 
 class TestSoundcloud implements SoundcloudApi {
+  @override
+  Future<({List<String> ids, String? nextHref})> followingsPage({
+    String? nextHref,
+    int limit = 200,
+  }) async => (ids: <String>[], nextHref: null);
+
+  @override
+  Future<LikeOutcome> setFollowing(String userId, bool following) async =>
+      LikeOutcome.ok;
+
+  @override
+  Future<({List<Track> tracks, String? nextHref})> userRepostsPage(
+    String userId, {
+    String? nextHref,
+    int limit = 20,
+  }) async => (tracks: <Track>[], nextHref: null);
+
   List<Track> tracks = [realTrack('1'), realTrack('2')];
   final searches = <String>[];
   int likesCalls = 0;

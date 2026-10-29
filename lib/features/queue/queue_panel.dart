@@ -12,17 +12,94 @@ import 'queue_visibility.dart';
 
 /// Правая queue-панель. Сверху — playing-карточка, под ней — реорордерится
 /// список "up next". Закрыть — крестик в шапке или toggle в TopBar.
-class QueuePanel extends ConsumerWidget {
+class QueuePanel extends ConsumerStatefulWidget {
   const QueuePanel({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<QueuePanel> createState() => _QueuePanelState();
+}
+
+class _QueuePanelState extends ConsumerState<QueuePanel> {
+  // Программные (не tab-stop) точки фокуса строк, чтобы после перестановки
+  // или удаления фокус оставался на осмысленном элементе.
+  final Map<String, FocusNode> _rowFocus = {};
+  final FocusNode _emptyFocus = FocusNode(
+    debugLabel: 'queue empty',
+    skipTraversal: true,
+  );
+
+  @override
+  void dispose() {
+    for (final node in _rowFocus.values) {
+      node.dispose();
+    }
+    _emptyFocus.dispose();
+    super.dispose();
+  }
+
+  FocusNode _focusFor(String id) => _rowFocus.putIfAbsent(
+    id,
+    () => FocusNode(debugLabel: 'queue row $id', skipTraversal: true),
+  );
+
+  Set<String> _liveIds = const {};
+
+  void _pruneFocus(Set<String> liveIds) {
+    _liveIds = liveIds;
+    if (_rowFocus.keys.every(liveIds.contains)) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      // Сверяем с актуальным списком: трек мог вернуться до этого кадра.
+      final stale = _rowFocus.keys.where((id) => !_liveIds.contains(id));
+      for (final id in stale.toList()) {
+        _rowFocus.remove(id)?.dispose();
+      }
+    });
+  }
+
+  void _afterMutation(VoidCallback focusStep) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) focusStep();
+    });
+  }
+
+  void _move(PlayerController pc, List<Track> upcoming, int index, int delta) {
+    final target = index + delta;
+    if (target < 0 || target >= upcoming.length) return;
+    final id = upcoming[index].id;
+    // ReorderableListView: вставка «после» элемента задаётся индексом + 1.
+    pc.reorderUpcoming(index, delta < 0 ? target : target + 1);
+    _afterMutation(() {
+      // Кнопка, ставшая недоступной на границе, роняет фокус — возвращаем
+      // его на ту же строку; иначе фокус остался на нажатой кнопке.
+      final focused = FocusManager.instance.primaryFocus;
+      if (focused == null ||
+          !focused.canRequestFocus ||
+          focused.context == null) {
+        _rowFocus[id]?.requestFocus();
+      }
+    });
+  }
+
+  void _remove(PlayerController pc, List<Track> upcoming, int index) {
+    final neighbour = index + 1 < upcoming.length
+        ? upcoming[index + 1].id
+        : (index > 0 ? upcoming[index - 1].id : null);
+    pc.removeFromQueue(upcoming[index].id);
+    _afterMutation(() {
+      final node = neighbour == null ? _emptyFocus : _rowFocus[neighbour];
+      node?.requestFocus();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final player = ref.watch(playerControllerProvider);
     // Подписка на queueVersion → когда меняется queue, перечитываем upcoming.
     ref.watch(playerControllerProvider.select((s) => s.queueVersion));
     final pc = ref.read(playerControllerProvider.notifier);
     final upcoming = pc.upcomingTracks;
     final current = player.track;
+    _pruneFocus({for (final t in upcoming) t.id});
 
     return Container(
       decoration: const BoxDecoration(
@@ -39,7 +116,7 @@ class QueuePanel extends ConsumerWidget {
           const Divider(color: AppColors.border, height: 0.5, thickness: 0.5),
           Expanded(
             child: upcoming.isEmpty
-                ? const _EmptyUpcoming()
+                ? _EmptyUpcoming(focusNode: _emptyFocus)
                 : ReorderableListView.builder(
                     padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
                     itemCount: upcoming.length,
@@ -53,7 +130,11 @@ class QueuePanel extends ConsumerWidget {
                         key: ValueKey('q-${t.id}'),
                         track: t,
                         index: index,
-                        onRemove: () => pc.removeFromQueue(t.id),
+                        count: upcoming.length,
+                        focusNode: _focusFor(t.id),
+                        onMoveUp: () => _move(pc, upcoming, index, -1),
+                        onMoveDown: () => _move(pc, upcoming, index, 1),
+                        onRemove: () => _remove(pc, upcoming, index),
                       );
                     },
                   ),
@@ -164,16 +245,21 @@ class _Header extends StatelessWidget {
 }
 
 class _EmptyUpcoming extends StatelessWidget {
-  const _EmptyUpcoming();
+  const _EmptyUpcoming({required this.focusNode});
+  final FocusNode focusNode;
+
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(20),
-      child: Center(
-        child: Text(
-          'queue is empty\nplay a playlist to see what\'s next',
-          textAlign: TextAlign.center,
-          style: AppTheme.mono(size: 11, color: AppColors.textLow),
+    return Focus(
+      focusNode: focusNode,
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Center(
+          child: Text(
+            'queue is empty\nplay a playlist to see what\'s next',
+            textAlign: TextAlign.center,
+            style: AppTheme.mono(size: 11, color: AppColors.textLow),
+          ),
         ),
       ),
     );
@@ -185,74 +271,129 @@ class _QueueRow extends StatelessWidget {
     super.key,
     required this.track,
     required this.index,
+    required this.count,
+    required this.focusNode,
+    required this.onMoveUp,
+    required this.onMoveDown,
     required this.onRemove,
   });
   final Track track;
   final int index;
+  final int count;
+  final FocusNode focusNode;
+  final VoidCallback onMoveUp;
+  final VoidCallback onMoveDown;
   final VoidCallback onRemove;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 6),
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-      decoration: BoxDecoration(
-        color: AppColors.bg,
-        borderRadius: AppTheme.borderRadius,
-        border: AppTheme.border(),
-      ),
-      child: Row(
-        children: [
-          Pressable(
-            onTap: () => context.push('/track/${track.id}'),
-            child: CoverArt(seed: track.id, imageUrl: track.coverUrl, size: 36),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  track.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                    color: AppColors.textHi,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  track.artist,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppTheme.mono(size: 10, color: AppColors.textMid),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 6),
-          Pressable(
-            onTap: onRemove,
-            child: const Padding(
-              padding: EdgeInsets.all(4),
-              child: Icon(Icons.close, size: 13, color: AppColors.textLow),
-            ),
-          ),
-          // Drag-handle для ReorderableListView. Помещаем в самый правый край.
-          ReorderableDragStartListener(
-            index: index,
-            child: const Padding(
-              padding: EdgeInsets.only(left: 2, right: 4),
-              child: Icon(
-                Icons.drag_handle,
-                size: 16,
-                color: AppColors.textLow,
+    return Focus(
+      focusNode: focusNode,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+        decoration: BoxDecoration(
+          color: AppColors.bg,
+          borderRadius: AppTheme.borderRadius,
+          border: AppTheme.border(),
+        ),
+        child: Row(
+          children: [
+            Pressable(
+              onTap: () => context.push('/track/${track.id}'),
+              child: CoverArt(
+                seed: track.id,
+                imageUrl: track.coverUrl,
+                size: 36,
               ),
             ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    track.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: AppColors.textHi,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    track.artist,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTheme.mono(size: 10, color: AppColors.textMid),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 6),
+            _RowAction(
+              label: 'move ${track.title} up',
+              icon: Icons.keyboard_arrow_up,
+              onTap: index > 0 ? onMoveUp : null,
+            ),
+            _RowAction(
+              label: 'move ${track.title} down',
+              icon: Icons.keyboard_arrow_down,
+              onTap: index < count - 1 ? onMoveDown : null,
+            ),
+            _RowAction(
+              label: 'remove ${track.title} from queue',
+              icon: Icons.close,
+              onTap: onRemove,
+            ),
+            // Drag-handle для ReorderableListView. Помещаем в самый правый край.
+            ReorderableDragStartListener(
+              index: index,
+              child: const Padding(
+                padding: EdgeInsets.only(left: 2, right: 4),
+                child: Icon(
+                  Icons.drag_handle,
+                  size: 16,
+                  color: AppColors.textLow,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Именованная иконка-кнопка строки очереди; `onTap == null` — недоступна
+/// (граница списка), Pressable сам исключает её из фокуса и действий.
+class _RowAction extends StatelessWidget {
+  const _RowAction({
+    required this.label,
+    required this.icon,
+    required this.onTap,
+  });
+  final String label;
+  final IconData icon;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: label,
+      child: Pressable(
+        onTap: onTap,
+        enabled: onTap != null,
+        child: Padding(
+          padding: const EdgeInsets.all(4),
+          child: Icon(
+            icon,
+            size: 14,
+            color: onTap == null ? AppColors.border : AppColors.textLow,
           ),
-        ],
+        ),
       ),
     );
   }

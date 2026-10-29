@@ -88,7 +88,11 @@ class _TrackBody extends ConsumerWidget {
     final isPlaying = isCurrent && player.isPlaying;
     final progress = isCurrent ? player.progress : 0.0;
     final buffered = isCurrent ? player.bufferedFraction : 0.0;
-    final queue = [track, ...detail.related];
+    // Трек уже в очереди (например, лайки) — играем в её контексте, а не
+    // подменяем её related-станцией.
+    final queue = c.queueContains(track.id)
+        ? c.queueSnapshot
+        : [track, ...detail.related];
 
     return Center(
       child: ConstrainedBox(
@@ -303,7 +307,7 @@ class _ActionBarState extends ConsumerState<_ActionBar> {
     setState(() => _likesDelta += wasLiked ? -1 : 1);
     final outcome = await ref
         .read(likedTracksProvider.notifier)
-        .toggle(widget.track.id);
+        .toggle(widget.track.id, track: widget.track);
     if (outcome != LikeOutcome.ok) {
       // Контроллер уже откатил `liked`-set; здесь откатываем дельту счётчика.
       if (mounted) setState(() => _likesDelta += wasLiked ? 1 : -1);

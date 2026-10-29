@@ -64,8 +64,8 @@ tracks you can't play are dropped before they reach the queue, and the wave keep
 builds are attached to every [github release](https://github.com/mollykitten/waveform/releases/latest). test builds and news go to telegram first: **[t.me/waveformsc](https://t.me/waveformsc)**
 
 - **macos** (12+): grab the `.dmg`, drag into applications. signed and notarized
-- **windows:** grab the `.zip`, run `Waveform.exe`. smartscreen asks once (no ev cert yet)
-- **linux:** grab the `.tar.gz`, run `./waveform_app`
+- **windows:** grab the `-setup.exe` (per-user, no admin rights, start menu entry, uninstaller; updates itself). smartscreen asks once (no ev cert yet). a portable `.zip` is there too
+- **linux:** grab the `.AppImage`, `chmod +x`, run it (or use the `.tar.gz` and `./waveform_app`)
 
 then sign in via settings → account. details in [docs/install.md](docs/install.md)
 

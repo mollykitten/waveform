@@ -33,7 +33,7 @@ class PlayerState {
     this.shuffle = false,
     this.repeat = false,
     this.liked = false,
-    this.volume = 1.0,
+    this.volume = PlaybackPrefs.defaultVolume,
     this.muted = false,
     this.unplayable,
     this.queueVersion = 0,
@@ -275,7 +275,24 @@ class PlayerController extends Notifier<PlayerState> {
       }
       _subs.clear();
     });
+    unawaited(_restoreVolume());
     return const PlayerState();
+  }
+
+  /// Применяет сохранённую громкость/mute к состоянию и движку до первого
+  /// воспроизведения (чтение prefs.json — миллисекунды).
+  Future<void> _restoreVolume() async {
+    final prefs = ref.read(playbackPrefsProvider.notifier);
+    await prefs.restored;
+    if (!ref.mounted) return;
+    final p = ref.read(playbackPrefsProvider);
+    state = state.copyWith(volume: p.volume, muted: p.muted);
+    _applyEngineVolume();
+  }
+
+  void _applyEngineVolume() {
+    final v = state.volume;
+    _engine.setVolume(state.muted ? 0 : v * v * v);
   }
 
   /// Запустить трек. [queue] — список-контекст для next/previous;
@@ -341,6 +358,12 @@ class PlayerController extends Notifier<PlayerState> {
     if (i == -1) return List.unmodifiable(_queue);
     return List.unmodifiable(_queue.skip(i + 1));
   }
+
+  /// Копия основной очереди (контекст воспроизведения) в порядке списка.
+  List<Track> get queueSnapshot => List.unmodifiable(_queue);
+
+  /// Есть ли трек в текущей очереди.
+  bool queueContains(String trackId) => _queue.any((t) => t.id == trackId);
 
   /// Индекс играющего в основной `_queue`; −1 если нет в очереди.
   int get currentQueueIndex =>
@@ -711,6 +734,7 @@ class PlayerController extends Notifier<PlayerState> {
     // Смена громкости снимает mute — естественное поведение.
     state = state.copyWith(volume: v, muted: false);
     _engine.setVolume(v * v * v);
+    ref.read(playbackPrefsProvider.notifier).setVolume(v, muted: false);
   }
 
   void toggleShuffle() {
@@ -736,7 +760,7 @@ class PlayerController extends Notifier<PlayerState> {
     final track = state.track;
     if (track == null) return LikeOutcome.failed;
     state = state.copyWith(liked: !state.liked);
-    return ref.read(likedTracksProvider.notifier).toggle(track.id);
+    return ref.read(likedTracksProvider.notifier).toggle(track.id, track: track);
   }
 
   /// Следующий трек. Если мы зашли назад в историю — идём вперёд по реальной
@@ -892,12 +916,13 @@ class PlayerController extends Notifier<PlayerState> {
   void toggleMute() {
     if (state.muted) {
       state = state.copyWith(muted: false);
-      final v = state.volume;
-      _engine.setVolume(v * v * v);
     } else {
       state = state.copyWith(muted: true);
-      _engine.setVolume(0);
     }
+    _applyEngineVolume();
+    ref
+        .read(playbackPrefsProvider.notifier)
+        .setVolume(state.volume, muted: state.muted);
   }
 
   /// Begin a listening fact for [track], stamped with the wave source that

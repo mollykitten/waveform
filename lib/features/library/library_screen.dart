@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/colors.dart';
 import '../../core/api/feeds.dart';
+import '../../core/api/liked_tracks.dart';
 import '../../core/api/me_likes.dart';
 import '../../core/api/soundcloud_api.dart';
 import '../../core/api/soundcloud_auth.dart';
@@ -274,13 +275,20 @@ class _PaginatedLikesTab extends ConsumerStatefulWidget {
   ConsumerState<_PaginatedLikesTab> createState() => _PaginatedLikesTabState();
 }
 
-class _PaginatedLikesTabState extends ConsumerState<_PaginatedLikesTab> {
+class _PaginatedLikesTabState extends ConsumerState<_PaginatedLikesTab>
+    with WidgetsBindingObserver {
   final ScrollController _scroll = ScrollController();
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _scroll.addListener(_onScroll);
+    // Открытие вкладки: подтягиваем лайки, поставленные после первой загрузки.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _refresh();
+    });
     // Если экран открыт уже с активным фильтром — догружаем все лайки.
     if (widget.query.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _loadAllForSearch());
@@ -297,11 +305,27 @@ class _PaginatedLikesTabState extends ConsumerState<_PaginatedLikesTab> {
     }
   }
 
-  void _loadAllForSearch() =>
-      ref.read(meLikesPagedProvider.notifier).loadAll();
+  void _loadAllForSearch() => ref.read(meLikesPagedProvider.notifier).loadAll();
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Возврат в окно (например, после лайка на soundcloud.com).
+    if (state == AppLifecycleState.resumed) _refresh();
+  }
+
+  /// [full] — явное обновление: перечитывает и множество лайков целиком.
+  void _refresh({bool full = false}) {
+    final liked = ref.read(likedTracksProvider.notifier);
+    final sync = full ? liked.reload() : liked.syncRecent();
+    sync.catchError((Object e, StackTrace st) {
+      ref.read(talkerProvider).warning('likes sync failed', e, st);
+    });
+    ref.read(meLikesPagedProvider.notifier).refresh();
+  }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _scroll.dispose();
     super.dispose();
   }
@@ -402,6 +426,18 @@ class _PaginatedLikesTabState extends ConsumerState<_PaginatedLikesTab> {
                         ),
                       ),
                       const SizedBox(width: 12),
+                      Tooltip(
+                        message: 'refresh',
+                        child: Pressable(
+                          onTap: () => _refresh(full: true),
+                          child: const Icon(
+                            Icons.refresh,
+                            size: 16,
+                            color: AppColors.textMid,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
                       if (state.tracks.isNotEmpty) const _ShuffleAllLikes(),
                     ],
                   ),
@@ -436,7 +472,11 @@ class _PaginatedLikesTabState extends ConsumerState<_PaginatedLikesTab> {
                 mainAxisSpacing: 24,
               ),
               itemCount: tracks.length,
-              itemBuilder: (_, i) => _LikeTile(track: tracks[i]),
+              itemBuilder: (_, i) => LikeTile(
+                key: ValueKey(tracks[i].id),
+                track: tracks[i],
+                queue: tracks,
+              ),
             ),
           )
         else
@@ -444,8 +484,7 @@ class _PaginatedLikesTabState extends ConsumerState<_PaginatedLikesTab> {
             padding: hPad,
             sliver: SliverList.builder(
               itemCount: tracks.length,
-              itemBuilder: (_, i) =>
-                  TrackRow(track: tracks[i], queue: state.tracks),
+              itemBuilder: (_, i) => TrackRow(track: tracks[i], queue: tracks),
             ),
           ),
         SliverToBoxAdapter(
@@ -627,23 +666,95 @@ class _RetryRow extends StatelessWidget {
   }
 }
 
-/// Тайл для likes-tiles-view: квадратная обложка + название + артист. Аналог
-/// CollectionCard, но для трека (тапает на /track/id).
-class _LikeTile extends StatelessWidget {
-  const _LikeTile({required this.track});
+/// Тайл для likes-tiles-view: квадратная обложка + название + артист.
+/// Клик по обложке играет трек в контексте [queue] (лайки); hover показывает
+/// play-аффорданс. На страницу трека ведёт название.
+class LikeTile extends ConsumerStatefulWidget {
+  const LikeTile({super.key, required this.track, required this.queue});
   final Track track;
+  final List<Track> queue;
+
+  @override
+  ConsumerState<LikeTile> createState() => LikeTileState();
+}
+
+class LikeTileState extends ConsumerState<LikeTile> {
+  bool _hover = false;
+  bool _focused = false;
+
   @override
   Widget build(BuildContext context) {
-    return Pressable(
-      onTap: () => context.push('/track/${track.id}'),
-      child: SizedBox(
-        width: 160,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            CoverArt(seed: track.id, imageUrl: track.coverUrl, size: 160),
-            const SizedBox(height: 8),
-            Text(
+    final track = widget.track;
+    final player = ref.watch(playerControllerProvider);
+    final c = ref.read(playerControllerProvider.notifier);
+    final isCurrent = player.track?.id == track.id;
+    final isPlaying = isCurrent && player.isPlaying;
+    final reduced = MediaQuery.disableAnimationsOf(context);
+    final showPlay = _hover || _focused || isCurrent;
+    return SizedBox(
+      width: 160,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          MouseRegion(
+            onEnter: (_) => setState(() => _hover = true),
+            onExit: (_) => setState(() => _hover = false),
+            child: Focus(
+              canRequestFocus: false,
+              onFocusChange: (v) => setState(() => _focused = v),
+              child: Semantics(
+                button: true,
+                label: isPlaying
+                    ? 'pause ${track.title}'
+                    : 'play ${track.title}',
+                excludeSemantics: true,
+                child: Pressable(
+                  onTap: () => isCurrent
+                      ? c.toggle()
+                      : c.play(track, queue: widget.queue),
+                  child: Stack(
+                    children: [
+                      Hero(
+                        tag: 'cover-track-${track.id}',
+                        child: CoverArt(
+                          seed: track.id,
+                          imageUrl: track.coverUrl,
+                          size: 160,
+                        ),
+                      ),
+                      Positioned.fill(
+                        child: AnimatedOpacity(
+                          opacity: showPlay ? 1 : 0,
+                          duration: reduced
+                              ? Duration.zero
+                              : const Duration(milliseconds: 120),
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: AppColors.bg.withValues(alpha: 0.45),
+                              borderRadius: AppTheme.borderRadius,
+                            ),
+                            child: Center(
+                              child: Icon(
+                                isPlaying ? Icons.pause : Icons.play_arrow,
+                                size: 36,
+                                color: isCurrent
+                                    ? AppColors.acid
+                                    : AppColors.textHi,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Pressable(
+            onTap: () => context.push('/track/${track.id}'),
+            child: Text(
               track.title,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
@@ -653,15 +764,15 @@ class _LikeTile extends StatelessWidget {
                 color: AppColors.textHi,
               ),
             ),
-            const SizedBox(height: 2),
-            Text(
-              track.artist,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: AppTheme.mono(size: 11, color: AppColors.textMid),
-            ),
-          ],
-        ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            track.artist,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: AppTheme.mono(size: 11, color: AppColors.textMid),
+          ),
+        ],
       ),
     );
   }
