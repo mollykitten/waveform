@@ -7,6 +7,15 @@ All notable changes to Waveform are documented here. Format follows
 ## [Unreleased]
 
 ### added
+- **installers and automatic updates on all three platforms.** macos updates
+  through sparkle (sandbox-ready: installer launcher service, signed helpers),
+  windows gets a per-user inno setup installer that updates through winsparkle,
+  linux gets an appimage with embedded zsync update info. the app checks once a
+  day and on settings → about → check for updates; linux without
+  `appimageupdatetool` points to the release page. feeds
+  (`appcast-macos.xml`, `appcast-windows.xml`) are signed in ci and attached to
+  the release; the release workflow now also checks that the tag matches
+  `pubspec.yaml` and scans every new artifact for a widevine profile.
 - **my wave draws on three candidate sources**: the related-track graph, your
   home stream and co-likers (people with similar likes), interleaved 50% /
   25% / 25% with a shared playability filter. co-likers run as a background
