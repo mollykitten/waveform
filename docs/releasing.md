@@ -1,6 +1,6 @@
 # cutting a release
 
-the next release is `v0.4.0`; `pubspec.yaml` is already `0.4.0+33`.
+the next release is `v0.4.0`; `pubspec.yaml` is already `0.5.0+34`.
 release the reviewed main tree after #56 without adding backlog features.
 keep the changelog's `unreleased` status until publication is ready.
 
@@ -134,8 +134,8 @@ bundles the committed file as is.
 ## candidate checks
 
 1. review the exact candidate diff and confirm `pubspec.yaml` stays at
-   `0.4.0+33` and `kAppVersion` in `lib/core/update/app_version.dart`
-   stays at `0.4.0` so the about screen matches the release. confirm release
+   `0.5.0+34` and `kAppVersion` in `lib/core/update/app_version.dart`
+   stays at `0.5.0` so the about screen matches the release. confirm release
    notes describe the merged scope and outstanding manual checks honestly.
 2. require a clean analyzer, passing flutter tests, and passing worker notifier
    tests on that tree. CI uses flutter 3.41.0 and runs:

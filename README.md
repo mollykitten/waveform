@@ -10,7 +10,7 @@
   <a href="https://github.com/mollykitten/waveform/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/mollykitten/waveform/actions/workflows/ci.yml/badge.svg?branch=main" /></a>
   <img alt="Flutter" src="https://img.shields.io/badge/Flutter-3.41-02569B?logo=flutter&logoColor=white" />
   <img alt="Platforms" src="https://img.shields.io/badge/Platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey" />
-  <img alt="Version" src="https://img.shields.io/badge/version-0.4.0-FF5500" />
+  <img alt="Version" src="https://img.shields.io/badge/version-0.5.0-FF5500" />
   <a href="https://t.me/waveformsc"><img alt="Telegram" src="https://img.shields.io/badge/Telegram-waveform-26A5E4?logo=telegram&logoColor=white" /></a>
 </p>
 
@@ -22,11 +22,11 @@ web soundcloud is fine, tabs are not
 
 desktop clients for it either don't exist or they're electron wrapped around the website. so i made a real native one, closer to canonical soundcloud than other unofficial clients but darker and quieter, and you can run it for hours without touching the trackpad
 
-> **v0.4.0:** my wave
+> **v0.5.0:** installers and updates
 >
-> one button, an endless queue of real soundcloud tracks. it's built on your machine from your likes, your home stream and people with similar taste, and refills while it plays. no settings, no model, nothing sent anywhere but soundcloud itself
+> a real installer on every platform and the app updates itself: sparkle on macos, winsparkle with a per-user installer on windows, an appimage on linux. it checks once a day, or from settings → about
 >
-> also: drm-protected tracks from distributors and labels play on macos through a small go core that decrypts widevine streams over `dart:ffi` (go+ tracks still need a go+ subscription; the macos release bundles a device profile, from source you bring your own, see [limitations](docs/limitations.md)). plus an audio output picker with airplay, keyboard focus everywhere, reduced motion, a new icon, and web3 bits are gone for good
+> also: a menu bar player on macos, windows and linux finally play tracks (media_kit) and get window buttons and `waveform://` links, my wave forgets what you disliked and leans into what you replay, plus a pile of likes, artist, volume and seek fixes
 >
 > daily-driver loop works on macos, windows and linux build too but i test them less. the api is unofficial so rough edges stay. everything else in [`CHANGELOG.md`](CHANGELOG.md)
 

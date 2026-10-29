@@ -6,6 +6,12 @@ All notable changes to Waveform are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-10-30
+
+installers and automatic updates on all three platforms, a macos menu bar
+player, windows/linux playback and window controls, and a batch of library,
+likes and player fixes. includes #85–#109.
+
 ### added
 - **installers and automatic updates on all three platforms.** macos updates
   through sparkle (sandbox-ready: installer launcher service, signed helpers),
@@ -16,12 +22,19 @@ All notable changes to Waveform are documented here. Format follows
   (`appcast-macos.xml`, `appcast-windows.xml`) are signed in ci and attached to
   the release; the release workflow now also checks that the tag matches
   `pubspec.yaml` and scans every new artifact for a widevine profile.
-- **my wave draws on three candidate sources**: the related-track graph, your
-  home stream and co-likers (people with similar likes), interleaved 50% /
-  25% / 25% with a shared playability filter. co-likers run as a background
-  job (at most 250 requests, cached for 24 hours without other users' ids);
-  listening facts record which source supplied each track, and stats shows a
-  listened/skipped tally per source.
+- **macos menu bar item** with now-playing and playback controls (#103).
+- **`waveform://` deep links on windows and linux**: registered per user at
+  start (registry on windows, `.desktop` handler on linux) (#98).
+- **queue actions for assistive tech**: move up, move down and remove are
+  exposed as semantic actions (#106).
+- **go+ tracks play through scdrm** for subscribers without an mp3 transcode
+  step (#100).
+
+### changed
+- the discover tab is now called **my wave** (#88).
+- my wave: disliked tracks stay out of later batches and repeat listens weigh
+  more than a single play (#99).
+- stats tells sampled history apart from actual listening time (#101).
 
 ### fixed
 - **every track was "unavailable" on windows (and linux).** just_audio has no
@@ -29,17 +42,17 @@ All notable changes to Waveform are documented here. Format follows
   `MissingPluginException`. windows and linux now play through the media_kit
   (libmpv) backend; linux builds need `libmpv-dev`. not yet verified on a real
   windows machine.
-
-### removed
-- **the model-assisted route of my wave.** the chatgpt connection, custom
-  openai-compatible and ollama providers, the mood field and the listening
-  consent dialog are gone: my wave now runs entirely on this device. an
-  offline pilot found the model route reached none of 100 new likes, below the
-  related-track graph. dev builds may leave a keychain item
-  `waveform.chatgpt.credentials.v1` and an `ai_config.json` in the support
-  directory; both can be deleted by hand.
-- the `jose`, `flutter_secure_storage` and `url_launcher` dependencies, the
-  loopback-server entitlement and the linux libsecret build requirement.
+- window control buttons on windows and linux (#87).
+- system playlists on home (trending by genre) open with covers and track
+  counts (#86).
+- library likes refresh after liking elsewhere, the feed shows liked state, and
+  like toggles show up in the likes list (#102, #109).
+- liked tracks play in place and keep the likes queue (#108).
+- artist pages show the real follow state and a reposts tab (#104).
+- volume and mute persist across restarts (#105).
+- dragging the waveform commits one seek on release instead of one per update
+  (#107).
+- auth no longer touches storage after its provider is disposed (#109).
 
 ## [0.4.0] — 2026-10-28
 
@@ -47,6 +60,12 @@ my wave recommendations, macos audio output controls, keyboard accessibility,
 and release preparation. includes the merged work in #50–#56.
 
 ### added
+- **my wave draws on three candidate sources**: the related-track graph, your
+  home stream and co-likers (people with similar likes), interleaved 50% /
+  25% / 25% with a shared playability filter. co-likers run as a background
+  job (at most 250 requests, cached for 24 hours without other users' ids);
+  listening facts record which source supplied each track, and stats shows a
+  listened/skipped tally per source.
 - **my wave** plays a continuous queue of real soundcloud tracks. local
   structural vectors rank a bounded related-track pool using account-isolated
   listening evidence, diversity and exploration; these are graph vectors, not
@@ -115,6 +134,17 @@ and release preparation. includes the merged work in #50–#56.
   with HTTP 403 for a missing or expired required agreement. staple and DMG
   creation were skipped. it ran SHA `4e4f87463f77f7e077724a1d73ffd7be9836edcc`,
   so the release candidate still needs its own successful dry run.
+
+### removed
+- **the model-assisted route of my wave.** the chatgpt connection, custom
+  openai-compatible and ollama providers, the mood field and the listening
+  consent dialog are gone: my wave now runs entirely on this device. an
+  offline pilot found the model route reached none of 100 new likes, below the
+  related-track graph. dev builds may leave a keychain item
+  `waveform.chatgpt.credentials.v1` and an `ai_config.json` in the support
+  directory; both can be deleted by hand.
+- the `jose`, `flutter_secure_storage` and `url_launcher` dependencies, the
+  loopback-server entitlement and the linux libsecret build requirement.
 
 ## [0.3.0] — 2026-06-10
 
