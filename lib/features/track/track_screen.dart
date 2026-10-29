@@ -88,7 +88,11 @@ class _TrackBody extends ConsumerWidget {
     final isPlaying = isCurrent && player.isPlaying;
     final progress = isCurrent ? player.progress : 0.0;
     final buffered = isCurrent ? player.bufferedFraction : 0.0;
-    final queue = [track, ...detail.related];
+    // Трек уже в очереди (например, лайки) — играем в её контексте, а не
+    // подменяем её related-станцией.
+    final queue = c.queueContains(track.id)
+        ? c.queueSnapshot
+        : [track, ...detail.related];
 
     return Center(
       child: ConstrainedBox(

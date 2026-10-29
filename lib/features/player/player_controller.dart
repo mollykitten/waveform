@@ -359,6 +359,12 @@ class PlayerController extends Notifier<PlayerState> {
     return List.unmodifiable(_queue.skip(i + 1));
   }
 
+  /// Копия основной очереди (контекст воспроизведения) в порядке списка.
+  List<Track> get queueSnapshot => List.unmodifiable(_queue);
+
+  /// Есть ли трек в текущей очереди.
+  bool queueContains(String trackId) => _queue.any((t) => t.id == trackId);
+
   /// Индекс играющего в основной `_queue`; −1 если нет в очереди.
   int get currentQueueIndex =>
       _queue.indexWhere((t) => t.id == state.track?.id);
