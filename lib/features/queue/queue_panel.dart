@@ -42,11 +42,15 @@ class _QueuePanelState extends ConsumerState<QueuePanel> {
     () => FocusNode(debugLabel: 'queue row $id', skipTraversal: true),
   );
 
+  Set<String> _liveIds = const {};
+
   void _pruneFocus(Set<String> liveIds) {
-    final stale = _rowFocus.keys.where((id) => !liveIds.contains(id)).toList();
-    if (stale.isEmpty) return;
+    _liveIds = liveIds;
+    if (_rowFocus.keys.every(liveIds.contains)) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      for (final id in stale) {
+      // Сверяем с актуальным списком: трек мог вернуться до этого кадра.
+      final stale = _rowFocus.keys.where((id) => !_liveIds.contains(id));
+      for (final id in stale.toList()) {
         _rowFocus.remove(id)?.dispose();
       }
     });

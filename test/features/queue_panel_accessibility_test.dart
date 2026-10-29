@@ -154,4 +154,21 @@ void main() {
     expect(FocusManager.instance.primaryFocus?.debugLabel, 'queue empty');
     expect(c.read(playerControllerProvider).track?.id, '1');
   });
+
+  testWidgets('remove then re-add within one frame keeps a live focus node', (
+    tester,
+  ) async {
+    final c = await pumpPanel(tester);
+    final pc = c.read(playerControllerProvider.notifier);
+
+    pc.removeFromQueue('3');
+    pc.addToQueue(t('3'));
+    await tester.pump();
+    await tester.pump();
+
+    expect(upcoming(c), ['2', '4', '3']);
+    await activate(tester, action('up', '3'));
+    expect(upcoming(c), ['2', '3', '4']);
+    expect(tester.takeException(), isNull);
+  });
 }
