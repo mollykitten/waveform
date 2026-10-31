@@ -94,6 +94,40 @@ jobs:
           test -s assets/widevine/device.wvd
           echo "widevine profile written ($(wc -c < assets/widevine/device.wvd) bytes)"
 
+      - name: Fetch the private drm core (macOS only)
+        # the core lives in a private repo and never in this one. without the
+        # token the build still works, drm tracks are just off.
+        id: scdrm
+        env:
+          SCDRM_REPO_TOKEN: ${{ secrets.SCDRM_REPO_TOKEN }}
+        run: |
+          if [ -z "$SCDRM_REPO_TOKEN" ]; then
+            echo "::warning::SCDRM_REPO_TOKEN is not set: building without drm support"
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "::add-mask::$SCDRM_REPO_TOKEN"
+          git clone --depth 1 \
+            "https://x-access-token:${SCDRM_REPO_TOKEN}@github.com/mollykitten/waveform-scdrm.git" \
+            "$RUNNER_TEMP/scdrm"
+          rm -rf "$RUNNER_TEMP/scdrm/.git"
+          echo "present=true" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Go (drm core)
+        if: steps.scdrm.outputs.present == 'true'
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: ${{ runner.temp }}/scdrm/go.mod
+          cache: false
+
+      - name: Build libscdrm.dylib (universal)
+        if: steps.scdrm.outputs.present == 'true'
+        run: |
+          set -euo pipefail
+          OUT="$GITHUB_WORKSPACE/macos/Runner/Frameworks" \
+            "$RUNNER_TEMP/scdrm/tool/build.sh" arm64 x86_64
+          lipo -archs macos/Runner/Frameworks/libscdrm.dylib
+
       - name: Refuse to ship the sparkle key placeholder
         if: startsWith(github.ref, 'refs/tags/')
         run: |
@@ -113,9 +147,11 @@ jobs:
             --dart-define=LASTFM_API_KEY="$LASTFM_API_KEY" \
             --dart-define=LASTFM_SHARED_SECRET="$LASTFM_SHARED_SECRET"
 
-      - name: Remove the widevine profile from the workspace
+      - name: Remove the widevine profile and drm core from the workspace
         if: always()
-        run: rm -f assets/widevine/device.wvd
+        run: |
+          rm -f assets/widevine/device.wvd macos/Runner/Frameworks/libscdrm.dylib
+          rm -rf "$RUNNER_TEMP/scdrm"
 
       - name: Codesign .app (Developer ID Application)
         run: |
@@ -160,7 +196,7 @@ jobs:
           # inside out, no --deep: every nested bundle and every Mach-O
           # except the main executable, deepest path first (hardened
           # runtime + timestamp, no entitlements); the app goes last with
-          # its entitlements. libscdrm.dylib ships ad-hoc signed from git
+          # its entitlements. libscdrm.dylib (when built) is ad-hoc signed
           # and is re-signed here.
           MAIN="$APP/Contents/MacOS/$(/usr/libexec/PlistBuddy \
             -c 'Print :CFBundleExecutable' "$APP/Contents/Info.plist")"

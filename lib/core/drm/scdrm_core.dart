@@ -3,7 +3,7 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
-/// C-экспорты Go-ядра scdrm (см. third_party/scdrm/cmd/scdrm/main.go):
+/// C-экспорты DRM-ядра (собирается отдельно, в публичном репо его нет):
 /// `scdrm_version`, `scdrm_license_url`, `scdrm_decrypt`, `scdrm_free`.
 ///
 /// Ядро резолвит Widevine-поток (`ctr-encrypted-hls`), получает лицензию,
@@ -11,7 +11,7 @@ import 'package:ffi/ffi.dart';
 /// не смог) — всё в один вызов, без временных сегментов на диске.
 ///
 /// Dylib ищется: в переменной `SCDRM_DYLIB`, по `@rpath` (в бандле .app его
-/// прописывает Xcode-фаза «Bundle Framework»), рядом с исполняемым файлом в
+/// кладёт Xcode-фаза «Bundle optional libscdrm»), рядом с исполняемым файлом в
 /// `Contents/Frameworks`, относительным путём сборки (для ручных прогонов).
 class ScDrmCore {
   ScDrmCore._(this._lib);

@@ -22,7 +22,7 @@ void main() {
     test('dylib из дерева сборки отвечает version/license (или skip)', () {
       final core = ScDrmCore.tryLoad();
       if (core == null) {
-        // Dylib не собран (tool/build_scdrm.sh) — не фаил, а отсутствие
+        // Dylib не собран (публичная сборка) — не фаил, а отсутствие
         // нативной части в этой среде (CI без Go и т.п.).
         return;
       }
