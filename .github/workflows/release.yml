@@ -77,23 +77,6 @@ jobs:
           echo "--- patched signing settings ---"
           grep -nE "CODE_SIGN_STYLE|CODE_SIGN_IDENTITY|DEVELOPMENT_TEAM" macos/Runner.xcodeproj/project.pbxproj | head
 
-      - name: Bundle the widevine device profile (macOS only)
-        # the profile never lives in git: it comes from a secret and is
-        # written into assets/widevine/ just for this build. without the
-        # secret the build still works, go+ is just off.
-        env:
-          WIDEVINE_DEVICE_WVD_BASE64: ${{ secrets.WIDEVINE_DEVICE_WVD_BASE64 }}
-        run: |
-          set -euo pipefail
-          if [ -z "$WIDEVINE_DEVICE_WVD_BASE64" ]; then
-            echo "::warning::WIDEVINE_DEVICE_WVD_BASE64 is not set: building without go+ support"
-            exit 0
-          fi
-          umask 077
-          printf '%s' "$WIDEVINE_DEVICE_WVD_BASE64" | base64 --decode > assets/widevine/device.wvd
-          test -s assets/widevine/device.wvd
-          echo "widevine profile written ($(wc -c < assets/widevine/device.wvd) bytes)"
-
       - name: Fetch the private drm core (macOS only)
         # the core lives in a private repo and never in this one. without the
         # token the build still works, drm tracks are just off.
@@ -121,9 +104,16 @@ jobs:
           cache: false
 
       - name: Build libscdrm.dylib (universal)
+        # the device profile goes into the dylib encrypted (never a file in
+        # the bundle). without the secret the dylib builds with no profile.
         if: steps.scdrm.outputs.present == 'true'
+        env:
+          SCDRM_WVD_B64: ${{ secrets.WIDEVINE_DEVICE_WVD_BASE64 }}
         run: |
           set -euo pipefail
+          if [ -z "$SCDRM_WVD_B64" ]; then
+            echo "::warning::WIDEVINE_DEVICE_WVD_BASE64 is not set: the drm core has no device profile"
+          fi
           OUT="$GITHUB_WORKSPACE/macos/Runner/Frameworks" \
             "$RUNNER_TEMP/scdrm/tool/build.sh" arm64 x86_64
           lipo -archs macos/Runner/Frameworks/libscdrm.dylib
@@ -147,10 +137,10 @@ jobs:
             --dart-define=LASTFM_API_KEY="$LASTFM_API_KEY" \
             --dart-define=LASTFM_SHARED_SECRET="$LASTFM_SHARED_SECRET"
 
-      - name: Remove the widevine profile and drm core from the workspace
+      - name: Remove the drm core from the workspace
         if: always()
         run: |
-          rm -f assets/widevine/device.wvd macos/Runner/Frameworks/libscdrm.dylib
+          rm -f macos/Runner/Frameworks/libscdrm.dylib
           rm -rf "$RUNNER_TEMP/scdrm"
 
       - name: Codesign .app (Developer ID Application)

@@ -59,6 +59,19 @@ class ScDrmCore {
         void Function(ffi.Pointer<ffi.Char>)
       >('scdrm_free');
 
+  /// Зашит ли профиль устройства в dylib при сборке (тогда `wvdPath` в
+  /// [decrypt] можно передать пустым). Старый dylib без символа → false.
+  bool get hasEmbeddedProfile {
+    try {
+      return _lib.lookupFunction<ffi.Int Function(), int Function()>(
+            'scdrm_has_embedded_profile',
+          )() ==
+          1;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Загрузка ядра; null — dylib не найден (например, в `flutter test` или на
   /// чужой машине без сборки scdrm) → DRM-поддержка просто выключена.
   static ScDrmCore? tryLoad() {

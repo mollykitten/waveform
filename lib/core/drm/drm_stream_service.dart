@@ -22,8 +22,8 @@ final scDrmCoreProvider = Provider<ScDrmCore?>((ref) => ScDrmCore.tryLoad());
 /// Сервис дешифровки Widevine-треков SoundCloud GO+ (`ctr-encrypted-hls`).
 ///
 /// Путь: транскодинг → api-v2 резолв (плейлист + licenseAuthToken) →
-/// Go-ядро scdrm тянет сегменты, берёт Widevine-лицензию (wvd-профиль
-/// устройства из ассета) и пишет дешифрованный файл в кэш каталога
+/// DRM-ядро тянет сегменты, берёт Widevine-лицензию (профиль устройства
+/// зашит в ядро, а в сборке из исходников — из ассета) и пишет дешифрованный файл в кэш каталога
 /// Application Support → плеер играет локальный файл как обычный трек.
 class DrmStreamService {
   DrmStreamService({required this.ids, this.core, this.log});
@@ -61,11 +61,12 @@ class DrmStreamService {
 
   Future<String?> _prepare(Track track, ScDrmCore core) async {
     try {
-      final wvd = await _ensureWvd();
+      // Встроенный профиль → пустой путь, на диск ничего не выгружаем.
+      final wvd = core.hasEmbeddedProfile
+          ? await _dropExtractedWvd()
+          : await _ensureWvd();
       if (wvd == null) {
-        log?.warning(
-          'scdrm: нет ассета assets/widevine/device.wvd — GO+ выключен',
-        );
+        log?.warning('scdrm: нет профиля устройства — GO+ выключен');
         return null;
       }
       final dir = await _cacheDir();
@@ -118,7 +119,18 @@ class DrmStreamService {
     return null;
   }
 
-  /// Путь к wvd: выгружаем ассет в Application Support один раз (ядро читает
+  /// Профиль зашит в ядро: удаляем выгруженный прежними версиями файл.
+  /// Возвращает пустой путь (ядро берёт встроенный профиль).
+  Future<String?> _dropExtractedWvd() => _wvdPath ??= () async {
+    try {
+      final support = await getApplicationSupportDirectory();
+      final f = File('${support.path}/device.wvd');
+      if (f.existsSync()) f.deleteSync();
+    } catch (_) {}
+    return '';
+  }();
+
+  /// Путь к wvd (сборка из исходников без встроенного профиля): выгружаем ассет в Application Support один раз (ядро читает
   /// с диска). null — ассета нет (устройство Widevine ещё не добавлено).
   Future<String?> _ensureWvd() => _wvdPath ??= () async {
     try {

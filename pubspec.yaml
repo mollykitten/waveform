@@ -108,9 +108,8 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
-  # Widevine-профиль устройства (device.wvd) для дешифровки GO+ (core/drm/).
-  # Файл в репозитории нет — приватный ключ устройства; без него DRM
-  # выключен (см. assets/widevine/README.md).
+  # Каталог assets/widevine/ в публичной сборке содержит только README
+  # (профиль в официальном релизе вшит в DRM-ядро, см. assets/widevine/README.md).
   assets:
     - assets/widevine/
     - assets/tray/

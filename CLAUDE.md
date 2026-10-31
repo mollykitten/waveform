@@ -206,9 +206,15 @@ CF по весу соседа и давности его лайка, без фи
   `.gitignore`), `ScDrmCore.tryLoad()` при отсутствии библиотеки возвращает
   null. Фолбэк после обычных кандидатов: лицензия → расшифровка → mp3 в кэш.
   Только macOS. release.yml macOS-джоб клонирует приватный репо по секрету
-  `SCDRM_REPO_TOKEN`, собирает universal dylib и профиль
-  `assets/widevine/device.wvd` из `WIDEVINE_DEVICE_WVD_BASE64`; без любого из
-  секретов — warning и сборка без DRM (трек — общий «unavailable — skipped»).
+  `SCDRM_REPO_TOKEN` и собирает universal dylib; `WIDEVINE_DEVICE_WVD_BASE64`
+  передаётся в сборку как `SCDRM_WVD_B64` и вшивается в dylib зашифрованным
+  (AES-GCM, случайный ключ на сборку, XOR-доли) — файла `device.wvd` в бандле
+  и на диске пользователя нет (`scdrm_has_embedded_profile`, пустой `wvdPath`;
+  прежний выгруженный `Application Support/device.wvd` удаляется). Это
+  обфускация против случайного извлечения, не криптозащита: ключ в том же
+  бинаре. Сборка из исходников с собственным dylib без профиля читает
+  `assets/widevine/device.wvd`. Без секретов — warning и сборка без DRM (трек —
+  общий «unavailable — skipped»).
   Windows/Linux-джобы падают на любом `*.wvd`. В публичных доках/README не
   описываем, как получить профиль, и не упоминаем инструменты дампа.
 - **Tiles ↔ list переключатель.** `viewModeProvider` + `ViewToggle` + новый

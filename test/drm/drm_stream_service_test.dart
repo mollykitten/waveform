@@ -44,6 +44,22 @@ void main() {
     });
   });
 
+  group('embedded profile', () {
+    test('hasEmbeddedProfile не падает; пустой путь без профиля — ошибка', () {
+      final core = ScDrmCore.tryLoad();
+      if (core == null) return;
+      final err = core.decrypt(
+        transcodingUrl: 'https://x/ctr',
+        clientId: 'cid',
+        wvdPath: '',
+        outPath: '/tmp/scdrm_test_out.mp3',
+      );
+      if (!core.hasEmbeddedProfile) {
+        expect(err, contains('no embedded profile'));
+      }
+    });
+  });
+
   group('DrmStreamService', () {
     test('ядро нет (null) — DRM выключен, prepare = null', () async {
       final svc = DrmStreamService(ids: ClientIdResolver(Dio()), core: null);

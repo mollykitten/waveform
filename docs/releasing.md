@@ -93,17 +93,20 @@ higher build number and run "check for updates" in settings → about.
 ## what the macos job does
 
 1. fetches the private drm core (`mollykitten/waveform-scdrm`) with the
-   `SCDRM_REPO_TOKEN` secret, builds a universal `libscdrm.dylib` into
-   `macos/Runner/Frameworks/` and removes it after the build. without the
-   secret the build only warns and drm stays off.
-2. writes the widevine device profile from the `WIDEVINE_DEVICE_WVD_BASE64`
-   secret (base64 of `device.wvd`) into `assets/widevine/` for this build only,
-   then deletes it from the workspace. the profile is never committed
-   (`.gitignore`). without the secret the build only warns and go+ stays off.
-   the windows and linux jobs still fail on any `*.wvd` (`tool/check_no_wvd.sh`):
-   go+ is macos only. `pubspec.yaml` bundles the whole `assets/widevine/`
-   directory because flutter has neither globs nor optional assets.
-3. signs inside out, without `--deep`: every nested bundle (`.framework`, `.app`,
+   `SCDRM_REPO_TOKEN` secret and builds a universal `libscdrm.dylib` into
+   `macos/Runner/Frameworks/`, removing it after the build. the
+   `WIDEVINE_DEVICE_WVD_BASE64` secret is passed to that build as
+   `SCDRM_WVD_B64`: the device profile is encrypted (aes-gcm, random key per
+   build, split into xor shares) and embedded in the dylib, so no `device.wvd`
+   file is bundled or written to the user's disk. this is obfuscation against
+   casual extraction (`strings`, signature search), not cryptographic
+   protection: the key lives in the same binary. without `SCDRM_REPO_TOKEN`
+   the build only warns and drm stays off; without the profile secret the
+   core builds with no profile (drm off too).
+   the windows and linux jobs fail on any `*.wvd` (`tool/check_no_wvd.sh`):
+   drm is macos only. `pubspec.yaml` still lists the `assets/widevine/`
+   directory (flutter has no optional assets); it only holds a readme.
+2. signs inside out, without `--deep`: every nested bundle (`.framework`, `.app`,
    `.xpc`, `.appex`) and every mach-o except the main executable, deepest path
    first (hardened runtime, timestamp), then the `.app` with
    `macos/Runner/Release.entitlements`. sparkle's helpers (`Autoupdate`,
@@ -113,16 +116,16 @@ higher build number and run "check for updates" in settings → about.
    `$(PRODUCT_BUNDLE_IDENTIFIER)-spks`/`-spki` are resolved to the real bundle
    id before signing, because `codesign` does not expand build settings.
    prints the effective entitlements.
-4. notarizes the `.app` with the api key via `tool/notarize.sh` (bounded
+3. notarizes the `.app` with the api key via `tool/notarize.sh` (bounded
    wait, apple log on failure), staples it and runs
    `spctl --assess --type execute`.
-5. builds the styled dmg from the stapled app with `tool/make_dmg.sh`
+4. builds the styled dmg from the stapled app with `tool/make_dmg.sh`
    (`ditto` copy + `dmgbuild` for background, window size and icon layout;
    the background is `assets/brand/dmg-background*.png` from
    `tool/brand/make_icons.py`), checks the staple inside it, signs it,
    notarizes it, staples it and runs `spctl --assess --type open --context
    context:primary-signature`.
-6. the api key lives in `$RUNNER_TEMP` (written with `umask 077`) and is
+5. the api key lives in `$RUNNER_TEMP` (written with `umask 077`) and is
    removed in an `if: always()` step.
 
 all third-party actions are pinned to full commit shas (tag in the comment).
