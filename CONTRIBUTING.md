@@ -14,6 +14,17 @@ first.
 - For anything non-trivial, **open an issue first** so we can agree on the
   approach before you write code.
 
+## Where to start
+
+- Issues labeled [`good first issue`](https://github.com/mollykitten/waveform/labels/good%20first%20issue)
+  need little knowledge of the codebase. Many are hands-on checks on windows
+  or linux, where we have no machines to test on.
+- [`help wanted`](https://github.com/mollykitten/waveform/labels/help%20wanted)
+  marks bigger pieces we'd love help with, like media keys on windows and
+  linux or a light theme.
+- Questions, ideas and show-and-tell go to
+  [Discussions](https://github.com/mollykitten/waveform/discussions).
+
 ## Development setup
 
 Prerequisites: a recent [Flutter](https://docs.flutter.dev/get-started/install)
@@ -45,21 +56,26 @@ flutter test      # must pass
 
 ## Design contract
 
-UI changes must follow the design contract documented in
-[`CLAUDE.md`](CLAUDE.md):
+UI changes must follow the design contract:
 
-- Dark theme, minimalism with light web3 accents; brutalist 3px radii, 0.5px borders.
+- Dark, quiet minimalism close to canonical soundcloud; brutalist 3px radii,
+  0.5px borders.
+- Palette lives in `lib/app/theme/colors.dart`: bg `#0A0A0A`, surface
+  `#111111`, surface2 `#1A1A1A`, border `#2A2A2A`, text `#F5F5F5` / `#888888`
+  / `#555555`.
 - **Inter** for text/headings, **JetBrains Mono** for every number, timecode,
   and technical label (use the `AppTheme.mono()` helper).
 - Acid orange (`#FF5500`) only for active elements; lime (`#C6FF00`) only for
-  web3 markers.
+  small labels and markers.
 
 Include before/after screenshots for any UI change.
 
 ## Commits & PRs
 
 - Keep each PR focused on one logical change.
-- Write clear commit messages (imperative mood: "Add …", "Fix …").
+- Use [conventional commits](https://www.conventionalcommits.org/) in
+  lowercase, imperative mood: `fix(player): commit one seek on drag release`.
+  The same style goes for PR titles.
 - Fill in the PR template checklist. PRs should pass `flutter analyze` and
   `flutter test`.
 
