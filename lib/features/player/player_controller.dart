@@ -526,11 +526,24 @@ class PlayerController extends Notifier<PlayerState> {
     // сети), старый звук глушим, иначе он играет под чужой обложкой. На
     // быстрой загрузке таймер не успевает — паузы между треками нет.
     _staleAudioMute?.cancel();
-    _staleAudioMute = Timer(_staleAudioMuteDelay, () {
+    final mute = _staleAudioMute = Timer(_staleAudioMuteDelay, () {
       if (token == _loadToken && !_sourceReady && !_swapping) {
         unawaited(_engine.stop());
       }
     });
+    try {
+      await _loadSources(track, token, candidates, api);
+    } finally {
+      mute.cancel();
+    }
+  }
+
+  Future<void> _loadSources(
+    Track track,
+    int token,
+    List<String> candidates,
+    SoundcloudApi api,
+  ) async {
     for (final candidate in candidates) {
       try {
         final url = await api.resolveStreamUrl(candidate);
