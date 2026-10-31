@@ -60,3 +60,6 @@ assets/widevine/*.wvd
 # Local secrets
 .env
 .env.json
+
+# optional drm core, built in ci from a private repo
+macos/Runner/Frameworks/libscdrm.dylib

@@ -92,13 +92,20 @@ higher build number and run "check for updates" in settings → about.
 
 ## what the macos job does
 
-1. writes the widevine device profile from the `WIDEVINE_DEVICE_WVD_BASE64`
-   secret (base64 of `device.wvd`) into `assets/widevine/` for this build only,
-   then deletes it from the workspace. the profile is never committed
-   (`.gitignore`). without the secret the build only warns and go+ stays off.
-   the windows and linux jobs still fail on any `*.wvd` (`tool/check_no_wvd.sh`):
-   go+ is macos only. `pubspec.yaml` bundles the whole `assets/widevine/`
-   directory because flutter has neither globs nor optional assets.
+1. fetches the private drm core (`mollykitten/waveform-scdrm`) with the
+   `SCDRM_REPO_TOKEN` secret and builds a universal `libscdrm.dylib` into
+   `macos/Runner/Frameworks/`, removing it after the build. the
+   `WIDEVINE_DEVICE_WVD_BASE64` secret is passed to that build as
+   `SCDRM_WVD_B64`: the device profile is encrypted (aes-gcm, random key per
+   build, split into xor shares) and embedded in the dylib, so no `device.wvd`
+   file is bundled or written to the user's disk. this is obfuscation against
+   casual extraction (`strings`, signature search), not cryptographic
+   protection: the key lives in the same binary. without `SCDRM_REPO_TOKEN`
+   the build only warns and drm stays off; without the profile secret the
+   core builds with no profile (drm off too).
+   the windows and linux jobs fail on any `*.wvd` (`tool/check_no_wvd.sh`):
+   drm is macos only. `pubspec.yaml` still lists the `assets/widevine/`
+   directory (flutter has no optional assets); it only holds a readme.
 2. signs inside out, without `--deep`: every nested bundle (`.framework`, `.app`,
    `.xpc`, `.appex`) and every mach-o except the main executable, deepest path
    first (hardened runtime, timestamp), then the `.app` with
@@ -126,10 +133,16 @@ bump them deliberately; dependabot proposes the new sha.
 
 ## libscdrm.dylib
 
-`macos/Runner/Frameworks/libscdrm.dylib` is a committed binary built from
-`third_party/scdrm` by `tool/build_scdrm.sh`. ci runs `go test ./...` and
-rebuilds it on a mac runner to prove the sources still build, but the release
-bundles the committed file as is.
+the drm core is not in this repo. the private repo `mollykitten/waveform-scdrm`
+holds it; the macos job clones it and builds the dylib. set up once:
+
+1. create a fine-grained personal access token with read-only `contents`
+   access to `mollykitten/waveform-scdrm` only;
+2. add it to this repo as the actions secret `SCDRM_REPO_TOKEN`.
+
+local builds without the dylib work: the xcode phase "Bundle optional
+libscdrm" copies `macos/Runner/Frameworks/libscdrm.dylib` only when present
+(gitignored), and the app skips drm tracks.
 
 ## candidate checks
 

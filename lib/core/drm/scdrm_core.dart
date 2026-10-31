@@ -3,7 +3,7 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
-/// C-экспорты Go-ядра scdrm (см. third_party/scdrm/cmd/scdrm/main.go):
+/// C-экспорты DRM-ядра (собирается отдельно, в публичном репо его нет):
 /// `scdrm_version`, `scdrm_license_url`, `scdrm_decrypt`, `scdrm_free`.
 ///
 /// Ядро резолвит Widevine-поток (`ctr-encrypted-hls`), получает лицензию,
@@ -11,7 +11,7 @@ import 'package:ffi/ffi.dart';
 /// не смог) — всё в один вызов, без временных сегментов на диске.
 ///
 /// Dylib ищется: в переменной `SCDRM_DYLIB`, по `@rpath` (в бандле .app его
-/// прописывает Xcode-фаза «Bundle Framework»), рядом с исполняемым файлом в
+/// кладёт Xcode-фаза «Bundle optional libscdrm»), рядом с исполняемым файлом в
 /// `Contents/Frameworks`, относительным путём сборки (для ручных прогонов).
 class ScDrmCore {
   ScDrmCore._(this._lib);
@@ -58,6 +58,19 @@ class ScDrmCore {
         ffi.Void Function(ffi.Pointer<ffi.Char>),
         void Function(ffi.Pointer<ffi.Char>)
       >('scdrm_free');
+
+  /// Зашит ли профиль устройства в dylib при сборке (тогда `wvdPath` в
+  /// [decrypt] можно передать пустым). Старый dylib без символа → false.
+  bool get hasEmbeddedProfile {
+    try {
+      return _lib.lookupFunction<ffi.Int Function(), int Function()>(
+            'scdrm_has_embedded_profile',
+          )() ==
+          1;
+    } catch (_) {
+      return false;
+    }
+  }
 
   /// Загрузка ядра; null — dylib не найден (например, в `flutter test` или на
   /// чужой машине без сборки scdrm) → DRM-поддержка просто выключена.

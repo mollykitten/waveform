@@ -41,10 +41,10 @@ installed from the dmg on a clean mac, not from `flutter run`.
 - [ ] last.fm connect and a scrobble (only if credentials are in the build)
 - [ ] my wave: configure a provider, generate, consent prompt, queue refill
 - [ ] audio output picker lists devices, switching doesn't change system default
-- [ ] drm track: skipped cleanly without a device profile
+- [ ] drm track: skipped cleanly in a build without the drm core
 
 ## release hygiene
-- [ ] `WIDEVINE_DEVICE_WVD_BASE64` is set; the dmg plays a drm track
+- [ ] `WIDEVINE_DEVICE_WVD_BASE64` and `SCDRM_REPO_TOKEN` are set; the dmg plays a drm track
 - [ ] no `*.wvd` in the windows zip or linux tar.gz
 - [ ] version in settings → about is 0.4.0
 - [ ] reduced-motion on: transitions calm down

@@ -22,7 +22,7 @@ void main() {
     test('dylib из дерева сборки отвечает version/license (или skip)', () {
       final core = ScDrmCore.tryLoad();
       if (core == null) {
-        // Dylib не собран (tool/build_scdrm.sh) — не фаил, а отсутствие
+        // Dylib не собран (публичная сборка) — не фаил, а отсутствие
         // нативной части в этой среде (CI без Go и т.п.).
         return;
       }
@@ -41,6 +41,22 @@ void main() {
       );
       expect(err, isNotNull);
       expect(err, contains('wvd'));
+    });
+  });
+
+  group('embedded profile', () {
+    test('hasEmbeddedProfile не падает; пустой путь без профиля — ошибка', () {
+      final core = ScDrmCore.tryLoad();
+      if (core == null) return;
+      final err = core.decrypt(
+        transcodingUrl: 'https://x/ctr',
+        clientId: 'cid',
+        wvdPath: '',
+        outPath: '/tmp/scdrm_test_out.mp3',
+      );
+      if (!core.hasEmbeddedProfile) {
+        expect(err, contains('no embedded profile'));
+      }
     });
   });
 

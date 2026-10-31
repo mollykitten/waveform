@@ -6,6 +6,10 @@ All notable changes to Waveform are documented here. Format follows
 
 ## [Unreleased]
 
+### changed
+- drm playback is now built only into the official macos release; the source
+  tree no longer contains the decryption core.
+
 ## [0.5.0] — 2026-10-30
 
 installers and automatic updates on all three platforms, a macos menu bar
@@ -27,7 +31,7 @@ likes and player fixes. includes #85–#109.
   start (registry on windows, `.desktop` handler on linux) (#98).
 - **queue actions for assistive tech**: move up, move down and remove are
   exposed as semantic actions (#106).
-- **go+ tracks play through scdrm** for subscribers without an mp3 transcode
+- **go+ tracks play in the official macos build** for subscribers without an mp3 transcode
   step (#100).
 
 ### changed
@@ -80,10 +84,9 @@ and release preparation. includes the merged work in #50–#56.
   to a coordinator with durable identities, retries and journal replay. its
   python regressions run in CI; no active watcher or credentials are shipped.
 - **drm-protected tracks play on macos** (uploaded by distributors and labels)
-  through a bundled Widevine decryption core (`scdrm`, go over `dart:ffi`), as
+  in the official macos build, as
   a fallback after regular streams. go+ tracks still require a go+
-  subscription. from source you need your own device profile in
-  `assets/widevine/device.wvd`; it's never committed.
+  subscription.
 - **copy-link button** in both player layouts; selectable track title and
   description.
 - **new app icon, svg logo** and a static landing page.
