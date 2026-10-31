@@ -143,6 +143,8 @@ class PlayerController extends Notifier<PlayerState> {
   /// Идёт ли сейчас swap (crossfade-рампа или gapless). Гейтит повторный
   /// early-trigger по позиции и completion-путь, пока переход не завершён.
   bool _swapping = false;
+  Timer? _staleAudioMute;
+  static const _staleAudioMuteDelay = Duration(milliseconds: 600);
   final List<StreamSubscription<dynamic>> _subs = [];
 
   /// Токен последней загрузки — отбрасываем резолв устаревшего трека,
@@ -270,6 +272,7 @@ class PlayerController extends Notifier<PlayerState> {
     });
 
     ref.onDispose(() {
+      _staleAudioMute?.cancel();
       ++_loadToken;
       ++_preloadToken;
       _readySourceToken = null;
@@ -519,6 +522,15 @@ class PlayerController extends Notifier<PlayerState> {
     // придёт из движка).
     if (candidates.isEmpty && track.drmStreamCandidates.isEmpty) return;
     final api = ref.read(soundcloudApiProvider);
+    // UI уже показывает новый трек. Если резолв стрима затянулся (таймауты
+    // сети), старый звук глушим, иначе он играет под чужой обложкой. На
+    // быстрой загрузке таймер не успевает — паузы между треками нет.
+    _staleAudioMute?.cancel();
+    _staleAudioMute = Timer(_staleAudioMuteDelay, () {
+      if (token == _loadToken && !_sourceReady && !_swapping) {
+        unawaited(_engine.stop());
+      }
+    });
     for (final candidate in candidates) {
       try {
         final url = await api.resolveStreamUrl(candidate);
@@ -813,7 +825,9 @@ class PlayerController extends Notifier<PlayerState> {
     final track = state.track;
     if (track == null) return LikeOutcome.failed;
     state = state.copyWith(liked: !state.liked);
-    return ref.read(likedTracksProvider.notifier).toggle(track.id, track: track);
+    return ref
+        .read(likedTracksProvider.notifier)
+        .toggle(track.id, track: track);
   }
 
   /// Следующий трек. Если мы зашли назад в историю — идём вперёд по реальной
