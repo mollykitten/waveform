@@ -52,7 +52,7 @@ dependencies:
     path: third_party/desktop_webview_window
   talker_flutter: ^5.1.16
   talker_riverpod_logger: ^5.1.16
-  talker_dio_logger: ^5.1.16
+  talker_dio_logger: ^5.2.0
   crypto: ^3.0.7
   ffi: ^2.1.0
   window_manager: ^0.5.2
